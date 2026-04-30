@@ -34,18 +34,12 @@ function downloadPDF(elementId, filenamePrefix) {
     return;
   }
   
+  // Clone the element to avoid modifying the UI during PDF generation
   const clone = element.cloneNode(true);
   clone.classList.add('pdf-export');
-  clone.style.position = 'fixed';
-  clone.style.top = '0';
-  clone.style.left = '0';
-  clone.style.zIndex = '-1';
-  clone.style.opacity = '0.01';
-  clone.style.width = '800px';
-  clone.style.overflow = 'visible';
-  clone.style.pointerEvents = 'none';
   clone.style.padding = '0';
   clone.style.margin = '0';
+  clone.style.width = '800px';
   clone.style.boxShadow = 'none';
   clone.style.border = 'none';
   
@@ -60,19 +54,14 @@ function downloadPDF(elementId, filenamePrefix) {
     margin:       [0, 0, 0, 0],
     filename:     `${filenamePrefix}.pdf`,
     image:        { type: 'jpeg', quality: 1.0 },
-    html2canvas:  { scale: 2, useCORS: true, scrollX: 0, scrollY: -window.scrollY },
+    html2canvas:  { scale: 2, useCORS: true },
     jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
   };
   
-  // html2pdf clones the element again internally. 
-  // Since we modified CSS to use .invoice-preview:not(.pdf-export), 
-  // html2canvas will properly ignore mobile styles inside its iframe.
+  document.body.classList.add('exporting-pdf');
   html2pdf().set(opt).from(clone).save().then(() => {
+    document.body.classList.remove('exporting-pdf');
     document.body.removeChild(clone);
-  }).catch(err => {
-    console.error("PDF Gen Error:", err);
-    if (document.body.contains(clone)) document.body.removeChild(clone);
-    alert("Failed to generate PDF.");
   });
 }
 
