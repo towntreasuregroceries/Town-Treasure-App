@@ -38,6 +38,7 @@ function downloadPDF(elementId, filenamePrefix) {
   const clone = element.cloneNode(true);
   
   // Ensure the clone has proper styling for the PDF format
+  clone.classList.add('pdf-export');
   clone.style.padding = '0';
   clone.style.margin = '0';
   clone.style.width = '800px'; 
@@ -61,7 +62,9 @@ function downloadPDF(elementId, filenamePrefix) {
     jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
   };
   
+  document.body.classList.add('exporting-pdf');
   html2pdf().set(opt).from(clone).save().then(() => {
+    document.body.classList.remove('exporting-pdf');
     document.body.removeChild(clone);
   });
 }

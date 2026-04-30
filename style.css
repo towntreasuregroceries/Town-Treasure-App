@@ -2,7 +2,6 @@
    Town Treasure Groceries — Invoice & Books
    Design System
    ═══════════════════════════════════════════ */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap');
 
 :root {
   /* Brand palette */
@@ -94,6 +93,10 @@ body {
   body {
     zoom: 67%;
   }
+}
+
+body.exporting-pdf {
+  zoom: 1 !important;
 }
 
 h1,

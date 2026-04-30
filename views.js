@@ -27,12 +27,16 @@ function viewInvoice(id) {
     
     <div class="invoice-title-row">
        <div class="invoice-title">INVOICE</div>
-       <div class="invoice-meta-grid">
-          <div class="meta-label">Receipt No:</div>
-          <div class="meta-value">${inv.number}</div>
-          <div class="meta-label">Order Date:</div>
-          <div class="meta-value">${fmtDate(inv.date)}</div>
-       </div>
+       <table class="invoice-meta-grid" style="border-collapse: collapse; background: transparent; font-size: 0.85rem;">
+          <tr>
+            <td class="meta-label" style="font-weight: 700; color: #424242; text-align: right; padding: 0 15px 5px 0;">Receipt No:</td>
+            <td class="meta-value" style="color: #616161; text-align: right; padding: 0 0 5px 0;">${inv.number}</td>
+          </tr>
+          <tr>
+            <td class="meta-label" style="font-weight: 700; color: #424242; text-align: right; padding: 0 15px 0 0;">Order Date:</td>
+            <td class="meta-value" style="color: #616161; text-align: right; padding: 0 0 0 0;">${fmtDate(inv.date)}</td>
+          </tr>
+       </table>
     </div>
 
     <div class="invoice-billed-to" style="display: flex; justify-content: space-between;">

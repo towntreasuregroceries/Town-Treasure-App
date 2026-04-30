@@ -62,15 +62,11 @@
   padding-bottom: 5px;
   min-width: 250px;
 }
-.invoice-meta-grid {
-  display: grid;
-  grid-template-columns: auto auto;
-  column-gap: 30px;
-  row-gap: 5px;
-  font-size: 0.85rem;
+/* Fix html2canvas overlapping text bugs */
+.pdf-export, .pdf-export * {
+  letter-spacing: 0 !important;
+  font-variant-ligatures: none !important;
 }
-.meta-label { font-weight: 700; color: #424242; }
-.meta-value { color: #616161; text-align: right; }
 
 .invoice-billed-to {
   padding: 0 50px 15px;
