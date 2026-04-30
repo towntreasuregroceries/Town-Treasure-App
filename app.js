@@ -40,7 +40,7 @@ function downloadPDF(elementId, filenamePrefix) {
   // Ensure the clone has proper styling for the PDF format
   clone.classList.add('pdf-export');
   clone.style.position = 'absolute';
-  clone.style.top = '0';
+  clone.style.top = window.scrollY + 'px';
   clone.style.left = '0';
   clone.style.zIndex = '-9999';
   clone.style.padding = '0';
@@ -62,7 +62,7 @@ function downloadPDF(elementId, filenamePrefix) {
     margin:       [0, 0, 0, 0],
     filename:     `${filenamePrefix}.pdf`,
     image:        { type: 'jpeg', quality: 1.0 },
-    html2canvas:  { scale: 2, useCORS: true, scrollY: 0, windowWidth: 800 },
+    html2canvas:  { scale: 2, useCORS: true },
     jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
   };
   
