@@ -31,6 +31,28 @@ function attachLineListeners(row) {
 }
 document.querySelectorAll('#lineItemsBody tr').forEach(attachLineListeners);
 
+/* ══ Secure Invoice Number Generation ══ */
+function generateSecureInvoiceNumber(dateStr) {
+  const d = new Date(dateStr || Date.now());
+  const dayBin = d.getDate().toString(2).padStart(5, '0');
+  const moBin = (d.getMonth() + 1).toString(2).padStart(4, '0');
+  const yrBin = (d.getFullYear() % 100).toString(2).padStart(7, '0');
+  
+  // Combine into a 16-bit integer and convert to base 36 (produces 3 uppercase chars)
+  const binDate = parseInt(yrBin + moBin + dayBin, 2); 
+  const dateCode = binDate.toString(36).toUpperCase().padStart(3, '0');
+  
+  // Generate 3 random uppercase letters/numbers
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let randCode = '';
+  for(let i=0; i<3; i++) {
+    randCode += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  
+  // Mix them securely: Date[0] + Rand[0] + Date[1] + Rand[1] + Date[2] + Rand[2]
+  return 'TTG-' + dateCode[0] + randCode[0] + dateCode[1] + randCode[1] + dateCode[2] + randCode[2];
+}
+
 /* ══ Save Invoice ══ */
 function saveInvoice() {
   const restId = document.getElementById('invRestaurant').value;
@@ -50,17 +72,17 @@ function saveInvoice() {
   const totalSell = items.reduce((s, i) => s + i.total, 0);
   const totalBuy = items.reduce((s, i) => s + i.qty * i.buyPrice, 0);
   const rest = DB.restaurants.find(r => r.id === restId);
+  const invDateVal = document.getElementById('invDate').value || new Date().toISOString().slice(0,10);
   const inv = {
-    id: genId(), number: 'TTG-' + DB.nextInvNum, restaurantId: restId,
+    id: genId(), number: generateSecureInvoiceNumber(invDateVal), restaurantId: restId,
     restaurantName: rest ? rest.name : 'Unknown',
-    date: document.getElementById('invDate').value || new Date().toISOString().slice(0,10),
+    date: invDateVal,
     dueDate: document.getElementById('invDueDate').value || '',
     items, totalSell, totalBuy, profit: totalSell - totalBuy,
     notes: document.getElementById('invNotes').value.trim(),
     status: 'pending', createdAt: new Date().toISOString()
   };
   const list = DB.invoices; list.push(inv); DB.invoices = list;
-  DB.nextInvNum = DB.nextInvNum + 1;
   toast('Invoice ' + inv.number + ' created!');
   resetInvoiceForm();
   viewInvoice(inv.id);
