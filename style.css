@@ -1007,8 +1007,11 @@ tbody tr:hover {
   .card { overflow: visible; }
   .card-body { overflow: visible; }
 
-  /* Line-items table: remove min-width, let it scroll naturally */
-  .line-items-table { min-width: 600px; }
+  /* Line-items table: compact inputs to fit screen */
+  .line-items-table { width: 100%; }
+  .line-items-table input, .line-items-table select { padding: 6px 4px; font-size: .75rem; }
+  .line-items-table th { font-size: .6rem; padding: 6px 3px; white-space: nowrap; }
+  .line-items-table td { padding: 6px 3px; }
 
   /* Invoice totals area: full width */
   .invoice-totals { justify-content: stretch; }

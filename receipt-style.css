@@ -182,16 +182,27 @@
 }
 
 @media (max-width: 600px) {
-  #invoice-doc { padding: 0; min-height: auto; }
-  .invoice-title-row { padding: 5px 20px 10px; flex-direction: column; align-items: flex-start; gap: 10px; }
-  .header-content { top: 15px; left: 20px; }
-  .invoice-logo-img { height: 45px; }
-  .invoice-header-shape { height: 100px; }
-  .invoice-header-shape::before { height: 70px; }
-  .invoice-billed-to { padding: 0 20px 10px; }
-  .invoice-table-wrapper { padding: 0 10px; overflow-x: auto; }
-  .receipt-table { min-width: 500px; }
-  .invoice-totals-area { padding: 15px 20px; flex-direction: column; align-items: flex-start; gap: 15px; }
-  .invoice-bottom-details { padding: 10px 20px 5px !important; flex-direction: column; gap: 15px; }
-  .watermark-overlay { font-size: 3rem; top: 250px; }
+  #invoice-doc { padding: 0; min-height: auto; max-width: 100%; }
+  .invoice-header-shape { height: 90px; }
+  .invoice-header-shape::before { height: 60px; }
+  .header-content { top: 12px; left: 15px; }
+  .invoice-logo-img { height: 40px; }
+  .invoice-title-row { padding: 5px 15px 10px; flex-direction: column; align-items: flex-start; gap: 8px; }
+  .invoice-title { font-size: 1.5rem; min-width: auto; }
+  .invoice-meta-grid { column-gap: 15px; font-size: .75rem; }
+  .invoice-billed-to { padding: 0 15px 10px; }
+  .invoice-billed-to h4 { font-size: .8rem; }
+  .invoice-billed-to p { font-size: .78rem; }
+  .invoice-table-wrapper { padding: 0 8px; }
+  .receipt-table { width: 100%; }
+  .receipt-table thead th { padding: 8px 6px; font-size: .7rem; }
+  .receipt-table tbody td { padding: 8px 6px; font-size: .75rem; }
+  .invoice-totals-area { padding: 15px; flex-direction: column; align-items: flex-start; gap: 15px; }
+  .totals-table { width: 100%; }
+  .totals-table td { font-size: .8rem; }
+  .totals-table .grand-total td { font-size: .95rem; }
+  .qr-code-container { width: 90px; height: 90px; }
+  .invoice-bottom-details { padding: 10px 15px 5px !important; flex-direction: column; gap: 12px; }
+  .watermark-overlay { font-size: 2.5rem; top: 200px; }
+  .invoice-footer-shape { height: 50px; }
 }
