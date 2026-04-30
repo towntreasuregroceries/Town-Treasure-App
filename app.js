@@ -77,5 +77,34 @@ window.addEventListener('afterprint', () => {
   docs.forEach(doc => {
     doc.style.height = 'auto';
   });
+  setTimeout(() => {
+    document.querySelectorAll('.fade-up').forEach((el, i) => {
+      setTimeout(() => el.classList.add('visible'), i * 100);
+    });
+  }, 100);
+
+  // Ask for notification permission and check for overdue bills
+  if ('Notification' in window) {
+    Notification.requestPermission().then(permission => {
+      if (permission === 'granted') {
+        checkPendingBills();
+      }
+    });
+  }
 });
 
+function checkPendingBills() {
+  if (!DB || !DB.invoices) return;
+  const pendingCount = DB.invoices.filter(i => i.status === 'pending' || i.status === 'overdue').length;
+  
+  if (pendingCount > 0) {
+    // Only notify once per session to avoid spamming
+    if (!sessionStorage.getItem('notifiedPending')) {
+      new Notification('Town Treasure Groceries', {
+        body: `You have ${pendingCount} pending/overdue invoices that need attention!`,
+        icon: 'assets/favicon.png'
+      });
+      sessionStorage.setItem('notifiedPending', 'true');
+    }
+  }
+}

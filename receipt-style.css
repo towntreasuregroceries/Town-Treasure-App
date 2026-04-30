@@ -180,3 +180,18 @@
   .invoice-header-shape { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .receipt-table thead th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
+
+@media (max-width: 600px) {
+  #invoice-doc { padding: 0; min-height: auto; }
+  .invoice-title-row { padding: 5px 20px 10px; flex-direction: column; align-items: flex-start; gap: 10px; }
+  .header-content { top: 15px; left: 20px; }
+  .invoice-logo-img { height: 45px; }
+  .invoice-header-shape { height: 100px; }
+  .invoice-header-shape::before { height: 70px; }
+  .invoice-billed-to { padding: 0 20px 10px; }
+  .invoice-table-wrapper { padding: 0 10px; overflow-x: auto; }
+  .receipt-table { min-width: 500px; }
+  .invoice-totals-area { padding: 15px 20px; flex-direction: column; align-items: flex-start; gap: 15px; }
+  .invoice-bottom-details { padding: 10px 20px 5px !important; flex-direction: column; gap: 15px; }
+  .watermark-overlay { font-size: 3rem; top: 250px; }
+}
