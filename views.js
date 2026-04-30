@@ -126,6 +126,35 @@ function viewInvoice(id) {
   }, 10);
 }
 
+function shareWhatsApp() {
+  if (!currentViewInvoiceId) return;
+  const inv = DB.invoices.find(i => i.id === currentViewInvoiceId);
+  if (!inv) return;
+  const rest = DB.restaurants.find(r => r.id === inv.restaurantId);
+  if (!rest || !rest.phone) {
+    toast('No phone number saved for this restaurant', 'error');
+    return;
+  }
+  
+  // Clean phone number (leave digits and + if present)
+  let phone = rest.phone.replace(/[^\d+]/g, '');
+  if (phone.startsWith('0')) {
+    phone = '254' + phone.slice(1); // Defaulting to Kenyan code (+254) as KSh is used
+  }
+
+  const text = `Hello ${rest.contact || rest.name},
+Here is your invoice from Town Treasure Groceries:
+
+*Invoice No:* ${inv.number}
+*Date:* ${inv.date}
+*Total Amount:* KES ${fmtMoney(inv.totalSell)}
+
+Please download the PDF from our portal or contact us for a copy. Thank you for your business!`;
+
+  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank');
+}
+
 /* ══ Expenses & Capital ══ */
 let expenseTab = 'expenses';
 function switchExpenseTab(tab, btn) {
@@ -150,9 +179,10 @@ function saveExpense() {
   renderExpenses(); toast('Entry saved');
 }
 function deleteExpense(id) {
-  if (!confirm('Delete?')) return;
-  DB.expenses = DB.expenses.filter(e => e.id !== id);
-  renderExpenses(); toast('Deleted');
+  customConfirm('Are you sure you want to delete this entry?', 'Delete Entry', 'Yes, Delete', true, () => {
+    DB.expenses = DB.expenses.filter(e => e.id !== id);
+    renderExpenses(); toast('Deleted');
+  });
 }
 function renderExpenses() {
   const all = DB.expenses.slice().reverse();

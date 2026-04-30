@@ -94,9 +94,10 @@ function renderInvoicesList() {
   }).join('');
 }
 function deleteInvoice(id) {
-  if (!confirm('Delete this invoice?')) return;
-  DB.invoices = DB.invoices.filter(i => i.id !== id);
-  renderInvoicesList(); toast('Invoice deleted');
+  customConfirm('Are you sure you want to delete this invoice? This cannot be undone.', 'Delete Invoice', 'Yes, Delete', true, () => {
+    DB.invoices = DB.invoices.filter(i => i.id !== id);
+    renderInvoicesList(); toast('Invoice deleted');
+  });
 }
 function markAsPaid(id) {
   const list = DB.invoices;

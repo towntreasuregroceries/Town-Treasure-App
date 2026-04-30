@@ -48,10 +48,11 @@ function editRestaurant(id) {
   openModal('restaurantModal');
 }
 function deleteRestaurant(id) {
-  if (!confirm('Delete this restaurant?')) return;
-  DB.restaurants = DB.restaurants.filter(x => x.id !== id);
-  renderRestaurants();
-  toast('Restaurant deleted');
+  customConfirm('Are you sure you want to delete this restaurant? All associated invoices will remain but show as Unknown.', 'Delete Restaurant', 'Yes, Delete', true, () => {
+    DB.restaurants = DB.restaurants.filter(x => x.id !== id);
+    renderRestaurants();
+    toast('Restaurant deleted');
+  });
 }
 function renderRestaurants() {
   const body = document.getElementById('restaurantsBody');
