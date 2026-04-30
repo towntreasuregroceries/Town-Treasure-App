@@ -83,15 +83,29 @@ window.addEventListener('afterprint', () => {
     });
   }, 100);
 
-  // Ask for notification permission and check for overdue bills
-  if ('Notification' in window) {
-    Notification.requestPermission().then(permission => {
-      if (permission === 'granted') {
-        checkPendingBills();
-      }
-    });
+  // Check if we already have permission, if so, check bills
+  if ('Notification' in window && Notification.permission === 'granted') {
+    document.getElementById('btnNotify').style.color = 'var(--green-500)';
+    checkPendingBills();
   }
 });
+
+function enableNotifications() {
+  if (!('Notification' in window)) {
+    toast('Notifications are not supported in this browser.', 'error');
+    return;
+  }
+  
+  Notification.requestPermission().then(permission => {
+    if (permission === 'granted') {
+      document.getElementById('btnNotify').style.color = 'var(--green-500)';
+      toast('Notifications enabled!', 'success');
+      checkPendingBills();
+    } else {
+      toast('Notification permission denied.', 'error');
+    }
+  });
+}
 
 function checkPendingBills() {
   if (!DB || !DB.invoices) return;
