@@ -950,6 +950,7 @@ tbody tr:hover {
 /* ── Responsive ── */
 @media (max-width: 860px) {
   html { font-size: 14px; }
+  body { zoom: 70%; }
 
   .sidebar { transform: translateX(-100%); }
   .sidebar.open { transform: translateX(0); z-index: 200; }
