@@ -1,6 +1,6 @@
 // Town Treasure Groceries — Service Worker
 // Version-based caching: bump this to push updates to all phones
-const CACHE_VERSION = 'ttg-v1.1.2';
+const CACHE_VERSION = 'ttg-v1.1.3';
 const CACHE_NAME = CACHE_VERSION;
 
 // Files to cache for offline use

@@ -158,6 +158,21 @@ img {
   border-bottom: 1px solid rgba(255, 255, 255, .12);
 }
 
+.btn-close-sidebar {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, .6);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  margin-left: auto;
+  transition: all .2s;
+}
+.btn-close-sidebar:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, .15);
+}
+
 .sidebar-brand img {
   width: 44px;
   height: 44px;
