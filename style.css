@@ -983,8 +983,29 @@ tbody tr:hover {
   .card-header { padding: 14px 16px; }
   .card-body { padding: 14px 16px; }
 
-  /* Tables: scrollable horizontally */
-  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  /* Tables: fit on screen with smaller cells */
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    display: block;
+    width: 100%;
+  }
+
+  thead th {
+    padding: 8px 6px;
+    font-size: .65rem;
+    white-space: nowrap;
+  }
+
+  tbody td {
+    padding: 10px 6px;
+    font-size: .78rem;
+    word-break: break-word;
+  }
+
+  /* Ensure cards don't clip the scroll */
+  .card { overflow: visible; }
+  .card-body { overflow: visible; }
 
   /* Line-items table: remove min-width, let it scroll naturally */
   .line-items-table { min-width: 600px; }
