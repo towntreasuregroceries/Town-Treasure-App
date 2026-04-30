@@ -83,6 +83,20 @@ window.addEventListener('afterprint', () => {
     });
   }, 100);
 
+  // Dynamic zoom for mobile to ensure everything fits perfectly
+  function adjustZoom() {
+    const width = window.innerWidth;
+    if (width < 600) {
+      document.body.style.zoom = "55%"; // Shrink more for phones
+    } else if (width < 860) {
+      document.body.style.zoom = "60%"; // Tablets
+    } else {
+      document.body.style.zoom = "67%"; // Desktop default
+    }
+  }
+  window.addEventListener('resize', adjustZoom);
+  adjustZoom();
+
   // Check if we already have permission, if so, check bills
   if ('Notification' in window && Notification.permission === 'granted') {
     document.getElementById('btnNotify').style.color = 'var(--green-500)';

@@ -88,12 +88,7 @@ body {
   color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
-}
-
-@media (min-width: 861px) {
-  body {
-    zoom: 67%;
-  }
+  zoom: 67%;
 }
 
 h1,
