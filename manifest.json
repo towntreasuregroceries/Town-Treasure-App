@@ -1,0 +1,24 @@
+{
+  "name": "Town Treasure Groceries",
+  "short_name": "TTG Books",
+  "description": "Invoice & Bookkeeping System for Town Treasure Groceries",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#1a1f2e",
+  "theme_color": "#61b146",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "assets/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

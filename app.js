@@ -1,0 +1,81 @@
+/* Town Treasure Groceries — App Entry Point */
+/* All modules are loaded via separate script tags in index.html */
+/* This file is kept for any future initialization or global state */
+console.log('Town Treasure Groceries — Invoice & Books v1.0');
+
+function paginateElement(doc) {
+  if (!doc) return;
+  const width = doc.offsetWidth;
+  if (!width) return;
+  
+  const a4Height = width * (297 / 210);
+  doc.style.height = 'auto';
+  
+  const height = doc.offsetHeight;
+  const pages = Math.ceil(height / a4Height);
+  
+  // If content barely overflows by less than 15%, keep it on the current page count - 1
+  // This prevents a tiny overflow from creating a mostly-empty second page
+  const overflow = height - ((pages - 1) * a4Height);
+  const overflowRatio = overflow / a4Height;
+  
+  if (pages > 1 && overflowRatio < 0.15) {
+    // Content barely spills over — fit it on fewer pages
+    doc.style.height = ((pages - 1) * a4Height - 10) + 'px';
+  } else {
+    doc.style.height = ((pages * a4Height) - 10) + 'px';
+  }
+}
+
+function downloadPDF(elementId, filenamePrefix) {
+  const element = document.getElementById(elementId);
+  if (!element || typeof html2pdf === 'undefined') {
+    alert("PDF generator not ready or element not found.");
+    return;
+  }
+  
+  // Clone the element to avoid modifying the UI during PDF generation
+  const clone = element.cloneNode(true);
+  
+  // Ensure the clone has proper styling for the PDF format
+  clone.style.padding = '0';
+  clone.style.margin = '0';
+  clone.style.width = '800px'; 
+  clone.style.boxShadow = 'none';
+  clone.style.border = 'none'; 
+  
+  // Magic trick: Force the clone to perfectly fit a multiple of A4 pages
+  document.body.appendChild(clone);
+  
+  // We need to find the actual doc inside the clone if the elementId is the container
+  const docToPaginate = clone.id === 'invoice-doc' ? clone : clone.querySelector('#invoice-doc');
+  if (docToPaginate) {
+    paginateElement(docToPaginate);
+  }
+  
+  const opt = {
+    margin:       [0, 0, 0, 0],
+    filename:     `${filenamePrefix}.pdf`,
+    image:        { type: 'jpeg', quality: 1.0 },
+    html2canvas:  { scale: 2, useCORS: true },
+    jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+  };
+  
+  html2pdf().set(opt).from(clone).save().then(() => {
+    document.body.removeChild(clone);
+  });
+}
+
+// Apply the same magic trick for the native Print dialog
+window.addEventListener('beforeprint', () => {
+  const docs = document.querySelectorAll('.invoice-preview');
+  docs.forEach(doc => paginateElement(doc));
+});
+
+window.addEventListener('afterprint', () => {
+  const docs = document.querySelectorAll('.invoice-preview');
+  docs.forEach(doc => {
+    doc.style.height = 'auto';
+  });
+});
+
