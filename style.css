@@ -517,7 +517,6 @@ img {
 table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 650px;
 }
 
 thead th {
@@ -950,51 +949,106 @@ tbody tr:hover {
 
 /* ── Responsive ── */
 @media (max-width: 860px) {
-  html {
-    font-size: 13px;
-  }
+  html { font-size: 14px; }
 
-  .sidebar {
-    transform: translateX(-100%);
-  }
+  .sidebar { transform: translateX(-100%); }
+  .sidebar.open { transform: translateX(0); z-index: 200; }
+  .main { margin-left: 0; }
+  .btn-hamburger { display: flex; }
 
-  .sidebar.open {
-    transform: translateX(0);
-  }
+  .header { padding: 0 12px; }
+  .header-left h1 { font-size: 1rem; }
+  .header-right { gap: 8px; }
+  .header-right span { display: none; }
 
-  .main {
-    margin-left: 0;
-  }
+  .content { padding: 16px 12px; }
 
-  .btn-hamburger {
-    display: flex;
-  }
-
-  .content {
-    padding: 20px 16px;
-  }
-
+  /* Stat cards: 2 per row on phone */
   .stats-grid {
-    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  }
-
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-
-  .invoice-parties {
-    grid-template-columns: 1fr;
-  }
-
-  .chart-row {
-    grid-template-columns: 1fr;
-  }
-
-  .table-wrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
     margin-bottom: 16px;
   }
+  .stat-card { padding: 14px 12px; gap: 10px; }
+  .stat-icon { width: 36px; height: 36px; }
+  .stat-icon svg { width: 18px; height: 18px; }
+  .stat-info h4 { font-size: .7rem; }
+  .stat-info .stat-value { font-size: 1.15rem; }
+
+  /* Charts: stack vertically */
+  .chart-row { grid-template-columns: 1fr; gap: 16px; }
+  .chart-container { height: 220px; }
+
+  /* Cards tighter on mobile */
+  .card-header { padding: 14px 16px; }
+  .card-body { padding: 14px 16px; }
+
+  /* Tables: scrollable horizontally */
+  .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Line-items table: remove min-width, let it scroll naturally */
+  .line-items-table { min-width: 600px; }
+
+  /* Invoice totals area: full width */
+  .invoice-totals { justify-content: stretch; }
+  .invoice-totals table { width: 100%; }
+
+  /* Forms stack */
+  .form-row { grid-template-columns: 1fr; gap: 10px; }
+  .invoice-parties { grid-template-columns: 1fr; }
+  .filter-bar { flex-direction: column; align-items: stretch; }
+  .filter-bar .search-box { min-width: 100%; }
+  .filter-bar select.form-control { width: 100% !important; }
+
+  /* Button rows wrap */
+  .no-print[style*="display:flex"] { flex-wrap: wrap; }
+
+  /* Expenses tab row */
+  #page-expenses > div[style*="display:flex"] {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 10px;
+  }
+  #page-expenses .tabs { margin-bottom: 0; }
+
+  /* Restaurants header row */
+  #page-restaurants > div[style*="display:flex"] {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 10px;
+  }
+
+  /* Reports filter form */
+  #page-reports .card-body > div[style*="display:flex"] {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 12px;
+  }
+  #page-reports .btn { width: 100%; justify-content: center; }
+
+  /* Invoice form buttons */
+  #invoiceForm div[style*="justify-content:flex-end"] {
+    flex-direction: column;
+    align-items: stretch !important;
+  }
+  #invoiceForm div[style*="width:280px"] {
+    width: 100% !important;
+  }
+  #invoiceForm div[style*="gap:12px"] {
+    flex-direction: column;
+  }
+  #invoiceForm .btn { width: 100%; justify-content: center; }
+
+  /* Invoice view buttons */
+  #page-invoice-view .no-print { flex-wrap: wrap; }
+  #page-invoice-view .btn { flex: 1; min-width: 120px; justify-content: center; font-size: .8rem; padding: 8px 12px; }
+
+  /* Toast notifications */
+  .toast-container { right: 12px; left: 12px; }
+  .toast { min-width: auto; }
+
+  /* Modal full-width on mobile */
+  .modal { width: 95%; }
 }
 
 /* ── Print ── */
@@ -1051,7 +1105,6 @@ tbody tr:hover {
 /* ── Line Items ── */
 .line-items-table {
   width: 100%;
-  min-width: 800px;
 }
 
 .line-items-table input,
