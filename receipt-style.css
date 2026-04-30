@@ -164,15 +164,30 @@
 
 .watermark-overlay {
   position: absolute;
-  top: 350px;
+  top: 50%;
   left: 50%;
-  transform: translateX(-50%) rotate(-30deg);
-  font-size: 5rem;
-  font-weight: 800;
-  color: rgba(0, 0, 0, 0.04);
-  white-space: nowrap;
+  transform: translate(-50%, -50%) rotate(-30deg);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 20px;
   pointer-events: none;
   z-index: 1;
+  opacity: 0.05;
+}
+
+.watermark-stamp {
+  width: 250px;
+  height: auto;
+  filter: grayscale(100%);
+}
+
+.watermark-text {
+  font-size: 5rem;
+  font-weight: 800;
+  color: #000;
+  white-space: nowrap;
 }
 
 @media print {
@@ -203,6 +218,8 @@
   .totals-table .grand-total td { font-size: .95rem; }
   .qr-code-container { width: 90px; height: 90px; }
   .invoice-bottom-details { padding: 10px 15px 5px !important; flex-direction: column; gap: 12px; }
-  .watermark-overlay { font-size: 2.5rem; top: 200px; }
+  .watermark-overlay { top: 50%; gap: 10px; }
+  .watermark-stamp { width: 120px; }
+  .watermark-text { font-size: 2.5rem; }
   .invoice-footer-shape { height: 50px; }
 }

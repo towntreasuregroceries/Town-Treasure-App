@@ -103,7 +103,10 @@ function viewInvoice(id) {
          </div>
       </div>
     </div>
-    <div class="watermark-overlay">Town Treasure Groceries</div>
+    <div class="watermark-overlay">
+      <img src="assets/logo.png" alt="Stamp" class="watermark-stamp">
+      <div class="watermark-text">Town Treasure Groceries</div>
+    </div>
   </div>`;
 
   navigateTo('invoice-view');

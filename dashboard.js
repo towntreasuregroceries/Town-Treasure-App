@@ -215,7 +215,10 @@ function generateReport() {
             <div style="font-size: 0.75rem;">Product Report</div>
          </div>
       </div>
-      <div class="watermark-overlay" style="z-index: 1;">Town Treasure Groceries</div>
+      <div class="watermark-overlay" style="z-index: 1;">
+         <img src="assets/logo.png" alt="Stamp" class="watermark-stamp">
+         <div class="watermark-text">Town Treasure Groceries</div>
+      </div>
     </div>`;
     return; // Exit early — product report is done
   }
@@ -373,7 +376,10 @@ function generateReport() {
           <div style="font-size: 0.75rem;">Financial Report</div>
        </div>
     </div>
-    <div class="watermark-overlay" style="z-index: 1;">Town Treasure Groceries</div>
+    <div class="watermark-overlay" style="z-index: 1;">
+       <img src="assets/logo.png" alt="Stamp" class="watermark-stamp">
+       <div class="watermark-text">Town Treasure Groceries</div>
+    </div>
   </div>`;
 }
 function printReport() { window.print(); }
