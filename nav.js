@@ -15,7 +15,10 @@ function navigateTo(page) {
   if (page === 'restaurants') renderRestaurants();
   if (page === 'expenses') renderExpenses();
   if (page === 'new-invoice') populateRestaurantDropdowns();
-  if (page === 'reports') populateRestaurantDropdowns();
+  if (page === 'reports') {
+    populateRestaurantDropdowns();
+    generateReport();
+  }
 }
 document.querySelectorAll('.nav-item[data-page]').forEach(n => {
   n.addEventListener('click', () => navigateTo(n.dataset.page));

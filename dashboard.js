@@ -36,9 +36,9 @@ function refreshDashboard() {
       }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { beginAtZero: true } } }
     });
   }
-  // Top restaurants chart
+  // Top restaurants chart (This Month)
   const restTotals = {};
-  invs.forEach(i => { restTotals[i.restaurantName] = (restTotals[i.restaurantName] || 0) + i.totalSell; });
+  thisMonth.forEach(i => { restTotals[i.restaurantName] = (restTotals[i.restaurantName] || 0) + i.totalSell; });
   const sorted = Object.entries(restTotals).sort((a, b) => b[1] - a[1]).slice(0, 5);
   if (topRestChartInst) topRestChartInst.destroy();
   const ctx2 = document.getElementById('topRestaurantsChart');
@@ -51,10 +51,10 @@ function refreshDashboard() {
       }, options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } } }
     });
   }
-  // Recent invoices
-  const recent = invs.slice().reverse().slice(0, 8);
+  // Recent invoices (This Month)
+  const recent = thisMonth.slice().reverse().slice(0, 8);
   const tbody = document.getElementById('recentInvoicesBody');
-  if (!recent.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><h3>No invoices yet</h3><p>Create your first invoice to see data here.</p></td></tr>'; return; }
+  if (!recent.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><h3>No invoices yet this month</h3><p>Create an invoice to see data here.</p></td></tr>'; return; }
   tbody.innerHTML = recent.map(i => {
     const bc = i.status === 'paid' ? 'badge-success' : i.status === 'overdue' ? 'badge-danger' : 'badge-warning';
     return `<tr style="cursor:pointer" onclick="viewInvoice('${i.id}')"><td><strong>${i.number}</strong></td><td>${i.restaurantName}</td><td>${fmtDate(i.date)}</td><td>KES ${fmtMoney(i.totalSell)}</td><td style="color:var(--green-700)">KES ${fmtMoney(i.profit)}</td><td><span class="badge ${bc}">${i.status}</span></td></tr>`;
@@ -87,22 +87,40 @@ function toggleReportRestaurant() {
         .join('');
   }
 }
+function toggleReportDate() {
+  const t = document.getElementById('reportDateType')?.value || 'single';
+  document.getElementById('reportSingleGroup').style.display = t === 'single' ? 'block' : 'none';
+  document.getElementById('reportFromGroup').style.display = t === 'range' ? 'block' : 'none';
+  document.getElementById('reportToGroup').style.display = t === 'range' ? 'block' : 'none';
+}
+
 function generateReport() {
   const type = document.getElementById('reportType').value;
-  const from = document.getElementById('reportFrom').value;
-  const to = document.getElementById('reportTo').value;
+  const dateType = document.getElementById('reportDateType')?.value || 'single';
   const restId = document.getElementById('reportRestaurant')?.value;
+  
+  let from = '', to = '', dateRangeStr = '';
+  
+  if (dateType === 'single') {
+    from = document.getElementById('reportSingleDate').value;
+    to = from;
+    dateRangeStr = from ? fmtDate(from) : 'All Time';
+  } else if (dateType === 'range') {
+    from = document.getElementById('reportFrom').value;
+    to = document.getElementById('reportTo').value;
+    dateRangeStr = (from ? fmtDate(from) : 'Start') + ' — ' + (to ? fmtDate(to) : 'Present');
+  } else {
+    dateRangeStr = 'All Time';
+  }
   
   // ── Invoice Data ──
   let invs = DB.invoices.slice();
   if (from) invs = invs.filter(i => i.date >= from);
   if (to) invs = invs.filter(i => i.date <= to);
   
-  // ── PRODUCT REPORT ──
   if (type === 'product') {
     const productName = (document.getElementById('reportProduct')?.value || '').toLowerCase().trim();
-    if (!productName) return alert('Please select a product from the dropdown');
-    const dateRange = (from ? fmtDate(from) : 'Start') + ' — ' + (to ? fmtDate(to) : 'Present');
+    if (!productName) return toast('Please select a product from the dropdown', 'error');
     
     // Find all line items matching the product across all invoices
     const matches = [];
@@ -230,7 +248,6 @@ function generateReport() {
   const paidTotal = invs.filter(i => i.status === 'paid').reduce((s, i) => s + i.totalSell, 0);
   const pendingTotal = invs.filter(i => i.status !== 'paid').reduce((s, i) => s + i.totalSell, 0);
   const restName = type === 'restaurant' ? (DB.restaurants.find(r => r.id === restId)?.name || 'Unknown') : 'All Restaurants';
-  const dateRange = (from ? fmtDate(from) : 'Start') + ' — ' + (to ? fmtDate(to) : 'Present');
 
   // ── Expenses & Capital Data ──
   let expenses = DB.expenses.slice();
@@ -389,9 +406,15 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('headerDate').textContent = new Date().toLocaleDateString('en-GB',{weekday:'long',day:'numeric',month:'long',year:'numeric'});
   document.getElementById('invDate').value = new Date().toISOString().slice(0,10);
   document.getElementById('expDate').value = new Date().toISOString().slice(0,10);
-  const now = new Date();
-  document.getElementById('reportFrom').value = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0,10);
-  document.getElementById('reportTo').value = now.toISOString().slice(0,10);
+  
+  const today = new Date().toISOString().slice(0,10);
+  if (document.getElementById('reportSingleDate')) document.getElementById('reportSingleDate').value = today;
+  document.getElementById('reportFrom').value = today;
+  document.getElementById('reportTo').value = today;
+  if (document.getElementById('reportDateType')) {
+    document.getElementById('reportDateType').value = 'single';
+    toggleReportDate();
+  }
   
   if (typeof DB !== 'undefined' && DB.loadFromSupabase) {
     await DB.loadFromSupabase();

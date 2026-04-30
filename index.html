@@ -251,10 +251,20 @@
                   <option value="">Select a product…</option>
                 </select>
               </div>
-              <div class="form-group" style="margin-bottom:0"><label>From</label>
+              <div class="form-group" style="margin-bottom:0"><label>Date Filter</label>
+                <select class="form-control" id="reportDateType" onchange="toggleReportDate()">
+                  <option value="single">Single Date</option>
+                  <option value="range">Date Range</option>
+                  <option value="all">All Time</option>
+                </select>
+              </div>
+              <div class="form-group" style="margin-bottom:0" id="reportSingleGroup"><label>Select Date</label>
+                <input type="date" class="form-control" id="reportSingleDate">
+              </div>
+              <div class="form-group" style="margin-bottom:0; display:none" id="reportFromGroup"><label>From</label>
                 <input type="date" class="form-control" id="reportFrom">
               </div>
-              <div class="form-group" style="margin-bottom:0"><label>To</label>
+              <div class="form-group" style="margin-bottom:0; display:none" id="reportToGroup"><label>To</label>
                 <input type="date" class="form-control" id="reportTo">
               </div>
               <button class="btn btn-primary" onclick="generateReport()">Generate Report</button>
