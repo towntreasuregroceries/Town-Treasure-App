@@ -308,6 +308,12 @@ img {
 }
 
 /* ── Stat Cards ── */
+.chart-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -850,6 +856,13 @@ tbody tr:hover {
 }
 
 /* ── Chart Container ── */
+.chart-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  margin-bottom: 24px;
+}
+
 .chart-container {
   position: relative;
   height: 300px;
@@ -962,6 +975,16 @@ tbody tr:hover {
   .invoice-parties {
     grid-template-columns: 1fr;
   }
+
+  .chart-row {
+    grid-template-columns: 1fr;
+  }
+
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    margin-bottom: 16px;
+  }
 }
 
 /* ── Print ── */
@@ -1018,6 +1041,7 @@ tbody tr:hover {
 /* ── Line Items ── */
 .line-items-table {
   width: 100%;
+  min-width: 800px;
 }
 
 .line-items-table input,
