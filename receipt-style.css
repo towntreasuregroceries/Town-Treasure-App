@@ -60,8 +60,6 @@
   font-weight: 700;
   color: #61b146;
   letter-spacing: 1px;
-  border-bottom: 2px solid #a5d6a7;
-  padding-bottom: 5px;
   min-width: 250px;
 }
 /* Fix html2canvas overlapping text bugs */

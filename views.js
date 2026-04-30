@@ -29,12 +29,12 @@ function viewInvoice(id) {
        <div class="invoice-title">INVOICE</div>
        <table class="invoice-meta-grid" style="border-collapse: collapse; background: transparent; font-size: 0.85rem;">
           <tr>
-            <td class="meta-label" style="font-weight: 700; color: #424242; text-align: right; padding: 0 15px 5px 0;">Receipt No:</td>
-            <td class="meta-value" style="color: #616161; text-align: right; padding: 0 0 5px 0;">${inv.number}</td>
+            <td class="meta-label" style="font-weight: 700; color: #424242; text-align: right; padding: 0 15px 5px 0; border: none;">Receipt No:</td>
+            <td class="meta-value" style="color: #616161; text-align: right; padding: 0 0 5px 0; border: none;">${inv.number}</td>
           </tr>
           <tr>
-            <td class="meta-label" style="font-weight: 700; color: #424242; text-align: right; padding: 0 15px 0 0;">Order Date:</td>
-            <td class="meta-value" style="color: #616161; text-align: right; padding: 0 0 0 0;">${fmtDate(inv.date)}</td>
+            <td class="meta-label" style="font-weight: 700; color: #424242; text-align: right; padding: 0 15px 0 0; border: none;">Order Date:</td>
+            <td class="meta-value" style="color: #616161; text-align: right; padding: 0 0 0 0; border: none;">${fmtDate(inv.date)}</td>
           </tr>
        </table>
     </div>
