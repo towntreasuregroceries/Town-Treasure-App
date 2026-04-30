@@ -130,33 +130,82 @@ function viewInvoice(id) {
   }, 10);
 }
 
-function shareWhatsApp() {
+async function shareWhatsApp() {
   if (!currentViewInvoiceId) return;
   const inv = DB.invoices.find(i => i.id === currentViewInvoiceId);
   if (!inv) return;
   const rest = DB.restaurants.find(r => r.id === inv.restaurantId);
-  if (!rest || !rest.phone) {
-    toast('No phone number saved for this restaurant', 'error');
-    return;
-  }
-  
-  // Clean phone number (leave digits and + if present)
-  let phone = rest.phone.replace(/[^\d+]/g, '');
-  if (phone.startsWith('0')) {
-    phone = '254' + phone.slice(1); // Defaulting to Kenyan code (+254) as KSh is used
-  }
+  if (!rest) return;
+
+  let phone = rest.phone ? rest.phone.replace(/[^\d+]/g, '') : '';
+  if (phone.startsWith('0')) phone = '254' + phone.slice(1);
 
   const text = `Hello ${rest.contact || rest.name},
-Here is your invoice from Town Treasure Groceries:
+
+Thank you for choosing Town Treasure Groceries! Please find attached your invoice for the recent order.
 
 *Invoice No:* ${inv.number}
 *Date:* ${inv.date}
 *Total Amount:* KES ${fmtMoney(inv.totalSell)}
 
-Please download the PDF from our portal or contact us for a copy. Thank you for your business!`;
+Feel free to reach out for any queries. We appreciate your business!`;
 
-  const url = `https://wa.me/${phone}?text=${encodeURIComponent(text)}`;
-  window.open(url, '_blank');
+  const filename = `Invoice_${inv.number}_${rest.name.replace(/\s+/g, '_')}.pdf`;
+
+  // If the browser supports native file sharing (Mobile devices & modern desktop)
+  if (navigator.canShare && navigator.canShare({ files: [new File([''], filename, {type: 'application/pdf'})] })) {
+    toast('Generating PDF to share...', 'success');
+    
+    const element = document.getElementById('invoice-doc');
+    const clone = element.cloneNode(true);
+    clone.classList.add('pdf-export');
+    clone.style.padding = '0';
+    clone.style.margin = '0';
+    clone.style.width = '800px'; 
+    clone.style.boxShadow = 'none';
+    clone.style.border = 'none'; 
+    document.body.appendChild(clone);
+    paginateElement(clone);
+    
+    const opt = {
+      margin:       [0, 0, 0, 0],
+      filename:     filename,
+      image:        { type: 'jpeg', quality: 1.0 },
+      html2canvas:  { scale: 2, useCORS: true },
+      jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
+    };
+    
+    document.body.classList.add('exporting-pdf');
+    try {
+      const pdfBlob = await html2pdf().set(opt).from(clone).output('blob');
+      const file = new File([pdfBlob], filename, { type: 'application/pdf' });
+      
+      document.body.classList.remove('exporting-pdf');
+      document.body.removeChild(clone);
+
+      await navigator.share({
+        files: [file],
+        title: `Invoice ${inv.number}`,
+        text: text
+      });
+      toast('Shared successfully!', 'success');
+    } catch (err) {
+      console.error('Share failed:', err);
+      // Fallback
+      if (document.body.contains(clone)) document.body.removeChild(clone);
+      document.body.classList.remove('exporting-pdf');
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
+    }
+  } else {
+    // Desktop Fallback: Download PDF automatically, then open wa.me
+    toast('Downloading PDF for WhatsApp...', 'success');
+    downloadPDF('invoice-doc', `Invoice_${inv.number}_${rest.name.replace(/\s+/g, '_')}`);
+    
+    setTimeout(() => {
+      const fallbackText = text + `\n\n*(I will attach the PDF document momentarily)*`;
+      window.open(`https://wa.me/${phone}?text=${encodeURIComponent(fallbackText)}`, '_blank');
+    }, 1500);
+  }
 }
 
 /* ══ Expenses & Capital ══ */
