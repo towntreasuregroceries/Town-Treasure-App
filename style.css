@@ -88,7 +88,12 @@ body {
   color: var(--text);
   min-height: 100vh;
   overflow-x: hidden;
-  zoom: 67%;
+}
+
+@media (min-width: 861px) {
+  body {
+    zoom: 67%;
+  }
 }
 
 h1,
@@ -512,6 +517,7 @@ img {
 table {
   width: 100%;
   border-collapse: collapse;
+  min-width: 650px;
 }
 
 thead th {
@@ -944,6 +950,10 @@ tbody tr:hover {
 
 /* ── Responsive ── */
 @media (max-width: 860px) {
+  html {
+    font-size: 13px;
+  }
+
   .sidebar {
     transform: translateX(-100%);
   }
