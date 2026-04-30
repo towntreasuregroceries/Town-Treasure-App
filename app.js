@@ -36,10 +36,18 @@ function downloadPDF(elementId, filenamePrefix) {
   
   const clone = element.cloneNode(true);
   clone.classList.add('pdf-export');
-  clone.style.position = 'absolute';
+  clone.style.position = 'fixed';
   clone.style.top = '0';
-  clone.style.left = '-9999px'; // Move off-screen horizontally to prevent visual glitch
-  clone.style.width = '800px'; 
+  clone.style.left = '0';
+  clone.style.zIndex = '-1';
+  clone.style.opacity = '0.01';
+  clone.style.width = '800px';
+  clone.style.overflow = 'visible';
+  clone.style.pointerEvents = 'none';
+  clone.style.padding = '0';
+  clone.style.margin = '0';
+  clone.style.boxShadow = 'none';
+  clone.style.border = 'none';
   
   document.body.appendChild(clone);
   
@@ -52,7 +60,7 @@ function downloadPDF(elementId, filenamePrefix) {
     margin:       [0, 0, 0, 0],
     filename:     `${filenamePrefix}.pdf`,
     image:        { type: 'jpeg', quality: 1.0 },
-    html2canvas:  { scale: 2, useCORS: true },
+    html2canvas:  { scale: 2, useCORS: true, scrollX: 0, scrollY: -window.scrollY },
     jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
   };
   
