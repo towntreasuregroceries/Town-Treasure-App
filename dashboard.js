@@ -99,18 +99,18 @@ function generateReport() {
   const dateType = document.getElementById('reportDateType')?.value || 'single';
   const restId = document.getElementById('reportRestaurant')?.value;
   
-  let from = '', to = '', dateRangeStr = '';
+  let from = '', to = '', dateRange = '';
   
   if (dateType === 'single') {
     from = document.getElementById('reportSingleDate').value;
     to = from;
-    dateRangeStr = from ? fmtDate(from) : 'All Time';
+    dateRange = from ? fmtDate(from) : 'All Time';
   } else if (dateType === 'range') {
     from = document.getElementById('reportFrom').value;
     to = document.getElementById('reportTo').value;
-    dateRangeStr = (from ? fmtDate(from) : 'Start') + ' — ' + (to ? fmtDate(to) : 'Present');
+    dateRange = (from ? fmtDate(from) : 'Start') + ' — ' + (to ? fmtDate(to) : 'Present');
   } else {
-    dateRangeStr = 'All Time';
+    dateRange = 'All Time';
   }
   
   // ── Invoice Data ──
