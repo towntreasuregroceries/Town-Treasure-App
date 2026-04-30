@@ -19,7 +19,12 @@ function viewInvoice(id) {
 
   container.innerHTML = `
   <div class="invoice-preview" id="invoice-doc">
-    <div class="invoice-header-shape">
+    <div class="invoice-header-shape" style="position:relative; height:140px; overflow:hidden; border-top-left-radius:8px; border-top-right-radius:8px;">
+      <svg width="100%" height="140" viewBox="0 0 800 140" preserveAspectRatio="none" style="display:block; position:absolute; top:0; left:0; width:100%; height:100%;">
+        <rect x="0" y="0" width="800" height="140" fill="#61b146"/>
+        <path d="M240,0 L810,0 L810,80 Q610,120 240,80 Z" fill="#313a43"/>
+        <path d="M-50,140 Q400,60 850,140 Z" fill="white"/>
+      </svg>
       <div class="header-content">
          <img src="assets/logo.png" alt="Logo" class="invoice-logo-img">
       </div>
