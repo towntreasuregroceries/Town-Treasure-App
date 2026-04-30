@@ -193,29 +193,29 @@
 }
 
 @media (max-width: 600px) {
-  #invoice-doc { padding: 0; min-height: auto; max-width: 100%; }
-  .invoice-header-shape { height: 90px; }
-  .invoice-header-shape::before { height: 60px; }
-  .header-content { top: 12px; left: 15px; }
-  .invoice-logo-img { height: 40px; }
-  .invoice-title-row { padding: 5px 15px 10px; flex-direction: column; align-items: flex-start; gap: 8px; }
-  .invoice-title { font-size: 1.5rem; min-width: auto; }
-  .invoice-meta-grid { column-gap: 15px; font-size: .75rem; }
-  .invoice-billed-to { padding: 0 15px 10px; }
-  .invoice-billed-to h4 { font-size: .8rem; }
-  .invoice-billed-to p { font-size: .78rem; }
-  .invoice-table-wrapper { padding: 0 8px; }
-  .receipt-table { width: 100%; }
-  .receipt-table thead th { padding: 8px 6px; font-size: .7rem; }
-  .receipt-table tbody td { padding: 8px 6px; font-size: .75rem; }
-  .invoice-totals-area { padding: 15px; flex-direction: column; align-items: flex-start; gap: 15px; }
-  .totals-table { width: 100%; }
-  .totals-table td { font-size: .8rem; }
-  .totals-table .grand-total td { font-size: .95rem; }
-  .qr-code-container { width: 90px; height: 90px; }
-  .invoice-bottom-details { padding: 10px 15px 5px !important; flex-direction: column; gap: 12px; }
-  .watermark-overlay { top: 50%; gap: 10px; }
-  .watermark-stamp { width: 120px; }
-  .watermark-text { font-size: 2.5rem; }
-  .invoice-footer-shape { height: 50px; }
+  body:not(.exporting-pdf) #invoice-doc { padding: 0; min-height: auto; max-width: 100%; }
+  body:not(.exporting-pdf) .invoice-header-shape { height: 90px; }
+  body:not(.exporting-pdf) .invoice-header-shape::before { height: 60px; }
+  body:not(.exporting-pdf) .header-content { top: 12px; left: 15px; }
+  body:not(.exporting-pdf) .invoice-logo-img { height: 40px; }
+  body:not(.exporting-pdf) .invoice-title-row { padding: 5px 15px 10px; flex-direction: column; align-items: flex-start; gap: 8px; }
+  body:not(.exporting-pdf) .invoice-title { font-size: 1.5rem; min-width: auto; }
+  body:not(.exporting-pdf) .invoice-meta-grid { column-gap: 15px; font-size: .75rem; }
+  body:not(.exporting-pdf) .invoice-billed-to { padding: 0 15px 10px; }
+  body:not(.exporting-pdf) .invoice-billed-to h4 { font-size: .8rem; }
+  body:not(.exporting-pdf) .invoice-billed-to p { font-size: .78rem; }
+  body:not(.exporting-pdf) .invoice-table-wrapper { padding: 0 8px; }
+  body:not(.exporting-pdf) .receipt-table { width: 100%; }
+  body:not(.exporting-pdf) .receipt-table thead th { padding: 8px 6px; font-size: .7rem; }
+  body:not(.exporting-pdf) .receipt-table tbody td { padding: 8px 6px; font-size: .75rem; }
+  body:not(.exporting-pdf) .invoice-totals-area { padding: 15px; flex-direction: column; align-items: flex-start; gap: 15px; }
+  body:not(.exporting-pdf) .totals-table { width: 100%; }
+  body:not(.exporting-pdf) .totals-table td { font-size: .8rem; }
+  body:not(.exporting-pdf) .totals-table .grand-total td { font-size: .95rem; }
+  body:not(.exporting-pdf) .qr-code-container { width: 90px; height: 90px; }
+  body:not(.exporting-pdf) .invoice-bottom-details { padding: 10px 15px 5px !important; flex-direction: column; gap: 12px; }
+  body:not(.exporting-pdf) .watermark-overlay { top: 50%; gap: 10px; }
+  body:not(.exporting-pdf) .watermark-stamp { width: 120px; }
+  body:not(.exporting-pdf) .watermark-text { font-size: 2.5rem; }
+  body:not(.exporting-pdf) .invoice-footer-shape { height: 50px; }
 }
