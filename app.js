@@ -121,3 +121,107 @@ function checkPendingBills() {
     }
   }
 }
+
+/* ══ WebAuthn App Lock ══ */
+function bufferToBase64url(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let str = '';
+  for (const charCode of bytes) str += String.fromCharCode(charCode);
+  return btoa(str).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+}
+
+function base64urlToBuffer(base64url) {
+  const padding = '='.repeat((4 - base64url.length % 4) % 4);
+  const base64 = (base64url + padding).replace(/\-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const buffer = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; ++i) buffer[i] = rawData.charCodeAt(i);
+  return buffer;
+}
+
+function updateLockUI() {
+  const isLocked = localStorage.getItem('ttg_device_lock');
+  const txt = document.getElementById('lockStatusText');
+  if (txt) txt.textContent = isLocked ? 'Disable App Lock' : 'Enable App Lock';
+}
+
+async function toggleDeviceLock() {
+  if (localStorage.getItem('ttg_device_lock')) {
+    customConfirm('Are you sure you want to disable the app lock?', 'Disable Lock', 'Yes, Disable', true, () => {
+      localStorage.removeItem('ttg_device_lock');
+      updateLockUI();
+      toast('App Lock disabled');
+    });
+    return;
+  }
+  
+  if (!window.PublicKeyCredential) {
+    toast("Your device doesn't support WebAuthn / Passkeys.", 'error');
+    return;
+  }
+  try {
+    const challenge = new Uint8Array(32);
+    crypto.getRandomValues(challenge);
+    const userId = new Uint8Array(16);
+    crypto.getRandomValues(userId);
+
+    const credential = await navigator.credentials.create({
+      publicKey: {
+        challenge: challenge,
+        rp: { name: "Town Treasure Groceries" },
+        user: { id: userId, name: "Owner", displayName: "Store Owner" },
+        pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
+        timeout: 60000
+      }
+    });
+
+    if (credential) {
+      localStorage.setItem('ttg_device_lock', bufferToBase64url(credential.rawId));
+      updateLockUI();
+      toast('App Lock enabled successfully!');
+    }
+  } catch (err) {
+    console.error(err);
+    toast('Failed to setup device lock. Ensure screen lock is enabled.', 'error');
+  }
+}
+
+async function unlockDevice() {
+  const credIdStr = localStorage.getItem('ttg_device_lock');
+  if (!credIdStr) {
+    document.getElementById('lockScreen').style.display = 'none';
+    return;
+  }
+  try {
+    const challenge = new Uint8Array(32);
+    crypto.getRandomValues(challenge);
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge: challenge,
+        allowCredentials: [{ type: 'public-key', id: base64urlToBuffer(credIdStr) }],
+        userVerification: 'required',
+        timeout: 60000
+      }
+    });
+    if (assertion) {
+      document.getElementById('lockScreen').style.display = 'none';
+    }
+  } catch (err) {
+    console.error(err);
+    toast('Authentication failed', 'error');
+  }
+}
+
+function initLockScreen() {
+  if (localStorage.getItem('ttg_device_lock')) {
+    document.getElementById('lockScreen').style.display = 'flex';
+  }
+  updateLockUI();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initLockScreen);
+} else {
+  initLockScreen();
+}
