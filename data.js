@@ -1,18 +1,18 @@
 /* ══ Data Layer ══ */
 const state = {
-  restaurants: [],
-  invoices: [],
-  expenses: [],
+  restaurants: JSON.parse(localStorage.getItem('ttg_restaurants') || '[]'),
+  invoices: JSON.parse(localStorage.getItem('ttg_invoices') || '[]'),
+  expenses: JSON.parse(localStorage.getItem('ttg_expenses') || '[]'),
   nextInvNum: 1001
 };
 
 const DB = {
   get restaurants() { return state.restaurants; },
-  set restaurants(v) { state.restaurants = v; this.syncToSupabase('restaurants', v); },
+  set restaurants(v) { state.restaurants = v; localStorage.setItem('ttg_restaurants', JSON.stringify(v)); this.syncToSupabase('restaurants', v); },
   get invoices() { return state.invoices; },
-  set invoices(v) { state.invoices = v; this.syncToSupabase('invoices', v); },
+  set invoices(v) { state.invoices = v; localStorage.setItem('ttg_invoices', JSON.stringify(v)); this.syncToSupabase('invoices', v); },
   get expenses() { return state.expenses; },
-  set expenses(v) { state.expenses = v; this.syncToSupabase('expenses', v); },
+  set expenses(v) { state.expenses = v; localStorage.setItem('ttg_expenses', JSON.stringify(v)); this.syncToSupabase('expenses', v); },
   
   get nextInvNum() {
     if (state.invoices.length === 0) return state.nextInvNum;
@@ -39,7 +39,11 @@ const DB = {
       }
     } catch (e) {
       console.error(`Error syncing ${table} to Supabase:`, e);
-      alert(`Error syncing to database: ${e.message}`);
+      const now = Date.now();
+      if (!window.lastOfflineToast || now - window.lastOfflineToast > 5000) {
+        if (typeof toast === 'function') toast(`Offline mode: Data saved locally.`, 'warning');
+        window.lastOfflineToast = now;
+      }
     }
   },
   
@@ -51,11 +55,12 @@ const DB = {
         const { data, error } = await supabaseClient.from(table).select('*');
         if (error) throw error;
         state[table] = data || [];
+        localStorage.setItem(`ttg_${table}`, JSON.stringify(state[table]));
       }
       return true;
     } catch (e) {
       console.error('Error loading from Supabase:', e);
-      alert('Error loading from database!');
+      if (typeof toast === 'function') toast('Offline mode: Using locally cached data', 'warning');
       return false;
     }
   }

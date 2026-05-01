@@ -1,7 +1,7 @@
 /* ══ Invoice Line Items ══ */
 function addLineItem() {
   const row = document.createElement('tr');
-  row.innerHTML = `<td><input type="text" placeholder="e.g. Onions" class="item-desc"></td><td><input type="number" min="0" step="any" value="1" class="item-qty"></td><td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs">Kgs</option><option value="litres">Litres</option><option value="pieces" selected>Pieces</option><option value="crates">Crates</option><option value="bags">Bags</option><option value="trays">Trays</option><option value="bundles">Bundles</option><option value="dozen">Dozen</option></select></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy"></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell"></td><td class="item-total" style="font-weight:600">0.00</td><td><button type="button" class="btn-remove-row" onclick="removeLineItem(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>`;
+  row.innerHTML = `<td><input type="text" placeholder="e.g. Onions" class="item-desc"></td><td><input type="number" min="0" step="any" value="1" class="item-qty"></td><td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs" selected>Kgs</option><option value="litres">Litres</option><option value="pieces">Pieces</option><option value="crates">Crates</option><option value="bags">Bags</option><option value="trays">Trays</option><option value="bundles">Bundles</option><option value="dozen">Dozen</option><option value="packets">Packets</option><option value="banch">Banch</option></select></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy"></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell"></td><td class="item-total" style="font-weight:600">0.00</td><td><button type="button" class="btn-remove-row" onclick="removeLineItem(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>`;
   document.getElementById('lineItemsBody').appendChild(row);
   attachLineListeners(row);
 }
@@ -62,7 +62,7 @@ function saveInvoice() {
   document.querySelectorAll('#lineItemsBody tr').forEach(row => {
     const desc = row.querySelector('.item-desc').value.trim();
     const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
-    const unit = row.querySelector('.item-unit')?.value || 'pieces';
+    const unit = row.querySelector('.item-unit')?.value || 'kgs';
     const buy = parseFloat(row.querySelector('.item-buy').value) || 0;
     const sell = parseFloat(row.querySelector('.item-sell').value) || 0;
     if (!desc) { valid = false; return; }
@@ -118,7 +118,7 @@ function saveInvoiceDraft(silent = false) {
   document.querySelectorAll('#lineItemsBody tr').forEach(row => {
     const desc = row.querySelector('.item-desc').value.trim();
     const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
-    const unit = row.querySelector('.item-unit')?.value || 'pieces';
+    const unit = row.querySelector('.item-unit')?.value || 'kgs';
     const buy = parseFloat(row.querySelector('.item-buy').value) || 0;
     const sell = parseFloat(row.querySelector('.item-sell').value) || 0;
     if (desc || qty > 0 || buy > 0 || sell > 0) {
@@ -184,7 +184,7 @@ function loadInvoiceDraft(id) {
   if (draft.items && draft.items.length > 0) {
     draft.items.forEach(item => {
       const row = document.createElement('tr');
-      row.innerHTML = `<td><input type="text" placeholder="e.g. Tomatoes" class="item-desc" value="${item.desc || ''}"></td><td><input type="number" min="0" step="any" class="item-qty" value="${item.qty || 1}"></td><td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs" ${item.unit === 'kgs' ? 'selected' : ''}>Kgs</option><option value="litres" ${item.unit === 'litres' ? 'selected' : ''}>Litres</option><option value="pieces" ${item.unit === 'pieces' || !item.unit ? 'selected' : ''}>Pieces</option><option value="crates" ${item.unit === 'crates' ? 'selected' : ''}>Crates</option><option value="bags" ${item.unit === 'bags' ? 'selected' : ''}>Bags</option><option value="trays" ${item.unit === 'trays' ? 'selected' : ''}>Trays</option><option value="bundles" ${item.unit === 'bundles' ? 'selected' : ''}>Bundles</option><option value="dozen" ${item.unit === 'dozen' ? 'selected' : ''}>Dozen</option></select></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy" value="${item.buyPrice !== undefined ? item.buyPrice : (item.buy || '')}"></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell" value="${item.sellPrice !== undefined ? item.sellPrice : (item.sell || '')}"></td><td class="item-total" style="font-weight:600">0.00</td><td><button type="button" class="btn-remove-row" onclick="removeLineItem(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>`;
+      row.innerHTML = `<td><input type="text" placeholder="e.g. Tomatoes" class="item-desc" value="${item.desc || ''}"></td><td><input type="number" min="0" step="any" class="item-qty" value="${item.qty || 1}"></td><td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs" ${item.unit === 'kgs' || !item.unit ? 'selected' : ''}>Kgs</option><option value="litres" ${item.unit === 'litres' ? 'selected' : ''}>Litres</option><option value="pieces" ${item.unit === 'pieces' ? 'selected' : ''}>Pieces</option><option value="crates" ${item.unit === 'crates' ? 'selected' : ''}>Crates</option><option value="bags" ${item.unit === 'bags' ? 'selected' : ''}>Bags</option><option value="trays" ${item.unit === 'trays' ? 'selected' : ''}>Trays</option><option value="bundles" ${item.unit === 'bundles' ? 'selected' : ''}>Bundles</option><option value="dozen" ${item.unit === 'dozen' ? 'selected' : ''}>Dozen</option><option value="packets" ${item.unit === 'packets' ? 'selected' : ''}>Packets</option><option value="banch" ${item.unit === 'banch' ? 'selected' : ''}>Banch</option></select></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy" value="${item.buyPrice !== undefined ? item.buyPrice : (item.buy || '')}"></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell" value="${item.sellPrice !== undefined ? item.sellPrice : (item.sell || '')}"></td><td class="item-total" style="font-weight:600">0.00</td><td><button type="button" class="btn-remove-row" onclick="removeLineItem(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>`;
       body.appendChild(row);
       attachLineListeners(row);
     });
@@ -268,7 +268,7 @@ function renderInvoicesList() {
   if (!invs.length) { body.innerHTML = '<tr><td colspan="8" class="empty-state"><h3>No invoices found</h3></td></tr>'; return; }
   body.innerHTML = invs.map(i => {
     const badgeCls = i.status === 'paid' ? 'badge-success' : i.status === 'overdue' ? 'badge-danger' : 'badge-warning';
-    return `<tr><td><strong>${i.number}</strong></td><td>${i.restaurantName}</td><td>${fmtDate(i.date)}</td><td>${i.items.length}</td><td>KES ${fmtMoney(i.totalSell)}</td><td style="color:var(--green-700)">KES ${fmtMoney(i.profit)}</td><td><span class="badge ${badgeCls}">${i.status}</span></td><td><button class="btn btn-sm btn-secondary" onclick="viewInvoice('${i.id}')">View</button> <button class="btn btn-sm btn-danger" onclick="deleteInvoice('${i.id}')">Del</button></td></tr>`;
+    return `<tr><td><strong>${i.number}</strong></td><td>${i.restaurantName}</td><td>${fmtDate(i.date)}</td><td>${i.items.length}</td><td>KES ${fmtMoney(i.totalSell)}</td><td style="color:var(--green-700)">KES ${fmtMoney(i.profit)}</td><td><span class="badge ${badgeCls}">${i.status}</span></td><td><button class="btn btn-sm btn-secondary" onclick="viewInvoice('${i.id}')">View</button> <button class="btn btn-sm btn-primary" onclick="editInvoice('${i.id}')">Edit</button> <button class="btn btn-sm btn-danger" onclick="deleteInvoice('${i.id}')">Del</button></td></tr>`;
   }).join('');
 }
 function deleteInvoice(id) {
@@ -281,4 +281,32 @@ function markAsPaid(id) {
   const list = DB.invoices;
   const inv = list.find(i => i.id === id);
   if (inv) { inv.status = 'paid'; DB.invoices = list; toast('Marked as paid'); viewInvoice(id); }
+}
+
+function editInvoice(id) {
+  const inv = DB.invoices.find(i => i.id === id);
+  if (!inv) { toast('Invoice not found.', 'error'); return; }
+  
+  if (typeof navigateTo === 'function') navigateTo('new-invoice');
+  
+  document.getElementById('editInvoiceId').value = inv.id;
+  if (inv.restaurantId) document.getElementById('invRestaurant').value = inv.restaurantId;
+  if (inv.date) document.getElementById('invDate').value = inv.date;
+  if (inv.dueDate) document.getElementById('invDueDate').value = inv.dueDate;
+  if (inv.notes) document.getElementById('invNotes').value = inv.notes;
+  
+  const body = document.getElementById('lineItemsBody');
+  body.innerHTML = '';
+  if (inv.items && inv.items.length > 0) {
+    inv.items.forEach(item => {
+      const row = document.createElement('tr');
+      row.innerHTML = `<td><input type="text" placeholder="e.g. Tomatoes" class="item-desc" value="${item.desc || ''}"></td><td><input type="number" min="0" step="any" class="item-qty" value="${item.qty || 1}"></td><td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs" ${item.unit === 'kgs' || !item.unit ? 'selected' : ''}>Kgs</option><option value="litres" ${item.unit === 'litres' ? 'selected' : ''}>Litres</option><option value="pieces" ${item.unit === 'pieces' ? 'selected' : ''}>Pieces</option><option value="crates" ${item.unit === 'crates' ? 'selected' : ''}>Crates</option><option value="bags" ${item.unit === 'bags' ? 'selected' : ''}>Bags</option><option value="trays" ${item.unit === 'trays' ? 'selected' : ''}>Trays</option><option value="bundles" ${item.unit === 'bundles' ? 'selected' : ''}>Bundles</option><option value="dozen" ${item.unit === 'dozen' ? 'selected' : ''}>Dozen</option><option value="packets" ${item.unit === 'packets' ? 'selected' : ''}>Packets</option><option value="banch" ${item.unit === 'banch' ? 'selected' : ''}>Banch</option></select></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy" value="${item.buyPrice !== undefined ? item.buyPrice : (item.buy || '')}"></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell" value="${item.sellPrice !== undefined ? item.sellPrice : (item.sell || '')}"></td><td class="item-total" style="font-weight:600">0.00</td><td><button type="button" class="btn-remove-row" onclick="removeLineItem(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>`;
+      body.appendChild(row);
+      attachLineListeners(row);
+    });
+    calcInvoiceTotals();
+  } else {
+    addLineItem();
+  }
+  toast('Editing Invoice ' + inv.number);
 }

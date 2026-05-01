@@ -5,7 +5,9 @@ function refreshDashboard() {
   const now = new Date();
   const thisMonth = invs.filter(i => { const d = new Date(i.date); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
   const totalSales = thisMonth.reduce((s, i) => s + i.totalSell, 0);
-  const totalProfit = thisMonth.reduce((s, i) => s + i.profit, 0);
+  let totalProfit = thisMonth.reduce((s, i) => s + i.profit, 0);
+  const thisMonthExpenses = DB.expenses.filter(e => { const d = new Date(e.date); return e.type === 'expense' && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).reduce((s, e) => s + e.amount, 0);
+  totalProfit -= thisMonthExpenses;
   const totalCost = thisMonth.reduce((s, i) => s + i.totalBuy, 0);
   const paidCount = thisMonth.filter(i => i.status === 'paid').length;
   document.getElementById('dashboardStats').innerHTML = `
@@ -20,8 +22,9 @@ function refreshDashboard() {
     const d = new Date(now.getFullYear(), now.getMonth() - m, 1);
     months.push(d.toLocaleDateString('en', { month: 'short', year: '2-digit' }));
     const mi = invs.filter(i => { const id = new Date(i.date); return id.getMonth() === d.getMonth() && id.getFullYear() === d.getFullYear(); });
+    const me = DB.expenses.filter(e => { const ed = new Date(e.date); return e.type === 'expense' && ed.getMonth() === d.getMonth() && ed.getFullYear() === d.getFullYear(); });
     salesData.push(mi.reduce((s, i) => s + i.totalSell, 0));
-    profitData.push(mi.reduce((s, i) => s + i.profit, 0));
+    profitData.push(mi.reduce((s, i) => s + i.profit, 0) - me.reduce((s, e) => s + e.amount, 0));
   }
   if (revenueChartInst) revenueChartInst.destroy();
   const ctx1 = document.getElementById('revenueChart');
@@ -74,7 +77,7 @@ function toggleReportRestaurant() {
       inv.items.forEach(item => {
         const name = item.desc.trim();
         const key = name.toLowerCase();
-        if (!productMap[key]) productMap[key] = { name: name, qty: 0, unit: item.unit || 'pcs', count: 0 };
+        if (!productMap[key]) productMap[key] = { name: name, qty: 0, unit: item.unit || 'kgs', count: 0 };
         productMap[key].qty += item.qty;
         productMap[key].count++;
       });
@@ -131,7 +134,7 @@ function generateReport() {
     invs.forEach(inv => {
       inv.items.forEach(item => {
         if (item.desc.toLowerCase().trim().includes(productName)) {
-          const unit = item.unit || 'pcs';
+          const unit = item.unit || 'kgs';
           matches.push({
             invoiceNum: inv.number,
             restaurant: inv.restaurantName,
@@ -318,7 +321,7 @@ function generateReport() {
       </div>
       <div>
         <h4 style="font-size: 0.75rem; color: #616161; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Total Profit</h4>
-        <div style="font-size: 1.2rem; font-weight: 700; color: #2E7D32;">KES ${fmtMoney(totalProfit)}</div>
+        <div style="font-size: 1.2rem; font-weight: 700; color: ${totalProfit - totalExpenses >= 0 ? '#2E7D32' : '#dc2626'};">KES ${fmtMoney(totalProfit - totalExpenses)}</div>
       </div>
       <div>
         <h4 style="font-size: 0.75rem; color: #616161; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Expenses</h4>

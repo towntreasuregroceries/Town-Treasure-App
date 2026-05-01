@@ -12,7 +12,7 @@ function viewInvoice(id) {
       <td style="text-align: center; width: 50px;">${(idx + 1).toString().padStart(2, '0')}</td>
       <td>${it.desc}</td>
       <td style="text-align: right;">KSh ${fmtMoney(it.sellPrice)}</td>
-      <td style="text-align: center;">${it.qty} ${it.unit || 'pcs'}</td>
+      <td style="text-align: center;">${it.qty} ${it.unit || 'kgs'}</td>
       <td style="text-align: right;">KSh ${fmtMoney(it.total)}</td>
     </tr>
   `).join('');

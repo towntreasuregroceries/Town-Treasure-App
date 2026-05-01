@@ -140,7 +140,7 @@
                     <tr>
                       <td><input type="text" placeholder="e.g. Tomatoes" class="item-desc"></td>
                       <td><input type="number" min="0" step="any" value="1" class="item-qty"></td>
-                      <td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs">Kgs</option><option value="litres">Litres</option><option value="pieces" selected>Pieces</option><option value="crates">Crates</option><option value="bags">Bags</option><option value="trays">Trays</option><option value="bundles">Bundles</option><option value="dozen">Dozen</option></select></td>
+                      <td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs" selected>Kgs</option><option value="litres">Litres</option><option value="pieces">Pieces</option><option value="crates">Crates</option><option value="bags">Bags</option><option value="trays">Trays</option><option value="bundles">Bundles</option><option value="dozen">Dozen</option><option value="packets">Packets</option><option value="banch">Banch</option></select></td>
                       <td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy"></td>
                       <td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell"></td>
                       <td class="item-total" style="font-weight:600">0.00</td>
@@ -318,6 +318,7 @@
             WhatsApp
           </button>
           <button class="btn btn-secondary" onclick="markAsPaid(currentViewInvoiceId)">✓ Mark as Paid</button>
+          <button class="btn btn-primary" onclick="editInvoice(currentViewInvoiceId)">✎ Edit</button>
         </div>
         <div id="invoiceViewContainer"></div>
       </div>
