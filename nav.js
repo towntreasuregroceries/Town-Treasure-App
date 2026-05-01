@@ -1,6 +1,7 @@
 /* ══ Navigation ══ */
 let currentViewInvoiceId = null;
 function navigateTo(page) {
+  localStorage.setItem('ttg_last_page', page);
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
   const el = document.getElementById('page-' + page);
@@ -31,13 +32,19 @@ function saveRestaurant() {
   if (!r.name) return toast('Name is required', 'error');
   const list = DB.restaurants;
   const idx = list.findIndex(x => x.id === r.id);
-  if (idx >= 0) list[idx] = r; else list.push(r);
+  const isNew = idx < 0;
+  if (!isNew) list[idx] = r; else list.push(r);
   DB.restaurants = list;
   closeModal('restaurantModal');
   document.getElementById('editRestaurantId').value = '';
   ['restName','restContact','restPhone','restAddress'].forEach(f => document.getElementById(f).value = '');
   renderRestaurants();
-  toast(idx >= 0 ? 'Restaurant updated' : 'Restaurant added');
+  populateRestaurantDropdowns();
+  if (isNew) {
+    const invRestaurant = document.getElementById('invRestaurant');
+    if (invRestaurant) invRestaurant.value = r.id;
+  }
+  toast(isNew ? 'Restaurant added' : 'Restaurant updated');
 }
 function editRestaurant(id) {
   const r = DB.restaurants.find(x => x.id === id);

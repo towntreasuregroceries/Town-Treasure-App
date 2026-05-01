@@ -111,9 +111,13 @@
           <div class="card-header"><h3>Create New Invoice</h3></div>
           <div class="card-body">
             <form id="invoiceForm" onsubmit="return false;">
+              <input type="hidden" id="editInvoiceId">
               <div class="form-row">
                 <div class="form-group">
-                  <label>Restaurant / Client</label>
+                  <label style="display:flex; justify-content:space-between; align-items:flex-end;">
+                    <span>Restaurant / Client</span>
+                    <a href="#" style="font-size: 0.8rem; color: var(--primary); text-decoration:none;" onclick="openModal('restaurantModal'); return false;">+ Add New</a>
+                  </label>
                   <select class="form-control" id="invRestaurant" required>
                     <option value="">Select restaurant…</option>
                   </select>
@@ -163,8 +167,9 @@
                 <textarea class="form-control" id="invNotes" rows="2" placeholder="Payment terms, delivery notes…"></textarea>
               </div>
 
-              <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:20px">
+              <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:20px;flex-wrap:wrap;">
                 <button type="button" class="btn btn-secondary" onclick="resetInvoiceForm()">Clear</button>
+                <button type="button" class="btn btn-secondary" onclick="saveInvoiceDraft()">Save Draft</button>
                 <button type="button" class="btn btn-primary" onclick="saveInvoice()">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
                   Save &amp; Generate Invoice
@@ -173,6 +178,20 @@
             </form>
           </div>
         </div>
+
+        <!-- ════════ SAVED DRAFTS ════════ -->
+        <div class="card" id="draftsSection" style="display:none; margin-top: 24px;">
+          <div class="card-header"><h3>Saved Drafts</h3></div>
+          <div class="card-body">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Draft Date</th><th>Restaurant</th><th>Items</th><th>Actions</th></tr></thead>
+                <tbody id="draftsListBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
       </div>
 
       <!-- ════════ INVOICES LIST ════════ -->
@@ -379,6 +398,25 @@
 <!-- Toast container -->
 <div class="toast-container" id="toastContainer"></div>
 
+<script>
+  (function() {
+    const lastPage = localStorage.getItem('ttg_last_page');
+    if (lastPage && lastPage !== 'dashboard') {
+      const activePage = document.querySelector('.page.active');
+      const activeNav = document.querySelector('.nav-item.active');
+      if (activePage) activePage.classList.remove('active');
+      if (activeNav) activeNav.classList.remove('active');
+      
+      const p = document.getElementById('page-' + lastPage);
+      if (p) p.classList.add('active');
+      const n = document.querySelector('[data-page="' + lastPage + '"]');
+      if (n) n.classList.add('active');
+      
+      const titles = { dashboard:'Dashboard','new-invoice':'New Invoice',invoices:'Invoices',restaurants:'Restaurants',expenses:'Capital & Expenses',reports:'Reports','invoice-view':'Invoice' };
+      document.getElementById('pageTitle').textContent = titles[lastPage] || 'Dashboard';
+    }
+  })();
+</script>
 <script src="data.js"></script>
 <script src="nav.js"></script>
 <script src="invoices.js"></script>

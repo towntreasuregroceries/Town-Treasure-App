@@ -1,7 +1,7 @@
 /* ══ Dashboard ══ */
 let revenueChartInst = null, topRestChartInst = null;
 function refreshDashboard() {
-  const invs = DB.invoices;
+  const invs = DB.invoices.filter(i => i.status !== 'draft');
   const now = new Date();
   const thisMonth = invs.filter(i => { const d = new Date(i.date); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
   const totalSales = thisMonth.reduce((s, i) => s + i.totalSell, 0);
@@ -114,7 +114,7 @@ function generateReport() {
   }
   
   // ── Invoice Data ──
-  let invs = DB.invoices.slice();
+  let invs = DB.invoices.filter(i => i.status !== 'draft');
   if (from) invs = invs.filter(i => i.date >= from);
   if (to) invs = invs.filter(i => i.date <= to);
   
@@ -431,5 +431,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
   
   populateRestaurantDropdowns();
-  refreshDashboard();
+  
+  const lastPage = localStorage.getItem('ttg_last_page') || 'dashboard';
+  navigateTo(lastPage);
+  
+  if (typeof checkInvoiceDraft === 'function') checkInvoiceDraft();
 });
