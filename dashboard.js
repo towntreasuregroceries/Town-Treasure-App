@@ -243,7 +243,7 @@ function generateReport() {
       </div>
       <div class="watermark-overlay" style="z-index: 1;">
          <img src="assets/logo.png" alt="Stamp" class="watermark-stamp">
-         <div class="watermark-text">Town Treasure Groceries</div>
+         <div class="watermark-text">Town Treasure Limited</div>
       </div>
     </div>`;
     return; // Exit early — product report is done
@@ -408,7 +408,7 @@ function generateReport() {
     </div>
     <div class="watermark-overlay" style="z-index: 1;">
        <img src="assets/logo.png" alt="Stamp" class="watermark-stamp">
-       <div class="watermark-text">Town Treasure Groceries</div>
+       <div class="watermark-text">Town Treasure Limited</div>
     </div>
   </div>`;
 }
