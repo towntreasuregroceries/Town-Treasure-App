@@ -431,12 +431,15 @@
       console.log('[PWA] Service Worker registered');
       // Check for updates every 60 seconds
       setInterval(() => { reg.update(); }, 60000);
+      let updateNotified = false;
       reg.addEventListener('updatefound', () => {
         const newWorker = reg.installing;
         newWorker.addEventListener('statechange', () => {
-          if (newWorker.state === 'activated') {
-            // New version available — reload to get fresh code
-            customConfirm('A new version of Town Treasure is available! Reload now to get the latest features and fixes.', 'Update Available', 'Reload Now', false, () => {
+          // Listen for 'installed' state (which happens before activated)
+          if (newWorker.state === 'installed' && navigator.serviceWorker.controller && !updateNotified) {
+            updateNotified = true;
+            // New version available — prompt user to reload
+            customConfirm('A new update is available! Reload now to get the latest features and fixes.', 'Update Available', 'Reload Now', false, () => {
               window.location.reload();
             });
           }
