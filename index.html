@@ -116,7 +116,7 @@
                 <div class="form-group">
                   <label style="display:flex; justify-content:space-between; align-items:flex-end;">
                     <span>Restaurant / Client</span>
-                    <a href="#" style="font-size: 0.8rem; color: var(--primary); text-decoration:none;" onclick="openModal('restaurantModal'); return false;">+ Add New</a>
+                    <a href="#" style="font-size: 0.8rem; color: var(--primary); text-decoration:none;" onclick="openNewRestaurantModal(); return false;">+ Add New</a>
                   </label>
                   <select class="form-control" id="invRestaurant" required>
                     <option value="">Select restaurant…</option>
@@ -222,7 +222,7 @@
       <div class="page" id="page-restaurants">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
           <p style="color:var(--text-2);font-size:.9rem">Manage your restaurant clients</p>
-          <button class="btn btn-primary" onclick="openModal('restaurantModal')">
+          <button class="btn btn-primary" onclick="openNewRestaurantModal()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
             Add Restaurant
           </button>

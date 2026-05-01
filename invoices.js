@@ -112,7 +112,7 @@ function resetInvoiceForm() {
   calcInvoiceTotals();
 }
 
-function saveInvoiceDraft() {
+function saveInvoiceDraft(silent = false) {
   const restId = document.getElementById('invRestaurant').value;
   const items = [];
   document.querySelectorAll('#lineItemsBody tr').forEach(row => {
@@ -158,7 +158,7 @@ function saveInvoiceDraft() {
   DB.invoices = list;
 
   document.getElementById('editInvoiceId').value = draft.id;
-  toast('Draft saved to database!');
+  if (!silent) toast('Draft saved to database!');
   checkInvoiceDraft();
 }
 
@@ -220,7 +220,32 @@ function checkInvoiceDraft() {
     section.style.display = 'none';
   }
 }
-document.addEventListener('DOMContentLoaded', checkInvoiceDraft);
+let autoSaveTimer = null;
+function triggerAutoSave() {
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    const restId = document.getElementById('invRestaurant')?.value;
+    let hasItems = false;
+    document.querySelectorAll('#lineItemsBody tr').forEach(row => {
+      const desc = row.querySelector('.item-desc')?.value.trim();
+      const buy = parseFloat(row.querySelector('.item-buy')?.value) || 0;
+      const sell = parseFloat(row.querySelector('.item-sell')?.value) || 0;
+      if (desc || buy > 0 || sell > 0) hasItems = true;
+    });
+    if (restId || hasItems) {
+      saveInvoiceDraft(true);
+    }
+  }, 1000);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  checkInvoiceDraft();
+  const form = document.getElementById('invoiceForm');
+  if (form) {
+    form.addEventListener('input', triggerAutoSave);
+    form.addEventListener('change', triggerAutoSave);
+  }
+});
 
 function deleteDraft(id) {
   customConfirm('Are you sure you want to delete this draft?', 'Delete Draft', 'Yes, Delete', true, () => {

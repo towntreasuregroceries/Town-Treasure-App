@@ -26,6 +26,12 @@ document.querySelectorAll('.nav-item[data-page]').forEach(n => {
 });
 
 /* ══ Restaurants ══ */
+function openNewRestaurantModal() {
+  document.getElementById('editRestaurantId').value = '';
+  ['restName','restContact','restPhone','restAddress'].forEach(f => document.getElementById(f).value = '');
+  document.getElementById('restaurantModalTitle').textContent = 'Add Restaurant';
+  openModal('restaurantModal');
+}
 function saveRestaurant() {
   const id = document.getElementById('editRestaurantId').value;
   const r = { id: id || genId(), name: document.getElementById('restName').value.trim(), contact: document.getElementById('restContact').value.trim(), phone: document.getElementById('restPhone').value.trim(), address: document.getElementById('restAddress').value.trim() };
