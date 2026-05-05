@@ -595,6 +595,47 @@ async function wizardCreateAccount() {
   }
 }
 
+async function verifyEmailCode() {
+  const email = document.getElementById('wizEmail').value.trim();
+  const pass = document.getElementById('wizPassword').value;
+  const code = document.getElementById('wizOtpCode').value.trim();
+  const btn = document.getElementById('btnEmailConfirmed');
+  const errorEl = document.getElementById('wizEmailConfirmError');
+
+  if (code.length !== 6) {
+    errorEl.textContent = 'Please enter the 6-digit code from your email.';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  btn.disabled = true;
+  document.getElementById('btnEmailConfirmText').style.display = 'none';
+  document.getElementById('btnEmailConfirmSpinner').style.display = 'inline-block';
+  errorEl.style.display = 'none';
+
+  try {
+    // 1. Verify the OTP code
+    await verifyOtp(email, code);
+    
+    // 2. Sign in to establish session
+    await signIn(email, pass);
+    
+    // 3. E2EE: Derive and store encryption key
+    const jwkKey = await Crypto.deriveKey(pass);
+    localStorage.setItem('ttg_e2e_key', JSON.stringify(jwkKey));
+    
+    localStorage.setItem('ttg_has_account', 'true');
+    wizardNext(6);
+  } catch (err) {
+    errorEl.textContent = err.message || 'Invalid or expired code. Please try again.';
+    errorEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    document.getElementById('btnEmailConfirmText').style.display = 'inline';
+    document.getElementById('btnEmailConfirmSpinner').style.display = 'none';
+  }
+}
+
 async function wizardCheckEmailConfirmed() {
   const email = document.getElementById('wizEmail').value.trim();
   const pass = document.getElementById('wizPassword').value;

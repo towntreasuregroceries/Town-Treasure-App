@@ -172,23 +172,22 @@
         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
       </div>
       <h2 class="auth-title" style="font-size:1.15rem;">Check your email</h2>
-      <p class="wizard-text">We just sent a confirmation link to your email address to verify it's you.</p>
+      <p class="wizard-text">We sent a 6-digit code to your email. Enter it below to verify your account.</p>
       
-      <div class="security-features" style="background:var(--surface-2); padding:16px; border-radius:var(--radius-sm); border:1px solid var(--border); margin-bottom:16px;">
-        <ol style="margin:0; padding-left:16px; color:var(--text-2); font-size:.85rem; line-height:1.6;">
-          <li>Open your email app.</li>
-          <li>Find the email from <strong>Town Treasure</strong>.</li>
-          <li>Click the <strong>Confirm Email</strong> link.</li>
-          <li>Come back here and click the button below.</li>
-        </ol>
+      <div class="auth-field" style="margin:20px 0;">
+        <input type="text" id="wizOtpCode" class="form-control" placeholder="Enter 6-digit code" maxlength="6" style="text-align:center; font-size:1.5rem; letter-spacing:4px; font-weight:bold;">
       </div>
 
       <div id="wizEmailConfirmError" class="auth-error" style="display:none;"></div>
 
-      <button class="btn btn-primary auth-btn" id="btnEmailConfirmed" onclick="wizardCheckEmailConfirmed()">
-        <span id="btnEmailConfirmText">I've confirmed my email →</span>
+      <button class="btn btn-primary auth-btn" id="btnEmailConfirmed" onclick="verifyEmailCode()">
+        <span id="btnEmailConfirmText">Verify Code</span>
         <span id="btnEmailConfirmSpinner" class="auth-spinner" style="display:none;"></span>
       </button>
+      
+      <p class="auth-toggle" style="margin-top:16px; text-align:center;">
+        <a href="#" onclick="wizardCheckEmailConfirmed(); return false;" style="font-size:.85rem; color:var(--text-2);">Or click here if you used the link instead</a>
+      </p>
     </div>
 
     <!-- Step 6: Success -->

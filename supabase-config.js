@@ -26,6 +26,14 @@ async function signUp(email, password) {
   return data;
 }
 
+async function verifyOtp(email, token) {
+  if (!supabaseClient) throw new Error('Supabase not available');
+  const { data, error } = await supabaseClient.auth.verifyOtp({ email, token, type: 'signup' });
+  if (error) throw error;
+  currentUser = data.user;
+  return data;
+}
+
 async function signIn(email, password) {
   if (!supabaseClient) throw new Error('Supabase not available');
   const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
