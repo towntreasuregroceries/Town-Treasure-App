@@ -8,7 +8,7 @@ function navigateTo(page) {
   if (el) el.classList.add('active');
   const nav = document.querySelector(`[data-page="${page}"]`);
   if (nav) nav.classList.add('active');
-  const titles = { dashboard:'Dashboard','new-invoice':'New Invoice',invoices:'Invoices',restaurants:'Restaurants',expenses:'Capital & Expenses',reports:'Reports','invoice-view':'Invoice' };
+  const titles = { dashboard:'Dashboard','new-invoice':'New Invoice',invoices:'Invoices',restaurants:'Restaurants',expenses:'Capital & Expenses',reports:'Reports','invoice-view':'Invoice','recycle-bin':'Recycle Bin' };
   document.getElementById('pageTitle').textContent = titles[page] || 'Dashboard';
   document.getElementById('sidebar').classList.remove('open');
   if (page === 'dashboard') refreshDashboard();
@@ -16,6 +16,7 @@ function navigateTo(page) {
   if (page === 'restaurants') renderRestaurants();
   if (page === 'expenses') renderExpenses();
   if (page === 'new-invoice') populateRestaurantDropdowns();
+  if (page === 'recycle-bin') renderBin();
   if (page === 'reports') {
     populateRestaurantDropdowns();
     generateReport();

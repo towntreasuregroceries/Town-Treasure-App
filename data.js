@@ -3,6 +3,7 @@ const state = {
   restaurants: JSON.parse(localStorage.getItem('ttg_restaurants') || '[]'),
   invoices: JSON.parse(localStorage.getItem('ttg_invoices') || '[]'),
   expenses: JSON.parse(localStorage.getItem('ttg_expenses') || '[]'),
+  deletedInvoices: JSON.parse(localStorage.getItem('ttg_deleted_invoices') || '[]'),
   nextInvNum: 1001
 };
 
@@ -13,6 +14,8 @@ const DB = {
   set invoices(v) { state.invoices = v; localStorage.setItem('ttg_invoices', JSON.stringify(v)); this.syncToSupabase('invoices', v); },
   get expenses() { return state.expenses; },
   set expenses(v) { state.expenses = v; localStorage.setItem('ttg_expenses', JSON.stringify(v)); this.syncToSupabase('expenses', v); },
+  get deletedInvoices() { return state.deletedInvoices; },
+  set deletedInvoices(v) { state.deletedInvoices = v; localStorage.setItem('ttg_deleted_invoices', JSON.stringify(v)); this.syncToSupabase('deleted_invoices', v); },
   
   get nextInvNum() {
     if (state.invoices.length === 0) return state.nextInvNum;
@@ -50,12 +53,18 @@ const DB = {
   async loadFromSupabase() {
     if (!supabaseClient) return false;
     try {
-      const tables = ['restaurants', 'invoices', 'expenses'];
+      const tables = ['restaurants', 'invoices', 'expenses', 'deleted_invoices'];
       for (const table of tables) {
-        const { data, error } = await supabaseClient.from(table).select('*');
-        if (error) throw error;
-        state[table] = data || [];
-        localStorage.setItem(`ttg_${table}`, JSON.stringify(state[table]));
+        try {
+          const { data, error } = await supabaseClient.from(table).select('*');
+          if (error) { console.warn(`Table '${table}' not available:`, error.message); continue; }
+          const stateKey = table === 'deleted_invoices' ? 'deletedInvoices' : table;
+          const lsKey = table === 'deleted_invoices' ? 'ttg_deleted_invoices' : `ttg_${table}`;
+          state[stateKey] = data || [];
+          localStorage.setItem(lsKey, JSON.stringify(state[stateKey]));
+        } catch (tableErr) {
+          console.warn(`Skipping table '${table}':`, tableErr);
+        }
       }
       return true;
     } catch (e) {

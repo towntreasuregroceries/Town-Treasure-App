@@ -272,10 +272,112 @@ function renderInvoicesList() {
   }).join('');
 }
 function deleteInvoice(id) {
-  customConfirm('Are you sure you want to delete this invoice? This cannot be undone.', 'Delete Invoice', 'Yes, Delete', true, () => {
+  customConfirm('This invoice will be moved to the Recycle Bin. You can restore it later.', 'Delete Invoice', 'Yes, Delete', true, () => {
+    const inv = DB.invoices.find(i => i.id === id);
+    if (inv) {
+      // Move to recycle bin with deletion timestamp
+      const deleted = { ...inv, deletedAt: new Date().toISOString(), originalStatus: inv.status };
+      const bin = DB.deletedInvoices;
+      bin.push(deleted);
+      DB.deletedInvoices = bin;
+    }
     DB.invoices = DB.invoices.filter(i => i.id !== id);
-    renderInvoicesList(); toast('Invoice deleted');
+    renderInvoicesList();
+    toast('Invoice moved to Recycle Bin');
   });
+}
+
+/* ══ Recycle Bin ══ */
+function renderBin() {
+  const body = document.getElementById('binListBody');
+  const items = DB.deletedInvoices.slice().reverse();
+  const actionsBar = document.getElementById('binActionsBar');
+  const selectAll = document.getElementById('binSelectAll');
+  if (selectAll) selectAll.checked = false;
+  if (actionsBar) actionsBar.style.display = 'none';
+
+  if (!items.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty-state"><div class="bin-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></div><h3>Recycle Bin is empty</h3><p>Deleted invoices will appear here for recovery.</p></td></tr>';
+    return;
+  }
+  body.innerHTML = items.map(i => {
+    const deletedDate = i.deletedAt ? fmtDate(i.deletedAt.slice(0, 10)) : '—';
+    return `<tr>
+      <td><input type="checkbox" class="bin-checkbox" value="${i.id}" onchange="updateBinSelection()"></td>
+      <td><strong>${i.number}</strong></td>
+      <td>${i.restaurantName || 'Unknown'}</td>
+      <td>${fmtDate(i.date)}</td>
+      <td>KES ${fmtMoney(i.totalSell)}</td>
+      <td><span style="color:var(--text-2);font-size:.85rem;">${deletedDate}</span></td>
+      <td>
+        <button class="btn btn-sm btn-primary" onclick="restoreInvoice('${i.id}')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+          Restore
+        </button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+function restoreInvoice(id) {
+  const bin = DB.deletedInvoices;
+  const inv = bin.find(i => i.id === id);
+  if (!inv) return toast('Invoice not found in bin.', 'error');
+
+  // Remove bin-only fields and restore
+  const restored = { ...inv };
+  restored.status = inv.originalStatus || inv.status || 'pending';
+  delete restored.deletedAt;
+  delete restored.originalStatus;
+
+  const list = DB.invoices;
+  list.push(restored);
+  DB.invoices = list;
+  DB.deletedInvoices = bin.filter(i => i.id !== id);
+  renderBin();
+  toast('Invoice ' + restored.number + ' restored!');
+}
+
+function restoreSelectedInvoices() {
+  const checkboxes = document.querySelectorAll('.bin-checkbox:checked');
+  if (!checkboxes.length) return toast('No invoices selected.', 'error');
+
+  const ids = Array.from(checkboxes).map(cb => cb.value);
+  customConfirm(`Restore ${ids.length} selected invoice(s) back to active invoices?`, 'Restore Invoices', 'Yes, Restore', false, () => {
+    const bin = DB.deletedInvoices;
+    const list = DB.invoices;
+    ids.forEach(id => {
+      const inv = bin.find(i => i.id === id);
+      if (inv) {
+        const restored = { ...inv };
+        restored.status = inv.originalStatus || inv.status || 'pending';
+        delete restored.deletedAt;
+        delete restored.originalStatus;
+        list.push(restored);
+      }
+    });
+    DB.invoices = list;
+    DB.deletedInvoices = bin.filter(i => !ids.includes(i.id));
+    renderBin();
+    toast(ids.length + ' invoice(s) restored!');
+  });
+}
+
+function toggleBinSelectAll(master) {
+  document.querySelectorAll('.bin-checkbox').forEach(cb => { cb.checked = master.checked; });
+  updateBinSelection();
+}
+
+function updateBinSelection() {
+  const checked = document.querySelectorAll('.bin-checkbox:checked').length;
+  const bar = document.getElementById('binActionsBar');
+  const countEl = document.getElementById('binSelectedCount');
+  if (checked > 0) {
+    bar.style.display = 'flex';
+    countEl.textContent = checked + ' selected';
+  } else {
+    bar.style.display = 'none';
+  }
 }
 function markAsPaid(id) {
   const list = DB.invoices;

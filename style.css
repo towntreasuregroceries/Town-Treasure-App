@@ -1194,3 +1194,68 @@ tbody tr:hover {
   border-color: var(--green-500);
   outline: none;
 }
+
+/* ── Recycle Bin ── */
+.bin-header-info {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 18px 22px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+.bin-icon-wrap {
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-lt);
+  color: var(--danger);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.bin-actions-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, var(--green-50), var(--info-lt));
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--green-200);
+  animation: fadeIn .3s var(--ease);
+}
+
+.bin-checkbox,
+#binSelectAll {
+  width: 17px;
+  height: 17px;
+  cursor: pointer;
+  accent-color: var(--green-600);
+}
+
+.bin-empty-icon {
+  margin-bottom: 12px;
+}
+
+#page-recycle-bin .empty-state {
+  text-align: center;
+  padding: 60px 20px;
+}
+
+#page-recycle-bin .empty-state h3 {
+  color: var(--text-2);
+  font-size: 1.05rem;
+  margin-bottom: 6px;
+}
+
+#page-recycle-bin .empty-state p {
+  color: var(--text-3);
+  font-size: .88rem;
+}
