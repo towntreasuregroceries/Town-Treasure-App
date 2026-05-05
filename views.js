@@ -18,7 +18,7 @@ function viewInvoice(id) {
   `).join('');
 
   container.innerHTML = `
-  <div class="invoice-preview" id="invoice-doc">
+  <div class="invoice-preview" id="invoice-view-doc">
     <div class="invoice-header-shape" style="position:relative; height:140px; overflow:hidden; border-top-left-radius:8px; border-top-right-radius:8px;">
       <svg width="100%" height="140" viewBox="0 0 800 140" preserveAspectRatio="none" style="display:block; position:absolute; top:0; left:0; width:100%; height:100%;">
         <rect x="0" y="0" width="800" height="140" fill="#61b146"/>
@@ -128,7 +128,7 @@ function viewInvoice(id) {
 
   // Auto-paginate immediately so the user sees the true A4 layout
   setTimeout(() => {
-    const doc = document.getElementById('invoice-doc');
+    const doc = document.getElementById('invoice-view-doc');
     if (doc && typeof paginateElement === 'function') {
       paginateElement(doc);
     }
@@ -159,7 +159,7 @@ Feel free to reach out for any queries. We appreciate your business!`;
 
   // 1. Download the PDF automatically
   toast('Downloading PDF...', 'success');
-  downloadPDF('invoice-doc', filename);
+  downloadPDF('invoice-view-doc', filename);
   
   // 2. Open WhatsApp directly to the specific contact
   setTimeout(() => {
