@@ -1,4 +1,72 @@
 /* ══ Data Layer ══ */
+
+// === Crypto Utilities for E2EE ===
+const Crypto = {
+  async deriveKey(password) {
+    const enc = new TextEncoder();
+    const salt = enc.encode("town-treasure-secure-salt-v1"); 
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveBits", "deriveKey"]
+    );
+    const key = await crypto.subtle.deriveKey(
+      { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
+      keyMaterial,
+      { name: "AES-GCM", length: 256 },
+      true,
+      ["encrypt", "decrypt"]
+    );
+    return await crypto.subtle.exportKey("jwk", key);
+  },
+
+  async encrypt(dataObj, jwkKey) {
+    if (!jwkKey) throw new Error("Missing encryption key");
+    const key = await crypto.subtle.importKey("jwk", jwkKey, { name: "AES-GCM", length: 256 }, false, ["encrypt"]);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const enc = new TextEncoder();
+    const cipherText = await crypto.subtle.encrypt(
+      { name: "AES-GCM", iv: iv }, key, enc.encode(JSON.stringify(dataObj))
+    );
+    const payload = new Uint8Array(iv.length + cipherText.byteLength);
+    payload.set(iv, 0);
+    payload.set(new Uint8Array(cipherText), iv.length);
+    return Crypto.bufferToBase64(payload);
+  },
+
+  async decrypt(base64Str, jwkKey) {
+    if (!jwkKey || !base64Str) return null;
+    try {
+      const key = await crypto.subtle.importKey("jwk", jwkKey, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+      const payload = Crypto.base64ToBuffer(base64Str);
+      const iv = payload.slice(0, 12);
+      const cipherText = payload.slice(12);
+      const decrypted = await crypto.subtle.decrypt({ name: "AES-GCM", iv: iv }, key, cipherText);
+      const dec = new TextDecoder();
+      return JSON.parse(dec.decode(decrypted));
+    } catch(e) {
+      console.error("Decryption failed", e);
+      return null;
+    }
+  },
+
+  bufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+  },
+
+  base64ToBuffer(base64) {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+};
+
 const state = {
   restaurants: JSON.parse(localStorage.getItem('ttg_restaurants') || '[]'),
   invoices: JSON.parse(localStorage.getItem('ttg_invoices') || '[]'),
@@ -29,23 +97,39 @@ const DB = {
   },
   set nextInvNum(v) { /* Computed dynamically, ignore sets */ },
   
-  async syncToSupabase(table, data) {
+  async syncToSupabase() {
     if (!supabaseClient) return;
     const uid = getUserId();
     if (!uid) return; // Not logged in, skip sync
+    
+    const e2eKeyStr = localStorage.getItem('ttg_e2e_key');
+    if (!e2eKeyStr) {
+      console.warn("No E2EE key found. Sync skipped.");
+      return;
+    }
+
     try {
-      // Delete only this user's rows, then re-insert
-      const { error: delError } = await supabaseClient.from(table).delete().eq('user_id', uid);
-      if (delError) throw delError;
-      
-      if (data && data.length > 0) {
-        // Attach user_id to every row
-        const withUser = data.map(row => ({ ...row, user_id: uid }));
-        const { error: insError } = await supabaseClient.from(table).insert(withUser);
-        if (insError) throw insError;
-      }
+      // 1. Gather all local state
+      const appState = {
+        invoices: state.invoices,
+        expenses: state.expenses,
+        restaurants: state.restaurants,
+        deletedInvoices: state.deletedInvoices
+      };
+
+      // 2. Encrypt it completely
+      const jwkKey = JSON.parse(e2eKeyStr);
+      const encryptedPayload = await Crypto.encrypt(appState, jwkKey);
+
+      // 3. Save to the secure vault (overwrites existing row for this user)
+      const { error } = await supabaseClient
+        .from('encrypted_vault')
+        .upsert({ user_id: uid, data: encryptedPayload }, { onConflict: 'user_id' });
+
+      if (error) throw error;
+      console.log('Successfully synced encrypted vault');
     } catch (e) {
-      console.error(`Error syncing ${table} to Supabase:`, e);
+      console.error(`Error syncing vault to Supabase:`, e);
       const now = Date.now();
       if (!window.lastOfflineToast || now - window.lastOfflineToast > 5000) {
         if (typeof toast === 'function') toast(`Offline mode: Data saved locally.`, 'warning');
@@ -58,24 +142,48 @@ const DB = {
     if (!supabaseClient) return false;
     const uid = getUserId();
     if (!uid) return false; // Not logged in
+    
+    const e2eKeyStr = localStorage.getItem('ttg_e2e_key');
+    if (!e2eKeyStr) {
+      console.warn("No E2EE key found. Loading skipped.");
+      return false;
+    }
+
     try {
-      const tables = ['restaurants', 'invoices', 'expenses', 'deleted_invoices'];
-      for (const table of tables) {
-        try {
-          // RLS automatically filters by user_id, but we also filter explicitly
-          const { data, error } = await supabaseClient.from(table).select('*').eq('user_id', uid);
-          if (error) { console.warn(`Table '${table}' not available:`, error.message); continue; }
-          const stateKey = table === 'deleted_invoices' ? 'deletedInvoices' : table;
-          const lsKey = table === 'deleted_invoices' ? 'ttg_deleted_invoices' : `ttg_${table}`;
-          state[stateKey] = data || [];
-          localStorage.setItem(lsKey, JSON.stringify(state[stateKey]));
-        } catch (tableErr) {
-          console.warn(`Skipping table '${table}':`, tableErr);
+      const { data, error } = await supabaseClient
+        .from('encrypted_vault')
+        .select('data')
+        .eq('user_id', uid)
+        .single();
+
+      if (error && error.code !== 'PGRST116') throw error; // Ignore "no rows" error
+
+      if (data && data.data) {
+        // Decrypt the payload
+        const jwkKey = JSON.parse(e2eKeyStr);
+        const appState = await Crypto.decrypt(data.data, jwkKey);
+        
+        if (appState) {
+          state.invoices = appState.invoices || [];
+          state.expenses = appState.expenses || [];
+          state.restaurants = appState.restaurants || [];
+          state.deletedInvoices = appState.deletedInvoices || [];
+          
+          localStorage.setItem('ttg_invoices', JSON.stringify(state.invoices));
+          localStorage.setItem('ttg_expenses', JSON.stringify(state.expenses));
+          localStorage.setItem('ttg_restaurants', JSON.stringify(state.restaurants));
+          localStorage.setItem('ttg_deleted_invoices', JSON.stringify(state.deletedInvoices));
+          
+          console.log('Loaded and decrypted data from vault');
+          return true;
+        } else {
+          if (typeof toast === 'function') toast('Failed to decrypt data. Incorrect key?', 'error');
+          return false;
         }
       }
-      return true;
+      return true; // No data yet
     } catch (e) {
-      console.error('Error loading from Supabase:', e);
+      console.error('Error loading from vault:', e);
       if (typeof toast === 'function') toast('Offline mode: Using locally cached data', 'warning');
       return false;
     }

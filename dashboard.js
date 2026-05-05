@@ -438,8 +438,14 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Show quick unlock screen
       showAuthPanel('authQuickLogin');
     } else {
-      // No screen lock set up, enter directly
-      await enterApp(user);
+      // No screen lock set up. Did she skip it?
+      if (!localStorage.getItem('ttg_skipped_webauthn')) {
+        // Intercept: She just clicked the email link! Show her the setup screen.
+        showAuthPanel('authWizard');
+        wizardNext(6);
+      } else {
+        await enterApp(user);
+      }
     }
   } else if (localStorage.getItem('ttg_has_account')) {
     // Had account before (formatted phone / new browser) — show password login
@@ -509,7 +515,7 @@ function wizardNext(step) {
   }
 
   // Hide all steps, show target
-  for (let i = 1; i <= 5; i++) {
+  for (let i = 1; i <= 6; i++) {
     const el = document.getElementById('wizStep' + i);
     if (el) el.style.display = 'none';
   }
@@ -565,17 +571,57 @@ async function wizardCreateAccount() {
 
   try {
     await signUp(email, pass);
-    // Also sign in immediately
+    // Also sign in immediately to check if confirmation is needed
     await signIn(email, pass);
+    
+    // E2EE: Derive and store encryption key
+    const jwkKey = await Crypto.deriveKey(pass);
+    localStorage.setItem('ttg_e2e_key', JSON.stringify(jwkKey));
+    
     localStorage.setItem('ttg_has_account', 'true');
-    wizardNext(5);
+    wizardNext(6); // Go to success if no email confirmation needed
   } catch (err) {
-    errorEl.textContent = err.message || 'Could not create account. Please try again.';
-    errorEl.style.display = 'block';
+    if (err.message && err.message.toLowerCase().includes('email not confirmed')) {
+      // Email confirmation is required
+      wizardNext(5);
+    } else {
+      errorEl.textContent = err.message || 'Could not create account. Please try again.';
+      errorEl.style.display = 'block';
+    }
   } finally {
     btn.disabled = false;
     document.getElementById('wizCreateText').style.display = 'inline';
     document.getElementById('wizCreateSpinner').style.display = 'none';
+  }
+}
+
+async function wizardCheckEmailConfirmed() {
+  const email = document.getElementById('wizEmail').value.trim();
+  const pass = document.getElementById('wizPassword').value;
+  const btn = document.getElementById('btnEmailConfirmed');
+  const errorEl = document.getElementById('wizEmailConfirmError');
+  
+  btn.disabled = true;
+  document.getElementById('btnEmailConfirmText').style.display = 'none';
+  document.getElementById('btnEmailConfirmSpinner').style.display = 'inline-block';
+  errorEl.style.display = 'none';
+
+  try {
+    await signIn(email, pass);
+    
+    // E2EE: Derive and store encryption key
+    const jwkKey = await Crypto.deriveKey(pass);
+    localStorage.setItem('ttg_e2e_key', JSON.stringify(jwkKey));
+    
+    localStorage.setItem('ttg_has_account', 'true');
+    wizardNext(6);
+  } catch (err) {
+    errorEl.textContent = 'Email is not confirmed yet. Please check your inbox and click the link.';
+    errorEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    document.getElementById('btnEmailConfirmText').style.display = 'inline';
+    document.getElementById('btnEmailConfirmSpinner').style.display = 'none';
   }
 }
 
@@ -614,6 +660,7 @@ async function wizardSetupScreenLock() {
 }
 
 async function wizardFinish() {
+  localStorage.setItem('ttg_skipped_webauthn', 'true');
   const user = await getCurrentUser();
   if (user) {
     await enterApp(user);
@@ -669,6 +716,11 @@ async function handlePasswordLogin() {
 
   try {
     await signIn(email, password);
+    
+    // E2EE: Derive and store encryption key
+    const jwkKey = await Crypto.deriveKey(password);
+    localStorage.setItem('ttg_e2e_key', JSON.stringify(jwkKey));
+    
     localStorage.setItem('ttg_has_account', 'true');
     const user = await getCurrentUser();
     if (user) await enterApp(user);
@@ -686,6 +738,7 @@ async function handleLogout() {
   customConfirm('Are you sure you want to sign out?', 'Sign Out', 'Yes, Sign Out', false, async () => {
     await signOut();
     DB.clearLocalData();
+    localStorage.removeItem('ttg_e2e_key'); // Clear encryption key from memory
     document.getElementById('appShell').style.display = 'none';
     document.getElementById('authScreen').style.display = 'flex';
     document.getElementById('userDropdown').classList.remove('open');
