@@ -1259,3 +1259,339 @@ tbody tr:hover {
   color: var(--text-3);
   font-size: .88rem;
 }
+
+/* ── Auth Screen ── */
+.auth-screen {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, var(--green-900) 0%, var(--green-700) 40%, var(--green-500) 100%);
+  z-index: 999999;
+  animation: fadeIn .5s var(--ease);
+}
+
+.auth-card {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 40px 36px 32px;
+  width: 90%;
+  max-width: 400px;
+  box-shadow: var(--shadow-xl), 0 0 80px rgba(0,0,0,.2);
+  animation: authSlideUp .5s var(--ease);
+}
+
+@keyframes authSlideUp {
+  from { opacity: 0; transform: translateY(30px) scale(.96); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.auth-logo {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.auth-logo img {
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
+  object-fit: cover;
+  box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  margin: 0 auto;
+}
+
+.auth-title {
+  text-align: center;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--green-800);
+  margin-bottom: 2px;
+}
+
+.auth-subtitle {
+  text-align: center;
+  font-size: .85rem;
+  color: var(--text-2);
+  margin-bottom: 28px;
+}
+
+.auth-field {
+  margin-bottom: 18px;
+}
+
+.auth-field label {
+  display: block;
+  font-size: .82rem;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 6px;
+}
+
+.auth-btn {
+  width: 100%;
+  padding: 13px;
+  font-size: 1rem;
+  justify-content: center;
+  margin-top: 6px;
+  position: relative;
+}
+
+.auth-btn:disabled {
+  opacity: .7;
+  cursor: wait;
+}
+
+.auth-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid rgba(255,255,255,.3);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin .6s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.auth-error {
+  background: var(--danger-lt);
+  color: #991b1b;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: .85rem;
+  margin-bottom: 16px;
+  border: 1px solid rgba(239,68,68,.2);
+}
+
+.auth-toggle {
+  text-align: center;
+  margin-top: 20px;
+  font-size: .85rem;
+  color: var(--text-2);
+}
+
+.auth-toggle a {
+  color: var(--green-700);
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+.auth-toggle a:hover {
+  text-decoration: underline;
+}
+
+/* ── User Menu ── */
+.user-menu {
+  position: relative;
+}
+
+.user-avatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--green-500), var(--green-800));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: .85rem;
+  cursor: pointer;
+  border: none;
+  transition: transform .2s var(--ease), box-shadow .2s;
+}
+
+.user-avatar:hover {
+  transform: scale(1.08);
+  box-shadow: 0 2px 10px rgba(76,175,80,.35);
+}
+
+.user-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lg);
+  min-width: 200px;
+  padding: 10px 0;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: all .2s var(--ease);
+  z-index: 200;
+}
+
+.user-dropdown.open {
+  opacity: 1;
+  pointer-events: all;
+  transform: translateY(0);
+}
+
+.user-dropdown-email {
+  padding: 6px 16px;
+  font-size: .8rem;
+  color: var(--text-2);
+  font-weight: 500;
+  word-break: break-all;
+}
+
+.user-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 16px;
+  font-size: .88rem;
+  color: var(--danger);
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background .15s;
+}
+
+.user-dropdown-item:hover {
+  background: var(--danger-lt);
+}
+
+/* ── Onboarding Wizard ── */
+.auth-wizard-card {
+  max-width: 440px;
+}
+
+.wizard-step {
+  animation: authSlideUp .4s var(--ease);
+}
+
+.wizard-text {
+  font-size: .9rem;
+  color: var(--text-2);
+  line-height: 1.6;
+  margin-bottom: 12px;
+  text-align: center;
+}
+
+.wizard-step-badge {
+  display: inline-block;
+  background: var(--green-50);
+  color: var(--green-700);
+  font-size: .72rem;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 20px;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+  margin-bottom: 16px;
+  text-align: center;
+  width: fit-content;
+  margin-left: auto;
+  margin-right: auto;
+  display: block;
+  width: fit-content;
+}
+
+.wizard-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--info-lt);
+  color: var(--info);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+}
+
+.wizard-nav {
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  margin-top: 20px;
+}
+
+.wizard-nav .btn {
+  flex: 1;
+}
+
+/* Security Features */
+.security-features {
+  margin: 16px 0 8px;
+  text-align: left;
+}
+
+.security-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.security-item:last-child {
+  border-bottom: none;
+}
+
+.security-check {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--green-50);
+  color: var(--green-700);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: .85rem;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.security-item strong {
+  display: block;
+  font-size: .88rem;
+  color: var(--text);
+  margin-bottom: 2px;
+}
+
+.security-item p {
+  font-size: .82rem;
+  color: var(--text-2);
+  line-height: 1.45;
+  margin: 0;
+}
+
+/* Success */
+.wizard-success-icon {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--green-50);
+  color: var(--green-700);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 16px;
+}
+
+.wizard-locksetup {
+  margin-top: 20px;
+  padding: 20px;
+  background: var(--surface-2);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  text-align: center;
+}
+
+.wizard-skip {
+  display: inline-block;
+  margin-top: 12px;
+  font-size: .82rem;
+  color: var(--text-2);
+}
+
+.wizard-skip:hover {
+  color: var(--text);
+}

@@ -3,3 +3,41 @@ const supabaseKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 
 // Initialize the Supabase client
 const supabaseClient = window.supabase ? window.supabase.createClient(supabaseUrl, supabaseKey) : null;
+
+/* ══ Auth Helpers ══ */
+let currentUser = null;
+
+async function getCurrentUser() {
+  if (!supabaseClient) return null;
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  currentUser = session?.user || null;
+  return currentUser;
+}
+
+function getUserId() {
+  return currentUser?.id || null;
+}
+
+async function signUp(email, password) {
+  if (!supabaseClient) throw new Error('Supabase not available');
+  const { data, error } = await supabaseClient.auth.signUp({ email, password });
+  if (error) throw error;
+  currentUser = data.user;
+  return data;
+}
+
+async function signIn(email, password) {
+  if (!supabaseClient) throw new Error('Supabase not available');
+  const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+  currentUser = data.user;
+  return data;
+}
+
+async function signOut() {
+  if (!supabaseClient) return;
+  await supabaseClient.auth.signOut();
+  currentUser = null;
+  // Clear all local data on sign out
+  ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices', 'ttg_last_page'].forEach(k => localStorage.removeItem(k));
+}

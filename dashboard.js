@@ -429,6 +429,45 @@ document.addEventListener('DOMContentLoaded', async () => {
     toggleReportDate();
   }
   
+  // ═══ Auth check ═══
+  const user = await getCurrentUser();
+  if (user) {
+    // Has active session — check for WebAuthn quick unlock
+    const credId = localStorage.getItem('ttg_webauthn_cred');
+    if (credId && window.PublicKeyCredential) {
+      // Show quick unlock screen
+      showAuthPanel('authQuickLogin');
+    } else {
+      // No screen lock set up, enter directly
+      await enterApp(user);
+    }
+  } else if (localStorage.getItem('ttg_has_account')) {
+    // Had account before (formatted phone / new browser) — show password login
+    showAuthPanel('authPasswordLogin');
+  } else {
+    // First time ever — show onboarding wizard
+    showAuthPanel('authWizard');
+    document.getElementById('wizStep1').style.display = 'block';
+  }
+});
+
+function showAuthPanel(panelId) {
+  ['authQuickLogin', 'authPasswordLogin', 'authWizard'].forEach(id => {
+    document.getElementById(id).style.display = 'none';
+  });
+  document.getElementById(panelId).style.display = 'block';
+}
+
+async function enterApp(user) {
+  const email = user.email || '';
+  const initials = email.split('@')[0].slice(0, 2).toUpperCase() || 'U';
+  document.getElementById('userInitials').textContent = initials;
+  document.getElementById('userDropdownEmail').textContent = email;
+
+  document.getElementById('authScreen').style.display = 'none';
+  document.getElementById('appShell').style.display = 'flex';
+
+  DB.clearLocalData();
   if (typeof DB !== 'undefined' && DB.loadFromSupabase) {
     await DB.loadFromSupabase();
   }
@@ -439,4 +478,233 @@ document.addEventListener('DOMContentLoaded', async () => {
   navigateTo(lastPage);
   
   if (typeof checkInvoiceDraft === 'function') checkInvoiceDraft();
+}
+
+/* ══ Onboarding Wizard ══ */
+function wizardNext(step) {
+  // Validate before advancing
+  if (step === 3) {
+    const emailInput = document.getElementById('wizEmail');
+    const email = emailInput.value.trim();
+    const errorEl = document.getElementById('wizEmailError');
+    
+    if (!email) {
+      errorEl.textContent = 'Email is required to create your account.';
+      errorEl.style.display = 'block';
+      emailInput.style.borderColor = 'var(--danger)';
+      emailInput.classList.add('shake');
+      setTimeout(() => emailInput.classList.remove('shake'), 400);
+      return;
+    }
+    if (!email.includes('@') || !email.includes('.')) {
+      errorEl.textContent = 'Please enter a valid email address.';
+      errorEl.style.display = 'block';
+      emailInput.style.borderColor = 'var(--danger)';
+      emailInput.classList.add('shake');
+      setTimeout(() => emailInput.classList.remove('shake'), 400);
+      return;
+    }
+    errorEl.style.display = 'none';
+    emailInput.style.borderColor = 'var(--border)';
+  }
+
+  // Hide all steps, show target
+  for (let i = 1; i <= 5; i++) {
+    const el = document.getElementById('wizStep' + i);
+    if (el) el.style.display = 'none';
+  }
+  const target = document.getElementById('wizStep' + step);
+  if (target) {
+    target.style.display = 'block';
+    target.style.animation = 'authSlideUp .4s cubic-bezier(.4, 0, .2, 1)';
+  }
+}
+
+async function wizardCreateAccount() {
+  const email = document.getElementById('wizEmail').value.trim();
+  const passInput = document.getElementById('wizPassword');
+  const confirmInput = document.getElementById('wizPasswordConfirm');
+  const pass = passInput.value;
+  const confirm = confirmInput.value;
+  const errorEl = document.getElementById('wizPassError');
+  const btn = document.getElementById('wizCreateBtn');
+
+  // Reset styles
+  passInput.style.borderColor = 'var(--border)';
+  confirmInput.style.borderColor = 'var(--border)';
+
+  if (!pass) {
+    errorEl.textContent = 'Password is required to secure your data.';
+    errorEl.style.display = 'block';
+    passInput.style.borderColor = 'var(--danger)';
+    passInput.classList.add('shake');
+    setTimeout(() => passInput.classList.remove('shake'), 400);
+    return;
+  }
+  if (pass.length < 6) {
+    errorEl.textContent = 'Password must be at least 6 characters.';
+    errorEl.style.display = 'block';
+    passInput.style.borderColor = 'var(--danger)';
+    passInput.classList.add('shake');
+    setTimeout(() => passInput.classList.remove('shake'), 400);
+    return;
+  }
+  if (pass !== confirm) {
+    errorEl.textContent = 'Passwords do not match. Please try again.';
+    errorEl.style.display = 'block';
+    confirmInput.style.borderColor = 'var(--danger)';
+    confirmInput.classList.add('shake');
+    setTimeout(() => confirmInput.classList.remove('shake'), 400);
+    return;
+  }
+
+  errorEl.style.display = 'none';
+  btn.disabled = true;
+  document.getElementById('wizCreateText').style.display = 'none';
+  document.getElementById('wizCreateSpinner').style.display = 'inline-block';
+
+  try {
+    await signUp(email, pass);
+    // Also sign in immediately
+    await signIn(email, pass);
+    localStorage.setItem('ttg_has_account', 'true');
+    wizardNext(5);
+  } catch (err) {
+    errorEl.textContent = err.message || 'Could not create account. Please try again.';
+    errorEl.style.display = 'block';
+  } finally {
+    btn.disabled = false;
+    document.getElementById('wizCreateText').style.display = 'inline';
+    document.getElementById('wizCreateSpinner').style.display = 'none';
+  }
+}
+
+async function wizardSetupScreenLock() {
+  if (!window.PublicKeyCredential) {
+    toast('Screen lock not supported on this device. You can still use email & password.', 'warning');
+    wizardFinish();
+    return;
+  }
+  try {
+    const challenge = new Uint8Array(32);
+    crypto.getRandomValues(challenge);
+    const userId = new Uint8Array(16);
+    crypto.getRandomValues(userId);
+
+    const credential = await navigator.credentials.create({
+      publicKey: {
+        challenge,
+        rp: { name: "Town Treasure" },
+        user: { id: userId, name: "Veronicah", displayName: "Veronicah" },
+        pubKeyCredParams: [{ type: "public-key", alg: -7 }, { type: "public-key", alg: -257 }],
+        authenticatorSelection: { authenticatorAttachment: "platform", userVerification: "required" },
+        timeout: 60000
+      }
+    });
+
+    if (credential) {
+      localStorage.setItem('ttg_webauthn_cred', bufferToBase64url(credential.rawId));
+      toast('Screen lock set up successfully!');
+    }
+  } catch (err) {
+    console.error('WebAuthn setup error:', err);
+    toast('Could not set up screen lock. You can use email & password.', 'warning');
+  }
+  wizardFinish();
+}
+
+async function wizardFinish() {
+  const user = await getCurrentUser();
+  if (user) {
+    await enterApp(user);
+  }
+}
+
+/* ══ Quick Unlock (Returning User) ══ */
+async function quickUnlock() {
+  const credIdStr = localStorage.getItem('ttg_webauthn_cred');
+  if (!credIdStr) {
+    const user = await getCurrentUser();
+    if (user) await enterApp(user);
+    return;
+  }
+  try {
+    const challenge = new Uint8Array(32);
+    crypto.getRandomValues(challenge);
+    const assertion = await navigator.credentials.get({
+      publicKey: {
+        challenge,
+        allowCredentials: [{ type: 'public-key', id: base64urlToBuffer(credIdStr) }],
+        userVerification: 'required',
+        timeout: 60000
+      }
+    });
+    if (assertion) {
+      const user = await getCurrentUser();
+      if (user) await enterApp(user);
+    }
+  } catch (err) {
+    console.error('Quick unlock failed:', err);
+    toast('Screen lock failed. Try email & password.', 'error');
+  }
+}
+
+function showPasswordLogin() {
+  showAuthPanel('authPasswordLogin');
+}
+
+/* ══ Password Login (Returning User) ══ */
+async function handlePasswordLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const password = document.getElementById('loginPassword').value;
+  if (!email || !password) return;
+
+  const btnText = document.getElementById('loginBtnText');
+  const spinner = document.getElementById('loginSpinner');
+  const errorEl = document.getElementById('authLoginError');
+
+  btnText.style.display = 'none';
+  spinner.style.display = 'inline-block';
+  errorEl.style.display = 'none';
+
+  try {
+    await signIn(email, password);
+    localStorage.setItem('ttg_has_account', 'true');
+    const user = await getCurrentUser();
+    if (user) await enterApp(user);
+  } catch (err) {
+    errorEl.textContent = err.message || 'Incorrect email or password.';
+    errorEl.style.display = 'block';
+  } finally {
+    btnText.style.display = 'inline';
+    spinner.style.display = 'none';
+  }
+}
+
+/* ══ Logout ══ */
+async function handleLogout() {
+  customConfirm('Are you sure you want to sign out?', 'Sign Out', 'Yes, Sign Out', false, async () => {
+    await signOut();
+    DB.clearLocalData();
+    document.getElementById('appShell').style.display = 'none';
+    document.getElementById('authScreen').style.display = 'flex';
+    document.getElementById('userDropdown').classList.remove('open');
+    // Determine which auth screen to show
+    if (localStorage.getItem('ttg_webauthn_cred')) {
+      showAuthPanel('authQuickLogin');
+    } else {
+      showAuthPanel('authPasswordLogin');
+    }
+  });
+}
+
+function toggleUserDropdown() {
+  document.getElementById('userDropdown').classList.toggle('open');
+}
+
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('userMenu');
+  if (menu && !menu.contains(e.target)) {
+    document.getElementById('userDropdown').classList.remove('open');
+  }
 });

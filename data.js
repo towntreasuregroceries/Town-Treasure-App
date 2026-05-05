@@ -31,13 +31,17 @@ const DB = {
   
   async syncToSupabase(table, data) {
     if (!supabaseClient) return;
+    const uid = getUserId();
+    if (!uid) return; // Not logged in, skip sync
     try {
-      // Clear and re-insert for sync. For production with multiple users, use granular operations.
-      const { error: delError } = await supabaseClient.from(table).delete().neq('id', '0');
+      // Delete only this user's rows, then re-insert
+      const { error: delError } = await supabaseClient.from(table).delete().eq('user_id', uid);
       if (delError) throw delError;
       
       if (data && data.length > 0) {
-        const { error: insError } = await supabaseClient.from(table).insert(data);
+        // Attach user_id to every row
+        const withUser = data.map(row => ({ ...row, user_id: uid }));
+        const { error: insError } = await supabaseClient.from(table).insert(withUser);
         if (insError) throw insError;
       }
     } catch (e) {
@@ -52,11 +56,14 @@ const DB = {
   
   async loadFromSupabase() {
     if (!supabaseClient) return false;
+    const uid = getUserId();
+    if (!uid) return false; // Not logged in
     try {
       const tables = ['restaurants', 'invoices', 'expenses', 'deleted_invoices'];
       for (const table of tables) {
         try {
-          const { data, error } = await supabaseClient.from(table).select('*');
+          // RLS automatically filters by user_id, but we also filter explicitly
+          const { data, error } = await supabaseClient.from(table).select('*').eq('user_id', uid);
           if (error) { console.warn(`Table '${table}' not available:`, error.message); continue; }
           const stateKey = table === 'deleted_invoices' ? 'deletedInvoices' : table;
           const lsKey = table === 'deleted_invoices' ? 'ttg_deleted_invoices' : `ttg_${table}`;
@@ -72,6 +79,14 @@ const DB = {
       if (typeof toast === 'function') toast('Offline mode: Using locally cached data', 'warning');
       return false;
     }
+  },
+
+  clearLocalData() {
+    state.restaurants = [];
+    state.invoices = [];
+    state.expenses = [];
+    state.deletedInvoices = [];
+    ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices'].forEach(k => localStorage.removeItem(k));
   }
 };
 
@@ -80,6 +95,7 @@ function fmtMoney(n) { return Number(n || 0).toLocaleString('en-KE', { minimumFr
 function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
 function toast(msg, type = 'success') {
   const c = document.getElementById('toastContainer');
+  if (!c) return;
   const t = document.createElement('div');
   t.className = 'toast ' + type;
   t.textContent = msg;
