@@ -700,6 +700,11 @@ function showPasswordLogin() {
   showAuthPanel('authPasswordLogin');
 }
 
+function showAuthWizard() {
+  showAuthPanel('authWizard');
+  wizardNext(1);
+}
+
 /* ══ Password Login (Returning User) ══ */
 async function handlePasswordLogin() {
   const email = document.getElementById('loginEmail').value.trim();

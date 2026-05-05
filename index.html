@@ -64,6 +64,9 @@
         <span id="loginSpinner" class="auth-spinner" style="display:none;"></span>
       </button>
     </form>
+    <p class="auth-toggle" style="margin-top:20px; text-align:center;">
+      <a href="#" onclick="showAuthWizard(); return false;" style="font-size:.85rem; color:var(--text-2); text-decoration:none;">Don't have an account? <strong style="color:var(--primary);">Sign up</strong></a>
+    </p>
   </div>
 
   <!-- ── FIRST TIME: Onboarding Wizard ── -->
@@ -78,6 +81,9 @@
       <p class="wizard-text">Welcome to <strong>Town Treasure</strong> — your personal business companion for invoices, bookkeeping, and financial reports.</p>
       <p class="wizard-text">Let's get you set up in just a moment. It's quick and easy!</p>
       <button class="btn btn-primary auth-btn" onclick="wizardNext(2)">Let's Get Started →</button>
+      <p class="auth-toggle" style="margin-top:20px; text-align:center;">
+        <a href="#" onclick="showPasswordLogin(); return false;" style="font-size:.85rem; color:var(--text-2); text-decoration:none;">Already have an account? <strong style="color:var(--primary);">Log in</strong></a>
+      </p>
     </div>
 
     <!-- Step 2: Email -->
