@@ -46,7 +46,7 @@ function refreshDashboard() {
   if (topRestChartInst) topRestChartInst.destroy();
   const ctx2 = document.getElementById('topRestaurantsChart');
   if (ctx2 && sorted.length) {
-    const colors = ['#4CAF50','#66BB6A','#81C784','#A5D6A7','#C8E6C9'];
+    const colors = ['#f43f5e', '#8b5cf6', '#3b82f6', '#10b981', '#f59e0b'];
     topRestChartInst = new Chart(ctx2, {
       type: 'doughnut', data: {
         labels: sorted.map(s => s[0]),
