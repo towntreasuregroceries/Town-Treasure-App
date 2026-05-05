@@ -602,8 +602,8 @@ async function verifyEmailCode() {
   const btn = document.getElementById('btnEmailConfirmed');
   const errorEl = document.getElementById('wizEmailConfirmError');
 
-  if (code.length !== 6) {
-    errorEl.textContent = 'Please enter the 6-digit code from your email.';
+  if (code.length < 6) {
+    errorEl.textContent = 'Please enter the code exactly as it appears in your email.';
     errorEl.style.display = 'block';
     return;
   }
