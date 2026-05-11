@@ -288,78 +288,121 @@ function deleteInvoice(id) {
 }
 
 /* ══ Recycle Bin ══ */
+let binTab = 'invoices';
+function switchBinTab(tab, btn) {
+  binTab = tab;
+  document.querySelectorAll('#page-recycle-bin .tab-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  renderBin();
+}
+
 function renderBin() {
   const body = document.getElementById('binListBody');
-  const items = DB.deletedInvoices.slice().reverse();
+  const header = document.getElementById('binTableHeader');
   const actionsBar = document.getElementById('binActionsBar');
   const selectAll = document.getElementById('binSelectAll');
   if (selectAll) selectAll.checked = false;
   if (actionsBar) actionsBar.style.display = 'none';
 
-  if (!items.length) {
-    body.innerHTML = '<tr><td colspan="7" class="empty-state"><div class="bin-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></div><h3>Recycle Bin is empty</h3><p>Deleted invoices will appear here for recovery.</p></td></tr>';
-    return;
-  }
-  body.innerHTML = items.map(i => {
-    const deletedDate = i.deletedAt ? fmtDate(i.deletedAt.slice(0, 10)) : '—';
-    return `<tr>
+  let items = [];
+  
+  if (binTab === 'invoices') {
+    items = DB.deletedInvoices.slice().reverse();
+    header.innerHTML = `<tr><th style="width:40px;"><input type="checkbox" id="binSelectAll" onchange="toggleBinSelectAll(this)" title="Select all"></th><th>Invoice #</th><th>Restaurant</th><th>Date</th><th>Total</th><th>Deleted On</th><th>Action</th></tr>`;
+    
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="7" class="empty-state"><div class="bin-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></div><h3>No deleted invoices</h3></td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(i => `<tr>
       <td><input type="checkbox" class="bin-checkbox" value="${i.id}" onchange="updateBinSelection()"></td>
       <td><strong>${i.number}</strong></td>
       <td>${i.restaurantName || 'Unknown'}</td>
       <td>${fmtDate(i.date)}</td>
       <td>KES ${fmtMoney(i.totalSell)}</td>
-      <td><span style="color:var(--text-2);font-size:.85rem;">${deletedDate}</span></td>
-      <td>
-        <button class="btn btn-sm btn-primary" onclick="restoreInvoice('${i.id}')">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-          Restore
-        </button>
-      </td>
-    </tr>`;
-  }).join('');
+      <td><span style="color:var(--text-2);font-size:.85rem;">${i.deletedAt ? fmtDate(i.deletedAt.slice(0, 10)) : '—'}</span></td>
+      <td><button class="btn btn-sm btn-primary" onclick="restoreInvoice('${i.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Restore</button></td>
+    </tr>`).join('');
+  } 
+  else if (binTab === 'staff') {
+    items = DB.deletedStaff.slice().reverse();
+    header.innerHTML = `<tr><th style="width:40px;"><input type="checkbox" id="binSelectAll" onchange="toggleBinSelectAll(this)" title="Select all"></th><th>Name</th><th>Role</th><th>Salary</th><th>Deleted On</th><th>Action</th></tr>`;
+    
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="6" class="empty-state"><div class="bin-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></div><h3>No deleted staff</h3></td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(s => `<tr>
+      <td><input type="checkbox" class="bin-checkbox" value="${s.id}" onchange="updateBinSelection()"></td>
+      <td><strong>${s.name}</strong></td>
+      <td>${s.role || '—'}</td>
+      <td>KES ${fmtMoney(s.salary)}</td>
+      <td><span style="color:var(--text-2);font-size:.85rem;">${s.deletedAt ? fmtDate(s.deletedAt.slice(0, 10)) : '—'}</span></td>
+      <td><button class="btn btn-sm btn-primary" onclick="restoreStaff('${s.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Restore</button></td>
+    </tr>`).join('');
+  }
+  else if (binTab === 'pricelists') {
+    items = DB.deletedPriceLists.slice().reverse();
+    header.innerHTML = `<tr><th style="width:40px;"><input type="checkbox" id="binSelectAll" onchange="toggleBinSelectAll(this)" title="Select all"></th><th>Name</th><th>Items</th><th>Deleted On</th><th>Action</th></tr>`;
+    
+    if (!items.length) {
+      body.innerHTML = '<tr><td colspan="5" class="empty-state"><div class="bin-empty-icon"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="color:var(--text-3)"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/></svg></div><h3>No deleted price lists</h3></td></tr>';
+      return;
+    }
+    body.innerHTML = items.map(p => `<tr>
+      <td><input type="checkbox" class="bin-checkbox" value="${p.id}" onchange="updateBinSelection()"></td>
+      <td><strong>${p.name}</strong></td>
+      <td>${p.items ? p.items.length : 0} items</td>
+      <td><span style="color:var(--text-2);font-size:.85rem;">${p.deletedAt ? fmtDate(p.deletedAt.slice(0, 10)) : '—'}</span></td>
+      <td><button class="btn btn-sm btn-primary" onclick="restorePriceList('${p.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Restore</button></td>
+    </tr>`).join('');
+  }
 }
 
 function restoreInvoice(id) {
   const bin = DB.deletedInvoices;
   const inv = bin.find(i => i.id === id);
   if (!inv) return toast('Invoice not found in bin.', 'error');
-
-  // Remove bin-only fields and restore
   const restored = { ...inv };
   restored.status = inv.originalStatus || inv.status || 'pending';
-  delete restored.deletedAt;
-  delete restored.originalStatus;
-
-  const list = DB.invoices;
-  list.push(restored);
-  DB.invoices = list;
+  delete restored.deletedAt; delete restored.originalStatus;
+  const list = DB.invoices; list.push(restored); DB.invoices = list;
   DB.deletedInvoices = bin.filter(i => i.id !== id);
-  renderBin();
-  toast('Invoice ' + restored.number + ' restored!');
+  renderBin(); toast('Invoice restored!');
 }
 
-function restoreSelectedInvoices() {
+function restoreSelectedBinItems() {
   const checkboxes = document.querySelectorAll('.bin-checkbox:checked');
-  if (!checkboxes.length) return toast('No invoices selected.', 'error');
-
+  if (!checkboxes.length) return toast('No items selected.', 'error');
   const ids = Array.from(checkboxes).map(cb => cb.value);
-  customConfirm(`Restore ${ids.length} selected invoice(s) back to active invoices?`, 'Restore Invoices', 'Yes, Restore', false, () => {
-    const bin = DB.deletedInvoices;
-    const list = DB.invoices;
-    ids.forEach(id => {
-      const inv = bin.find(i => i.id === id);
-      if (inv) {
-        const restored = { ...inv };
-        restored.status = inv.originalStatus || inv.status || 'pending';
-        delete restored.deletedAt;
-        delete restored.originalStatus;
-        list.push(restored);
-      }
-    });
-    DB.invoices = list;
-    DB.deletedInvoices = bin.filter(i => !ids.includes(i.id));
+  
+  customConfirm(`Restore ${ids.length} selected item(s)?`, 'Restore Items', 'Yes, Restore', false, () => {
+    if (binTab === 'invoices') {
+      const bin = DB.deletedInvoices; const list = DB.invoices;
+      ids.forEach(id => {
+        const inv = bin.find(i => i.id === id);
+        if (inv) { const r = { ...inv }; r.status = inv.originalStatus || inv.status || 'pending'; delete r.deletedAt; delete r.originalStatus; list.push(r); }
+      });
+      DB.invoices = list; DB.deletedInvoices = bin.filter(i => !ids.includes(i.id));
+    } 
+    else if (binTab === 'staff') {
+      const bin = DB.deletedStaff; const list = DB.staff;
+      ids.forEach(id => {
+        const s = bin.find(i => i.id === id);
+        if (s) { const r = { ...s }; delete r.deletedAt; list.push(r); }
+      });
+      DB.staff = list; DB.deletedStaff = bin.filter(i => !ids.includes(i.id));
+    }
+    else if (binTab === 'pricelists') {
+      const bin = DB.deletedPriceLists; const list = DB.priceLists;
+      ids.forEach(id => {
+        const p = bin.find(i => i.id === id);
+        if (p) { const r = { ...p }; delete r.deletedAt; list.push(r); }
+      });
+      DB.priceLists = list; DB.deletedPriceLists = bin.filter(i => !ids.includes(i.id));
+    }
     renderBin();
-    toast(ids.length + ' invoice(s) restored!');
+    toast(ids.length + ' item(s) restored!');
   });
 }
 

@@ -72,18 +72,36 @@ const state = {
   invoices: JSON.parse(localStorage.getItem('ttg_invoices') || '[]'),
   expenses: JSON.parse(localStorage.getItem('ttg_expenses') || '[]'),
   deletedInvoices: JSON.parse(localStorage.getItem('ttg_deleted_invoices') || '[]'),
+  staff: JSON.parse(localStorage.getItem('ttg_staff') || '[]'),
+  salaryPayments: JSON.parse(localStorage.getItem('ttg_salary_payments') || '[]'),
+  recurringExpenses: JSON.parse(localStorage.getItem('ttg_recurring_expenses') || '[]'),
+  priceLists: JSON.parse(localStorage.getItem('ttg_price_lists') || '[]'),
+  deletedStaff: JSON.parse(localStorage.getItem('ttg_deleted_staff') || '[]'),
+  deletedPriceLists: JSON.parse(localStorage.getItem('ttg_deleted_pricelists') || '[]'),
   nextInvNum: 1001
 };
 
 const DB = {
   get restaurants() { return state.restaurants; },
-  set restaurants(v) { state.restaurants = v; localStorage.setItem('ttg_restaurants', JSON.stringify(v)); this.syncToSupabase('restaurants', v); },
+  set restaurants(v) { state.restaurants = v; localStorage.setItem('ttg_restaurants', JSON.stringify(v)); this.syncToSupabase(); },
   get invoices() { return state.invoices; },
-  set invoices(v) { state.invoices = v; localStorage.setItem('ttg_invoices', JSON.stringify(v)); this.syncToSupabase('invoices', v); },
+  set invoices(v) { state.invoices = v; localStorage.setItem('ttg_invoices', JSON.stringify(v)); this.syncToSupabase(); },
   get expenses() { return state.expenses; },
-  set expenses(v) { state.expenses = v; localStorage.setItem('ttg_expenses', JSON.stringify(v)); this.syncToSupabase('expenses', v); },
+  set expenses(v) { state.expenses = v; localStorage.setItem('ttg_expenses', JSON.stringify(v)); this.syncToSupabase(); },
   get deletedInvoices() { return state.deletedInvoices; },
-  set deletedInvoices(v) { state.deletedInvoices = v; localStorage.setItem('ttg_deleted_invoices', JSON.stringify(v)); this.syncToSupabase('deleted_invoices', v); },
+  set deletedInvoices(v) { state.deletedInvoices = v; localStorage.setItem('ttg_deleted_invoices', JSON.stringify(v)); this.syncToSupabase(); },
+  get staff() { return state.staff; },
+  set staff(v) { state.staff = v; localStorage.setItem('ttg_staff', JSON.stringify(v)); this.syncToSupabase(); },
+  get salaryPayments() { return state.salaryPayments; },
+  set salaryPayments(v) { state.salaryPayments = v; localStorage.setItem('ttg_salary_payments', JSON.stringify(v)); this.syncToSupabase(); },
+  get recurringExpenses() { return state.recurringExpenses; },
+  set recurringExpenses(v) { state.recurringExpenses = v; localStorage.setItem('ttg_recurring_expenses', JSON.stringify(v)); this.syncToSupabase(); },
+  get priceLists() { return state.priceLists; },
+  set priceLists(v) { state.priceLists = v; localStorage.setItem('ttg_price_lists', JSON.stringify(v)); this.syncToSupabase(); },
+  get deletedStaff() { return state.deletedStaff; },
+  set deletedStaff(v) { state.deletedStaff = v; localStorage.setItem('ttg_deleted_staff', JSON.stringify(v)); this.syncToSupabase(); },
+  get deletedPriceLists() { return state.deletedPriceLists; },
+  set deletedPriceLists(v) { state.deletedPriceLists = v; localStorage.setItem('ttg_deleted_pricelists', JSON.stringify(v)); this.syncToSupabase(); },
   
   get nextInvNum() {
     if (state.invoices.length === 0) return state.nextInvNum;
@@ -114,7 +132,13 @@ const DB = {
         invoices: state.invoices,
         expenses: state.expenses,
         restaurants: state.restaurants,
-        deletedInvoices: state.deletedInvoices
+        deletedInvoices: state.deletedInvoices,
+        staff: state.staff,
+        salaryPayments: state.salaryPayments,
+        recurringExpenses: state.recurringExpenses,
+        priceLists: state.priceLists,
+        deletedStaff: state.deletedStaff,
+        deletedPriceLists: state.deletedPriceLists
       };
 
       // 2. Encrypt it completely
@@ -168,11 +192,23 @@ const DB = {
           state.expenses = appState.expenses || [];
           state.restaurants = appState.restaurants || [];
           state.deletedInvoices = appState.deletedInvoices || [];
+          state.staff = appState.staff || [];
+          state.salaryPayments = appState.salaryPayments || [];
+          state.recurringExpenses = appState.recurringExpenses || [];
+          state.priceLists = appState.priceLists || [];
+          state.deletedStaff = appState.deletedStaff || [];
+          state.deletedPriceLists = appState.deletedPriceLists || [];
           
           localStorage.setItem('ttg_invoices', JSON.stringify(state.invoices));
           localStorage.setItem('ttg_expenses', JSON.stringify(state.expenses));
           localStorage.setItem('ttg_restaurants', JSON.stringify(state.restaurants));
           localStorage.setItem('ttg_deleted_invoices', JSON.stringify(state.deletedInvoices));
+          localStorage.setItem('ttg_staff', JSON.stringify(state.staff));
+          localStorage.setItem('ttg_salary_payments', JSON.stringify(state.salaryPayments));
+          localStorage.setItem('ttg_recurring_expenses', JSON.stringify(state.recurringExpenses));
+          localStorage.setItem('ttg_price_lists', JSON.stringify(state.priceLists));
+          localStorage.setItem('ttg_deleted_staff', JSON.stringify(state.deletedStaff));
+          localStorage.setItem('ttg_deleted_pricelists', JSON.stringify(state.deletedPriceLists));
           
           console.log('Loaded and decrypted data from vault');
           return true;
@@ -194,7 +230,13 @@ const DB = {
     state.invoices = [];
     state.expenses = [];
     state.deletedInvoices = [];
-    ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices'].forEach(k => localStorage.removeItem(k));
+    state.staff = [];
+    state.salaryPayments = [];
+    state.recurringExpenses = [];
+    state.priceLists = [];
+    state.deletedStaff = [];
+    state.deletedPriceLists = [];
+    ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices', 'ttg_staff', 'ttg_salary_payments', 'ttg_recurring_expenses', 'ttg_price_lists', 'ttg_deleted_staff', 'ttg_deleted_pricelists'].forEach(k => localStorage.removeItem(k));
   }
 };
 

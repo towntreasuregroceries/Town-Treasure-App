@@ -256,6 +256,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M9 8h1M9 12h1M9 16h1M14 8h1M14 12h1M14 16h1"/><rect x="5" y="2" width="14" height="19" rx="1"/></svg>
         Restaurants
       </a>
+      <a class="nav-item" data-page="pricelists" id="nav-pricelists">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><line x1="10" y1="9" x2="8" y2="9"/></svg>
+        Price Lists
+      </a>
       <a class="nav-item" data-page="expenses" id="nav-expenses">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>
         Capital & Expenses
@@ -265,6 +269,10 @@
       <a class="nav-item" data-page="reports" id="nav-reports">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
         Reports
+      </a>
+      <a class="nav-item" data-page="statements" id="nav-statements">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+        Statements
       </a>
 
       <div class="nav-section">Recovery</div>
@@ -326,6 +334,8 @@
           <div class="card-header"><h3>Recent Invoices</h3></div>
           <div class="card-body"><div class="table-wrap"><table><thead><tr><th>Invoice #</th><th>Restaurant</th><th>Date</th><th>Amount</th><th>Profit</th><th>Status</th></tr></thead><tbody id="recentInvoicesBody"></tbody></table></div></div>
         </div>
+        <div id="insightsPanel"></div>
+        <div id="monthlyPnL"></div>
       </div>
 
       <!-- ════════ NEW INVOICE ════════ -->
@@ -455,21 +465,68 @@
         </div>
       </div>
 
-      <!-- ════════ CAPITAL & EXPENSES ════════ -->
+      <!-- ════════ CAPITAL & EXPENSES (Enhanced) ════════ -->
       <div class="page" id="page-expenses">
         <div class="stats-grid" id="capitalStats"></div>
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
-          <div class="tabs" style="margin-bottom:0;border-bottom:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+          <div class="tabs" style="margin-bottom:0;border-bottom:none;flex-wrap:wrap;">
             <button class="tab-btn active" onclick="switchExpenseTab('expenses',this)">Expenses</button>
             <button class="tab-btn" onclick="switchExpenseTab('capital',this)">Capital Input</button>
+            <button class="tab-btn" onclick="switchExpenseTab('salaries',this)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;vertical-align:text-bottom;"><rect x="2" y="7" width="20" height="14" rx="2" ry="2"></rect><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"></path></svg> Monthly Salaries</button>
+            <button class="tab-btn" onclick="switchExpenseTab('recurring',this)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;vertical-align:text-bottom;"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg> Recurring</button>
+            <button class="tab-btn" onclick="switchExpenseTab('personal',this)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:4px;vertical-align:text-bottom;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg> Personal</button>
           </div>
-          <button class="btn btn-primary" onclick="openModal('expenseModal')">
+          <button class="btn btn-primary" id="expenseAddBtn" onclick="openModal('expenseModal')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
             Add Entry
           </button>
         </div>
-        <div class="card">
-          <div class="card-body"><div class="table-wrap"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Amount</th><th>Type</th><th>Actions</th></tr></thead><tbody id="expensesBody"></tbody></table></div></div>
+
+        <!-- Expenses Tab -->
+        <div class="expense-tab-content" id="expTab-expenses">
+          <div class="card"><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Amount</th><th>Type</th><th>Actions</th></tr></thead><tbody id="expensesBody"></tbody></table></div></div></div>
+        </div>
+
+        <!-- Capital Tab -->
+        <div class="expense-tab-content" id="expTab-capital" style="display:none;">
+          <div class="card"><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Amount</th><th>Type</th><th>Actions</th></tr></thead><tbody id="capitalBody"></tbody></table></div></div></div>
+        </div>
+
+        <!-- Monthly Salaries Tab -->
+        <div class="expense-tab-content" id="expTab-salaries" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;flex-wrap:wrap;gap:10px;">
+            <input type="month" class="form-control" id="payrollMonth" style="width:auto;" onchange="renderPayrollTab()">
+            <button class="btn btn-primary" onclick="openStaffModal()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              Add Staff
+            </button>
+          </div>
+          <div class="stats-grid" id="payrollSummary"></div>
+          <div class="card"><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Salary</th><th>Status</th><th>Payment</th><th>Actions</th></tr></thead><tbody id="payrollBody"></tbody></table></div></div></div>
+        </div>
+
+        <!-- Recurring Tab -->
+        <div class="expense-tab-content" id="expTab-recurring" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <p style="color:var(--text-2);font-size:.9rem">Monthly recurring costs — rent, utilities, subscriptions</p>
+            <button class="btn btn-primary" onclick="openRecurringModal()">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              Add Recurring
+            </button>
+          </div>
+          <div class="card"><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Description</th><th>Category</th><th>Amount</th><th>Due Day</th><th>Status</th><th>Actions</th></tr></thead><tbody id="recurringBody"></tbody></table></div></div></div>
+        </div>
+
+        <!-- Personal Tab -->
+        <div class="expense-tab-content" id="expTab-personal" style="display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <p style="color:var(--text-2);font-size:.9rem">Personal expenses — <strong id="personalTotal">KES 0.00</strong> this month</p>
+            <button class="btn btn-primary" onclick="openModal('personalExpenseModal')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+              Add Personal Expense
+            </button>
+          </div>
+          <div class="card"><div class="card-body"><div class="table-wrap"><table><thead><tr><th>Date</th><th>Description</th><th>Category</th><th>Amount</th><th>Actions</th></tr></thead><tbody id="personalBody"></tbody></table></div></div></div>
         </div>
       </div>
 
@@ -524,6 +581,91 @@
         <div id="reportOutput"></div>
       </div>
 
+      <!-- ════════ PRICE LISTS ════════ -->
+      <div class="page" id="page-pricelists">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
+          <p style="color:var(--text-2);font-size:.9rem">Create and manage price lists to share with restaurants</p>
+          <button class="btn btn-primary" onclick="createNewPriceList()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            New Price List
+          </button>
+        </div>
+        <div class="card">
+          <div class="card-body"><div class="table-wrap"><table><thead><tr><th>Name</th><th>Items</th><th>Last Updated</th><th>Status</th><th>Actions</th></tr></thead><tbody id="priceListsBody"></tbody></table></div></div>
+        </div>
+      </div>
+
+      <!-- ════════ PRICE LIST EDITOR ════════ -->
+      <div class="page" id="page-pricelist-edit">
+        <div class="no-print" style="margin-bottom:16px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <button class="btn btn-secondary" onclick="navigateTo('pricelists')">← Back to Price Lists</button>
+          <input type="text" class="form-control" id="plEditName" placeholder="Price List Name" style="flex:1;min-width:200px;font-weight:600;" oninput="triggerPriceListAutoSave()">
+          <select class="form-control" id="plEditStatus" style="width:auto;">
+            <option value="draft">Draft</option>
+            <option value="active">Active</option>
+          </select>
+        </div>
+        <div class="card" style="margin-bottom:16px;">
+          <div class="card-body">
+            <div class="table-wrap">
+              <table class="line-items-table">
+                <thead><tr><th>Item Name</th><th>Category</th><th>Unit</th><th>Price (KES)</th><th>Notes</th><th></th></tr></thead>
+                <tbody id="plItemsBody"></tbody>
+              </table>
+            </div>
+            <div style="display:flex;gap:10px;margin-top:12px;flex-wrap:wrap;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="addPriceListRow()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg> Add Item
+              </button>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="smartImportItems()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Smart Import from Invoices
+              </button>
+            </div>
+          </div>
+        </div>
+        <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;">
+          <button class="btn btn-secondary" onclick="downloadPriceListPDF()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            Download PDF
+          </button>
+          <button class="btn btn-secondary" onclick="sharePriceListWhatsApp()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+            WhatsApp
+          </button>
+          <button class="btn btn-primary" onclick="publishPriceList()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/></svg>
+            Save Price List
+          </button>
+        </div>
+      </div>
+
+      <!-- ════════ STATEMENTS ════════ -->
+      <div class="page" id="page-statements">
+        <div class="card no-print" style="margin-bottom:24px">
+          <div class="card-body">
+            <div style="display:flex;align-items:flex-end;gap:16px;flex-wrap:wrap">
+              <div class="form-group" style="margin-bottom:0"><label>Restaurant</label>
+                <select class="form-control" id="stmtRestaurant"><option value="">Select restaurant…</option></select>
+              </div>
+              <div class="form-group" style="margin-bottom:0"><label>Month</label>
+                <input type="month" class="form-control" id="stmtMonth">
+              </div>
+              <button class="btn btn-primary" onclick="generateStatement()">Generate Statement</button>
+              <button class="btn btn-secondary" onclick="downloadStatementPDF()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                Download PDF
+              </button>
+              <button class="btn btn-secondary" onclick="shareStatementWhatsApp()">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg>
+                WhatsApp
+              </button>
+            </div>
+          </div>
+        </div>
+        <div id="statementOutput"></div>
+      </div>
+
       <!-- ════════ INVOICE VIEW (hidden page) ════════ -->
       <div class="page" id="page-invoice-view">
         <div class="no-print" style="margin-bottom:16px;display:flex;gap:10px">
@@ -554,21 +696,29 @@
           </div>
           <div>
             <h3 style="margin-bottom:4px;">Recycle Bin</h3>
-            <p style="color:var(--text-2);font-size:.85rem;">Deleted invoices are kept here for recovery. To permanently remove, use Supabase.</p>
+            <p style="color:var(--text-2);font-size:.85rem;">Deleted items are kept here for recovery. To permanently remove, use Supabase.</p>
           </div>
         </div>
+
+        <div class="tabs" style="margin-bottom:16px;">
+          <button class="tab-btn active" onclick="switchBinTab('invoices',this)">Invoices</button>
+          <button class="tab-btn" onclick="switchBinTab('staff',this)">Staff</button>
+          <button class="tab-btn" onclick="switchBinTab('pricelists',this)">Price Lists</button>
+        </div>
+
         <div class="bin-actions-bar no-print" id="binActionsBar" style="display:none;">
           <span id="binSelectedCount" style="font-weight:600;color:var(--text);">0 selected</span>
-          <button class="btn btn-primary btn-sm" onclick="restoreSelectedInvoices()">
+          <button class="btn btn-primary btn-sm" onclick="restoreSelectedBinItems()">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
             Restore Selected
           </button>
         </div>
+        
         <div class="card">
           <div class="card-body">
             <div class="table-wrap">
-              <table>
-                <thead>
+              <table id="binTable">
+                <thead id="binTableHeader">
                   <tr>
                     <th style="width:40px;"><input type="checkbox" id="binSelectAll" onchange="toggleBinSelectAll(this)" title="Select all"></th>
                     <th>Invoice #</th>
@@ -576,7 +726,7 @@
                     <th>Date</th>
                     <th>Total</th>
                     <th>Deleted On</th>
-                    <th>Actions</th>
+                    <th>Action</th>
                   </tr>
                 </thead>
                 <tbody id="binListBody"></tbody>
@@ -638,6 +788,82 @@
   </div>
 </div>
 
+<!-- Staff Modal -->
+<div class="modal-overlay" id="staffModal">
+  <div class="modal">
+    <div class="modal-header"><h2 id="staffModalTitle">Add Staff</h2><button onclick="closeModal('staffModal')" class="btn-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="editStaffId">
+      <div class="form-row">
+        <div class="form-group"><label>Full Name</label><input type="text" class="form-control" id="staffName" placeholder="e.g. James Mwangi" required></div>
+        <div class="form-group"><label>Role / Position</label><input type="text" class="form-control" id="staffRole" placeholder="e.g. Driver, Loader"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Monthly Salary (KES)</label><input type="number" class="form-control" id="staffSalary" min="0" step="any" placeholder="15000"></div>
+        <div class="form-group"><label>Phone</label><input type="text" class="form-control" id="staffPhone" placeholder="0712345678"></div>
+      </div>
+      <div class="form-group"><label>Pay Day (day of month)</label><input type="number" class="form-control" id="staffPayDay" min="1" max="31" value="5"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('staffModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveStaff()">Save Staff</button>
+    </div>
+  </div>
+</div>
+
+<!-- Recurring Expense Modal -->
+<div class="modal-overlay" id="recurringModal">
+  <div class="modal">
+    <div class="modal-header"><h2 id="recurringModalTitle">Add Recurring Expense</h2><button onclick="closeModal('recurringModal')" class="btn-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-body">
+      <input type="hidden" id="editRecurringId">
+      <div class="form-group"><label>Description</label><input type="text" class="form-control" id="recurringDesc" placeholder="e.g. Shop Rent, Electricity"></div>
+      <div class="form-row">
+        <div class="form-group"><label>Category</label>
+          <select class="form-control" id="recurringCategory"><option value="rent">Rent</option><option value="utilities">Utilities</option><option value="transport">Transport</option><option value="supplies">Supplies</option><option value="insurance">Insurance</option><option value="subscriptions">Subscriptions</option><option value="other">Other</option></select>
+        </div>
+        <div class="form-group"><label>Amount (KES)</label><input type="number" class="form-control" id="recurringAmount" min="0" step="any" placeholder="25000"></div>
+      </div>
+      <div class="form-group"><label>Due Day (day of month)</label><input type="number" class="form-control" id="recurringDueDay" min="1" max="31" value="1"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('recurringModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="saveRecurring()">Save</button>
+    </div>
+  </div>
+</div>
+
+<!-- Personal Expense Modal -->
+<div class="modal-overlay" id="personalExpenseModal">
+  <div class="modal">
+    <div class="modal-header"><h2>Add Personal Expense</h2><button onclick="closeModal('personalExpenseModal')" class="btn-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
+    <div class="modal-body">
+      <div class="form-group"><label>Description</label><input type="text" class="form-control" id="personalExpDesc" placeholder="e.g. Lunch, Airtime, Uber"></div>
+      <div class="form-row">
+        <div class="form-group"><label>Category</label>
+          <select class="form-control" id="personalExpCategory">
+            <option value="airtime">Airtime</option>
+            <option value="food_personal">Food & Meals</option>
+            <option value="personal_transport">Transport</option>
+            <option value="family">Family</option>
+            <option value="medical">Medical</option>
+            <option value="clothing">Clothing</option>
+            <option value="entertainment">Entertainment</option>
+            <option value="savings">Savings</option>
+            <option value="other_personal">Other</option>
+          </select>
+        </div>
+        <div class="form-group"><label>Amount (KES)</label><input type="number" class="form-control" id="personalExpAmount" min="0" step="any" placeholder="500"></div>
+      </div>
+      <div class="form-group"><label>Date</label><input type="date" class="form-control" id="personalExpDate"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeModal('personalExpenseModal')">Cancel</button>
+      <button class="btn btn-primary" onclick="savePersonalExpense()">Save</button>
+    </div>
+  </div>
+</div>
+
 <!-- Custom Confirm Modal -->
 <div class="modal-overlay" id="confirmModal" style="z-index: 9999;">
   <div class="modal" style="max-width: 360px;">
@@ -676,7 +902,7 @@
       const n = document.querySelector('[data-page="' + lastPage + '"]');
       if (n) n.classList.add('active');
       
-      const titles = { dashboard:'Dashboard','new-invoice':'New Invoice',invoices:'Invoices',restaurants:'Restaurants',expenses:'Capital & Expenses',reports:'Reports','invoice-view':'Invoice','recycle-bin':'Recycle Bin' };
+      const titles = { dashboard:'Dashboard','new-invoice':'New Invoice',invoices:'Invoices',restaurants:'Restaurants',expenses:'Capital & Expenses',reports:'Reports','invoice-view':'Invoice','recycle-bin':'Recycle Bin',pricelists:'Price Lists','pricelist-edit':'Edit Price List',statements:'Statements' };
       document.getElementById('pageTitle').textContent = titles[lastPage] || 'Dashboard';
     }
   })();
@@ -685,8 +911,12 @@
 <script src="nav.js?v=1.1.7"></script>
 <script src="invoices.js?v=1.1.7"></script>
 <script src="views.js?v=1.1.7"></script>
-<script src="dashboard.js?v=1.1.7"></script>
-<script src="app.js?v=1.1.7"></script>
+<script src="dashboard.js?v=1.2.0"></script>
+<script src="payroll.js?v=1.2.0"></script>
+<script src="pricelist.js?v=1.2.0"></script>
+<script src="statements.js?v=1.2.0"></script>
+<script src="insights.js?v=1.2.0"></script>
+<script src="app.js?v=1.2.0"></script>
 <script>
   // Register Service Worker for PWA + auto-updates
   if ('serviceWorker' in navigator) {

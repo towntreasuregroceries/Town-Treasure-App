@@ -1595,3 +1595,125 @@ tbody tr:hover {
 .wizard-skip:hover {
   color: var(--text);
 }
+
+/* ══ Smart Insights Panel ══ */
+.insight-section {
+  margin-bottom: 16px;
+}
+.insight-section:last-child {
+  margin-bottom: 0;
+}
+.insight-label {
+  font-size: .72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .8px;
+  padding: 4px 10px;
+  border-radius: 12px;
+  display: inline-block;
+  margin-bottom: 8px;
+}
+.insight-urgent { background: #fef2f2; color: #991b1b; }
+.insight-attention { background: #fffbeb; color: #92400e; }
+.insight-good { background: #f0fdf4; color: #166534; }
+
+.insight-item {
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  font-size: .88rem;
+  line-height: 1.5;
+  margin-bottom: 6px;
+  border-left: 3px solid transparent;
+  transition: all .2s;
+}
+.insight-item:hover {
+  transform: translateX(3px);
+}
+.insight-item-urgent {
+  background: #fef2f2;
+  border-left-color: #ef4444;
+  color: #7f1d1d;
+}
+.insight-item-attention {
+  background: #fffbeb;
+  border-left-color: #f59e0b;
+  color: #78350f;
+}
+.insight-item-good {
+  background: #f0fdf4;
+  border-left-color: #22c55e;
+  color: #14532d;
+}
+
+/* ══ Fade-Up Animation ══ */
+.fade-up {
+  animation: fadeUp .4s var(--ease) both;
+}
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ══ Price List Editor ══ */
+#plItemsBody input,
+#plItemsBody select {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: .85rem;
+  background: var(--surface);
+  transition: border-color .2s;
+}
+#plItemsBody input:focus,
+#plItemsBody select:focus {
+  outline: none;
+  border-color: var(--green-500);
+  box-shadow: 0 0 0 2px rgba(76, 175, 80, .12);
+}
+#plItemsBody td {
+  padding: 6px 4px;
+}
+.btn-remove-row {
+  background: none;
+  border: none;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all .2s;
+}
+.btn-remove-row:hover {
+  color: var(--danger);
+  background: var(--danger-lt);
+}
+
+/* ══ Payroll / Salary Tracker ══ */
+#payrollBody .badge,
+#recurringBody .badge {
+  white-space: nowrap;
+}
+#payrollBody td,
+#recurringBody td {
+  vertical-align: middle;
+}
+
+/* ══ Empty State Enhancement ══ */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px !important;
+  color: var(--text-2);
+}
+.empty-state h3 {
+  font-size: 1rem;
+  margin-bottom: 6px;
+  color: var(--text);
+}
+.empty-state p {
+  font-size: .88rem;
+}
+
+/* ══ Expense Tab Content ══ */
+.expense-tab-content {
+  animation: fadeIn .3s var(--ease);
+}

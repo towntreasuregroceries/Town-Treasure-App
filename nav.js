@@ -8,10 +8,10 @@ function navigateTo(page) {
   if (el) el.classList.add('active');
   const nav = document.querySelector(`[data-page="${page}"]`);
   if (nav) nav.classList.add('active');
-  const titles = { dashboard:'Dashboard','new-invoice':'New Invoice',invoices:'Invoices',restaurants:'Restaurants',expenses:'Capital & Expenses',reports:'Reports','invoice-view':'Invoice','recycle-bin':'Recycle Bin' };
+  const titles = { dashboard:'Dashboard','new-invoice':'New Invoice',invoices:'Invoices',restaurants:'Restaurants',expenses:'Capital & Expenses',reports:'Reports','invoice-view':'Invoice','recycle-bin':'Recycle Bin',pricelists:'Price Lists','pricelist-edit':'Edit Price List',statements:'Statements' };
   document.getElementById('pageTitle').textContent = titles[page] || 'Dashboard';
   document.getElementById('sidebar').classList.remove('open');
-  if (page === 'dashboard') refreshDashboard();
+  if (page === 'dashboard') { refreshDashboard(); if(typeof renderInsightsPanel==='function') renderInsightsPanel(); if(typeof renderMonthlyPnL==='function') renderMonthlyPnL(); }
   if (page === 'invoices') renderInvoicesList();
   if (page === 'restaurants') renderRestaurants();
   if (page === 'expenses') renderExpenses();
@@ -21,6 +21,8 @@ function navigateTo(page) {
     populateRestaurantDropdowns();
     generateReport();
   }
+  if (page === 'pricelists' && typeof renderPriceLists === 'function') renderPriceLists();
+  if (page === 'statements' && typeof renderStatementsPage === 'function') renderStatementsPage();
 }
 document.querySelectorAll('.nav-item[data-page]').forEach(n => {
   n.addEventListener('click', () => navigateTo(n.dataset.page));
@@ -78,7 +80,7 @@ function renderRestaurants() {
   if (!rests.length) { body.innerHTML = '<tr><td colspan="6" class="empty-state"><h3>No restaurants yet</h3><p>Add your first restaurant client to get started.</p></td></tr>'; return; }
   body.innerHTML = rests.map(r => {
     const total = invs.filter(i => i.restaurantId === r.id).reduce((s, i) => s + (i.totalSell || 0), 0);
-    return `<tr><td><strong>${r.name}</strong></td><td>${r.contact||'—'}</td><td>${r.phone||'—'}</td><td>${r.address||'—'}</td><td><strong>KES ${fmtMoney(total)}</strong></td><td><button class="btn btn-sm btn-secondary" onclick="editRestaurant('${r.id}')">Edit</button> <button class="btn btn-sm btn-danger" onclick="deleteRestaurant('${r.id}')">Del</button></td></tr>`;
+    return `<tr><td><strong>${r.name}</strong></td><td>${r.contact||'—'}</td><td>${r.phone||'—'}</td><td>${r.address||'—'}</td><td><strong>KES ${fmtMoney(total)}</strong></td><td><button class="btn btn-sm btn-secondary" onclick="editRestaurant('${r.id}')">Edit</button> <button class="btn btn-sm btn-primary" onclick="quickStatement('${r.id}')">📄 Statement</button> <button class="btn btn-sm btn-danger" onclick="deleteRestaurant('${r.id}')">Del</button></td></tr>`;
   }).join('');
 }
 
