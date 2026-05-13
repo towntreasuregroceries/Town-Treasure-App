@@ -257,10 +257,14 @@ function generateReport() {
   const pendingTotal = invs.filter(i => i.status !== 'paid').reduce((s, i) => s + i.totalSell, 0);
   const restName = type === 'restaurant' ? (DB.restaurants.find(r => r.id === restId)?.name || 'Unknown') : 'All Restaurants';
 
-  // ── Expenses & Capital Data ──
-  let expenses = DB.expenses.slice();
-  if (from) expenses = expenses.filter(e => e.date >= from);
-  if (to) expenses = expenses.filter(e => e.date <= to);
+  // ── Expenses & Capital Data (only for general reports) ──
+  const isGeneral = (type === 'general');
+  let expenses = [];
+  if (isGeneral) {
+    expenses = DB.expenses.slice();
+    if (from) expenses = expenses.filter(e => e.date >= from);
+    if (to) expenses = expenses.filter(e => e.date <= to);
+  }
   const expenseItems = expenses.filter(e => e.type === 'expense');
   const capitalItems = expenses.filter(e => e.type === 'capital');
   const totalExpenses = expenseItems.reduce((s, e) => s + e.amount, 0);
@@ -276,7 +280,7 @@ function generateReport() {
 
   // ── Net Position ──
   const netIncome = paidTotal - totalBuy;
-  const netPosition = totalCapital + paidTotal - totalBuy - totalExpenses;
+  const netPosition = isGeneral ? (totalCapital + paidTotal - totalBuy - totalExpenses) : (paidTotal - totalBuy);
 
   // Group invoices by restaurant
   const byRest = {};
@@ -313,16 +317,21 @@ function generateReport() {
     </div>
 
     <!-- ═══ Financial Summary ═══ -->
-    <div style="display: flex; justify-content: space-between; margin: 0 50px 20px; border-top: 2px solid var(--border); border-bottom: 2px solid var(--border); padding: 15px 0;">
+    <div style="display: flex; justify-content: space-between; margin: 0 50px 20px; border-top: 2px solid var(--border); border-bottom: 2px solid var(--border); padding: 15px 0; flex-wrap: wrap; gap: 10px;">
       <div>
         <h4 style="font-size: 0.75rem; color: #616161; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Total Sales</h4>
         <div style="font-size: 1.2rem; font-weight: 700; color: #2E7D32;">KES ${fmtMoney(totalSell)}</div>
         <div style="font-size: 0.75rem; color: #61b146; margin-top: 3px; font-weight: 600;">${invs.length} invoices</div>
       </div>
       <div>
-        <h4 style="font-size: 0.75rem; color: #616161; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Total Profit</h4>
-        <div style="font-size: 1.2rem; font-weight: 700; color: ${totalProfit - totalExpenses >= 0 ? '#2E7D32' : '#dc2626'};">KES ${fmtMoney(totalProfit - totalExpenses)}</div>
+        <h4 style="font-size: 0.75rem; color: #616161; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Total Cost</h4>
+        <div style="font-size: 1.2rem; font-weight: 700; color: #dc2626;">KES ${fmtMoney(totalBuy)}</div>
       </div>
+      <div>
+        <h4 style="font-size: 0.75rem; color: #616161; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">${isGeneral ? 'Gross Profit' : 'Profit'}</h4>
+        <div style="font-size: 1.2rem; font-weight: 700; color: ${totalProfit >= 0 ? '#2E7D32' : '#dc2626'};">KES ${fmtMoney(totalProfit)}</div>
+      </div>
+      ${isGeneral ? `
       <div>
         <h4 style="font-size: 0.75rem; color: #616161; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Expenses</h4>
         <div style="font-size: 1.2rem; font-weight: 700; color: #dc2626;">KES ${fmtMoney(totalExpenses)}</div>
@@ -335,6 +344,12 @@ function generateReport() {
         <h4 style="font-size: 0.75rem; color: #616161; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Net Position</h4>
         <div style="font-size: 1.2rem; font-weight: 700; color: ${netPosition >= 0 ? '#2E7D32' : '#dc2626'};">KES ${fmtMoney(netPosition)}</div>
       </div>
+      ` : `
+      <div>
+        <h4 style="font-size: 0.75rem; color: #616161; text-transform: uppercase; margin-bottom: 4px; font-weight: 600;">Margin</h4>
+        <div style="font-size: 1.2rem; font-weight: 700; color: #424242;">${totalSell > 0 ? ((totalProfit / totalSell) * 100).toFixed(1) + '%' : '—'}</div>
+      </div>
+      `}
     </div>
     
     <!-- ═══ Payment Status ═══ -->
@@ -413,6 +428,239 @@ function generateReport() {
   </div>`;
 }
 function printReport() { window.print(); }
+
+async function downloadReportPDF() {
+  if (!window.jspdf) return toast('PDF generator loading...', 'warning');
+  const type = document.getElementById('reportType').value;
+  const dateType = document.getElementById('reportDateType')?.value || 'single';
+  const restId = document.getElementById('reportRestaurant')?.value;
+  
+  let from = '', to = '', dateRange = '';
+  if (dateType === 'single') {
+    from = document.getElementById('reportSingleDate').value; to = from;
+    dateRange = from ? fmtDate(from) : 'All Time';
+  } else if (dateType === 'range') {
+    from = document.getElementById('reportFrom').value; to = document.getElementById('reportTo').value;
+    dateRange = (from ? fmtDate(from) : 'Start') + ' — ' + (to ? fmtDate(to) : 'Present');
+  } else { dateRange = 'All Time'; }
+  
+  let invs = DB.invoices.filter(i => i.status !== 'draft');
+  if (from) invs = invs.filter(i => i.date >= from);
+  if (to) invs = invs.filter(i => i.date <= to);
+
+  toast('Generating Report PDF...', 'info');
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({
+    orientation: 'p', unit: 'pt', format: 'a4',
+    encryption: {
+      userPassword: '',
+      ownerPassword: 'TownTreasure2025!',
+      userPermissions: ['print']
+    }
+  });
+  const a4Width = 595.28, a4Height = 841.89;
+
+  const loadImage = (src) => new Promise((resolve, reject) => {
+    const img = new Image(); img.crossOrigin = 'Anonymous';
+    img.onload = () => {
+      const cvs = document.createElement('canvas'); cvs.width = img.width; cvs.height = img.height;
+      cvs.getContext('2d').drawImage(img, 0, 0); resolve(cvs.toDataURL('image/png'));
+    };
+    img.onerror = reject; img.src = src;
+  });
+
+  let logoData = null, logoWidth = 0, logoHeight = 0;
+  try {
+    logoData = await loadImage('assets/logo.png');
+    logoHeight = 55;
+    logoWidth = (doc.getImageProperties(logoData).width * logoHeight) / doc.getImageProperties(logoData).height;
+  } catch(e) {}
+
+  const drawHeaderShapes = (isFirst) => {
+    doc.setFillColor(97, 177, 70); doc.rect(0, 0, a4Width, 110, 'F');
+    doc.setFillColor(49, 58, 67); doc.ellipse(a4Width, -158, 500, 258, 'F');
+    if (logoData) doc.addImage(logoData, 'PNG', 40, 25, logoWidth, logoHeight);
+
+    doc.saveGraphicsState();
+    doc.setGState(new doc.GState({ opacity: 0.06 }));
+    doc.setTextColor(180, 180, 180);
+    doc.setFontSize(45);
+    doc.setFont("helvetica", "bold");
+    doc.text("Town Treasure Limited", 100, 550, { angle: 30 });
+    doc.restoreGraphicsState();
+  };
+
+  drawHeaderShapes(true);
+
+  let title = type === 'product' ? 'PRODUCT REPORT' : 'FINANCIAL REPORT';
+  doc.setFont("helvetica", "bold"); doc.setFontSize(26); doc.setTextColor('#61b146');
+  doc.text(title, 40, 160);
+  
+  doc.setFontSize(10); doc.setTextColor('#424242');
+  doc.text("Period:", 480, 150, { align: "right" });
+  doc.setFont("helvetica", "normal"); doc.setTextColor('#616161');
+  doc.text(dateRange, 555, 150, { align: "right" });
+  
+  doc.setFont("helvetica", "bold"); doc.setTextColor('#424242');
+  doc.text("Generated:", 480, 165, { align: "right" });
+  doc.setFont("helvetica", "normal"); doc.setTextColor('#616161');
+  doc.text(fmtDate(new Date().toISOString().slice(0, 10)), 555, 165, { align: "right" });
+  
+  let currentY = 220;
+
+  if (type === 'product') {
+    const productName = (document.getElementById('reportProduct')?.value || '').toLowerCase().trim();
+    if (!productName) return toast('Select a product first', 'error');
+    doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor('#616161');
+    doc.text(`Product: ${productName}`, 40, 185);
+
+    const matches = []; let totalQty = 0, totalSell = 0, totalBuy = 0;
+    const byRest = {}, byUnit = {};
+    invs.forEach(inv => {
+      inv.items.forEach(item => {
+        if (item.desc.toLowerCase().trim().includes(productName)) {
+          const unit = item.unit || 'kgs';
+          matches.push([inv.number, inv.restaurantName, fmtDate(inv.date), item.qty.toString(), unit, `KES ${fmtMoney(item.sellPrice)}`, `KES ${fmtMoney(item.total)}`, `KES ${fmtMoney(item.total - (item.qty*item.buyPrice))}`]);
+          totalQty += item.qty; totalSell += item.total; totalBuy += item.qty * item.buyPrice;
+          if (!byRest[inv.restaurantName]) byRest[inv.restaurantName] = { qty:0, sell:0, buy:0, count:0 };
+          byRest[inv.restaurantName].qty += item.qty; byRest[inv.restaurantName].sell += item.total; byRest[inv.restaurantName].buy += item.qty * item.buyPrice; byRest[inv.restaurantName].count++;
+          if (!byUnit[unit]) byUnit[unit] = 0; byUnit[unit] += item.qty;
+        }
+      });
+    });
+    
+    // Summary in two rows
+    doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.setTextColor('#424242');
+    doc.text(`Total Sold: ${Object.entries(byUnit).map(([u, q]) => `${q} ${u}`).join(', ') || '0'}`, 40, currentY);
+    doc.setTextColor('#2E7D32'); doc.text(`Revenue: KES ${fmtMoney(totalSell)}`, 220, currentY);
+    currentY += 16;
+    doc.setTextColor('#dc2626'); doc.text(`Cost: KES ${fmtMoney(totalBuy)}`, 40, currentY);
+    doc.setTextColor((totalSell - totalBuy) >= 0 ? '#2E7D32' : '#dc2626'); doc.text(`Profit: KES ${fmtMoney(totalSell - totalBuy)}`, 220, currentY);
+    currentY += 25;
+
+    const tableMargins = { left: 40, right: 40, top: 130, bottom: 60 };
+
+    // Sales by Rest Table
+    const restData = Object.entries(byRest).sort((a,b)=>b[1].sell-a[1].sell).map(([n, d]) => [n, d.count.toString(), d.qty.toString(), `KES ${fmtMoney(d.sell)}`, `KES ${fmtMoney(d.buy)}`, `KES ${fmtMoney(d.sell - d.buy)}`]);
+    if (restData.length) {
+      doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("Sales by Restaurant", 40, currentY);
+      doc.autoTable({ startY: currentY + 10, head: [["Restaurant", "Orders", "Qty", "Revenue", "Cost", "Profit"]], body: restData, theme: 'plain', styles: { fontSize: 9 }, headStyles: { fillColor: '#f1f5f9', textColor: '#424242' }, margin: tableMargins, didDrawPage: (data) => { if (data.pageNumber > 1) drawHeaderShapes(false); } });
+      currentY = doc.lastAutoTable.finalY + 25;
+    }
+
+    // Tx Table
+    doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("Transaction History", 40, currentY);
+    doc.autoTable({ startY: currentY + 10, head: [["Invoice", "Restaurant", "Date", "Qty", "Unit", "Price", "Total", "Profit"]], body: matches, theme: 'plain', styles: { fontSize: 8.5 }, headStyles: { fillColor: '#313a43', textColor: '#ffffff' }, margin: tableMargins, didDrawPage: (data) => { if (data.pageNumber > 1) drawHeaderShapes(false); } });
+
+  } else {
+    // Financial Report
+    if (type === 'restaurant' && restId) invs = invs.filter(i => i.restaurantId === restId);
+    const restName = type === 'restaurant' ? (DB.restaurants.find(r => r.id === restId)?.name || 'Unknown') : 'All Restaurants';
+    // Show "For:" below the title, not in the header
+    doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor('#616161');
+    doc.text(`For: ${restName}`, 40, 185);
+
+    const totalSell = invs.reduce((s, i) => s + i.totalSell, 0);
+    const totalBuy = invs.reduce((s, i) => s + i.totalBuy, 0);
+    const totalProfit = invs.reduce((s, i) => s + i.profit, 0);
+    const paidTotal = invs.filter(i => i.status === 'paid').reduce((s, i) => s + i.totalSell, 0);
+    const pendingTotal = invs.filter(i => i.status !== 'paid').reduce((s, i) => s + i.totalSell, 0);
+    const isGeneral = (type === 'general');
+    
+    let exps = [];
+    if (isGeneral) {
+      exps = DB.expenses.slice();
+      if (from) exps = exps.filter(e => e.date >= from);
+      if (to) exps = exps.filter(e => e.date <= to);
+    }
+    const expItems = exps.filter(e => e.type === 'expense');
+    const capItems = exps.filter(e => e.type === 'capital');
+    const totalExp = expItems.reduce((s, e) => s + e.amount, 0);
+    const totalCap = capItems.reduce((s, e) => s + e.amount, 0);
+    const netPos = isGeneral ? (totalCap + paidTotal - totalBuy - totalExp) : (paidTotal - totalBuy);
+
+    // Summary — adapt layout to general vs restaurant
+    doc.setFontSize(9); doc.setFont("helvetica", "bold");
+    doc.setTextColor('#424242'); doc.text("Total Sales:", 40, currentY);
+    doc.setTextColor('#2E7D32'); doc.text(`KES ${fmtMoney(totalSell)}`, 110, currentY);
+    doc.setTextColor('#424242'); doc.text("Total Cost:", 220, currentY);
+    doc.setTextColor('#dc2626'); doc.text(`KES ${fmtMoney(totalBuy)}`, 280, currentY);
+    doc.setTextColor('#424242'); doc.text("Profit:", 400, currentY);
+    doc.setTextColor(totalProfit >= 0 ? '#2E7D32' : '#dc2626'); doc.text(`KES ${fmtMoney(totalProfit)}`, 440, currentY);
+    currentY += 16;
+    if (isGeneral) {
+      doc.setTextColor('#424242'); doc.text("Expenses:", 40, currentY);
+      doc.setTextColor('#dc2626'); doc.text(`KES ${fmtMoney(totalExp)}`, 110, currentY);
+      doc.setTextColor('#424242'); doc.text("Capital In:", 220, currentY);
+      doc.setTextColor('#2563eb'); doc.text(`KES ${fmtMoney(totalCap)}`, 280, currentY);
+      doc.setTextColor('#424242'); doc.text("Net Position:", 400, currentY);
+      doc.setTextColor(netPos >= 0 ? '#2E7D32' : '#dc2626'); doc.text(`KES ${fmtMoney(netPos)}`, 480, currentY);
+    } else {
+      doc.setTextColor('#424242'); doc.text("Paid:", 40, currentY);
+      doc.setTextColor('#2E7D32'); doc.text(`KES ${fmtMoney(paidTotal)}`, 110, currentY);
+      doc.setTextColor('#424242'); doc.text("Pending:", 220, currentY);
+      doc.setTextColor('#d97706'); doc.text(`KES ${fmtMoney(pendingTotal)}`, 280, currentY);
+      doc.setTextColor('#424242'); doc.text("Margin:", 400, currentY);
+      doc.setTextColor('#424242'); doc.text(totalSell > 0 ? ((totalProfit / totalSell) * 100).toFixed(1) + '%' : '—', 440, currentY);
+    }
+    currentY += 25;
+
+    const tableMargins = { left: 40, right: 40, top: 130, bottom: 60 };
+
+    const byRest = {}; invs.forEach(i => { if (!byRest[i.restaurantName]) byRest[i.restaurantName] = { sell:0, buy:0, prof:0, cnt:0 }; byRest[i.restaurantName].sell += i.totalSell; byRest[i.restaurantName].buy += i.totalBuy; byRest[i.restaurantName].prof += i.profit; byRest[i.restaurantName].cnt++; });
+    const restData = Object.entries(byRest).sort((a,b)=>b[1].sell-a[1].sell).map(([n, d]) => [n, d.cnt.toString(), `KES ${fmtMoney(d.sell)}`, `KES ${fmtMoney(d.buy)}`, `KES ${fmtMoney(d.prof)}`, d.sell>0?((d.prof/d.sell)*100).toFixed(1)+'%':'—']);
+    if (restData.length) {
+      doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("Sales by Restaurant", 40, currentY);
+      doc.autoTable({ startY: currentY + 10, head: [["Restaurant", "Invs", "Sales", "Cost", "Profit", "Margin"]], body: restData, theme: 'plain', styles: { fontSize: 9 }, headStyles: { fillColor: '#f1f5f9', textColor: '#424242' }, margin: tableMargins, didDrawPage: (data) => { if (data.pageNumber > 1) drawHeaderShapes(false); } });
+      currentY = doc.lastAutoTable.finalY + 25;
+    }
+
+    // Expenses & Capital only for general reports
+    if (isGeneral) {
+      const byCat = {}; expItems.forEach(e => { if (!byCat[e.category]) byCat[e.category] = { tot:0, cnt:0 }; byCat[e.category].tot += e.amount; byCat[e.category].cnt++; });
+      const catData = Object.entries(byCat).sort((a,b)=>b[1].tot-a[1].tot).map(([n, d]) => [n, d.cnt.toString(), `KES ${fmtMoney(d.tot)}`, totalExp>0?((d.tot/totalExp)*100).toFixed(1)+'%':'—']);
+      if (catData.length) {
+        doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("Expenses by Category", 40, currentY);
+        doc.autoTable({ startY: currentY + 10, head: [["Category", "Entries", "Total Amount", "%"]], body: catData, theme: 'plain', styles: { fontSize: 9 }, headStyles: { fillColor: '#f1f5f9', textColor: '#424242' }, margin: tableMargins, didDrawPage: (data) => { if (data.pageNumber > 1) drawHeaderShapes(false); } });
+        currentY = doc.lastAutoTable.finalY + 25;
+      }
+
+      if (capItems.length) {
+        const capData = capItems.sort((a,b)=>a.date.localeCompare(b.date)).map(e => [fmtDate(e.date), e.desc, e.category, `KES ${fmtMoney(e.amount)}`]);
+        doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("Capital Injections", 40, currentY);
+        doc.autoTable({ startY: currentY + 10, head: [["Date", "Description", "Category", "Amount"]], body: capData, theme: 'plain', styles: { fontSize: 9 }, headStyles: { fillColor: '#f1f5f9', textColor: '#424242' }, margin: tableMargins, didDrawPage: (data) => { if (data.pageNumber > 1) drawHeaderShapes(false); } });
+        currentY = doc.lastAutoTable.finalY + 25;
+      }
+    }
+
+    const invData = invs.sort((a,b)=>a.date.localeCompare(b.date)).map(i => [i.number, i.restaurantName, fmtDate(i.date), `KES ${fmtMoney(i.totalSell)}`, `KES ${fmtMoney(i.profit)}`, i.status]);
+    if (invData.length) {
+      doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("All Invoices", 40, currentY);
+      doc.autoTable({ startY: currentY + 10, head: [["#", "Restaurant", "Date", "Amount", "Profit", "Status"]], body: invData, theme: 'plain', styles: { fontSize: 9 }, headStyles: { fillColor: '#f1f5f9', textColor: '#424242' }, margin: tableMargins, didDrawPage: (data) => { if (data.pageNumber > 1) drawHeaderShapes(false); } });
+      currentY = doc.lastAutoTable.finalY + 25;
+    }
+
+
+    const expData = expItems.sort((a,b)=>a.date.localeCompare(b.date)).map(e => [fmtDate(e.date), e.desc, e.category, `KES ${fmtMoney(e.amount)}`]);
+    if (expData.length) {
+      doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("All Expenses", 40, currentY);
+      doc.autoTable({ startY: currentY + 10, head: [["Date", "Description", "Category", "Amount"]], body: expData, theme: 'plain', styles: { fontSize: 9 }, headStyles: { fillColor: '#f1f5f9', textColor: '#424242' }, margin: tableMargins, didDrawPage: (data) => { if (data.pageNumber > 1) drawHeaderShapes(false); } });
+    }
+  }
+
+  // Footer on all pages
+  const pageCount = doc.internal.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFillColor(49, 58, 67); doc.ellipse(a4Width/2, a4Height-40, a4Width*0.8, 20, 'F'); doc.rect(0, a4Height-40, a4Width, 40, 'F');
+    doc.setFont("helvetica", "italic"); doc.setFontSize(9); doc.setTextColor('#ffffff');
+    doc.text(`Generated on ${fmtDate(new Date().toISOString().slice(0,10))} — Town Treasure Groceries`, 40, a4Height-15);
+  }
+
+  doc.save(`Report_${type}_${dateRange.replace(/[^a-zA-Z0-9]/g,'_')}.pdf`);
+  toast('PDF Downloaded!', 'success');
+}
 
 /* ══ Init ══ */
 document.addEventListener('DOMContentLoaded', async () => {

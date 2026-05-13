@@ -27,43 +27,7 @@ function paginateElement(doc) {
   }
 }
 
-function downloadPDF(elementId, filenamePrefix) {
-  const element = document.getElementById(elementId);
-  if (!element || typeof html2pdf === 'undefined') {
-    alert("PDF generator not ready or element not found.");
-    return;
-  }
-  
-  // Clone the element to avoid modifying the UI during PDF generation
-  const clone = element.cloneNode(true);
-  clone.classList.add('pdf-export');
-  clone.style.padding = '0';
-  clone.style.margin = '0';
-  clone.style.width = '800px';
-  clone.style.boxShadow = 'none';
-  clone.style.border = 'none';
-  
-  document.body.appendChild(clone);
-  
-  const docToPaginate = clone.id === 'invoice-doc' ? clone : clone.querySelector('#invoice-doc');
-  if (docToPaginate) {
-    paginateElement(docToPaginate);
-  }
-  
-  const opt = {
-    margin:       [0, 0, 0, 0],
-    filename:     `${filenamePrefix}.pdf`,
-    image:        { type: 'jpeg', quality: 1.0 },
-    html2canvas:  { scale: 2, useCORS: true },
-    jsPDF:        { unit: 'in', format: 'a4', orientation: 'portrait' }
-  };
-  
-  document.body.classList.add('exporting-pdf');
-  html2pdf().set(opt).from(clone).save().then(() => {
-    document.body.classList.remove('exporting-pdf');
-    document.body.removeChild(clone);
-  });
-}
+
 
 // Apply the same magic trick for the native Print dialog
 window.addEventListener('beforeprint', () => {

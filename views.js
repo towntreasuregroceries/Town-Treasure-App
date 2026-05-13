@@ -123,7 +123,7 @@ function viewInvoice(id) {
   // Set the PDF download filename to the exact invoice number
   const btn = document.getElementById('btnDownloadPdf');
   if (btn) {
-    btn.setAttribute('onclick', `downloadPDF('invoiceViewContainer', '${inv.number}')`);
+    btn.setAttribute('onclick', `generateInvoicePDF('${inv.id}')`);
   }
 
   // Auto-paginate immediately so the user sees the true A4 layout
@@ -159,12 +159,246 @@ Feel free to reach out for any queries. We appreciate your business!`;
 
   // 1. Download the PDF automatically
   toast('Downloading PDF...', 'success');
-  downloadPDF('invoice-view-doc', filename);
+  generateInvoicePDF(currentViewInvoiceId);
   
   // 2. Open WhatsApp directly to the specific contact
   setTimeout(() => {
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(text)}`, '_blank');
   }, 1500);
+}
+
+
+/* ══ jsPDF Invoice Generator ══ */
+async function generateInvoicePDF(id) {
+  const inv = DB.invoices.find(i => i.id === id);
+  if (!inv) return;
+  const rest = DB.restaurants.find(r => r.id === inv.restaurantId) || {};
+  
+  if (!window.jspdf) {
+    toast('PDF generator is still loading. Please try again.', 'warning');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({
+    orientation: 'p', unit: 'pt', format: 'a4',
+    encryption: {
+      userPassword: '',
+      ownerPassword: 'TownTreasure2025!',
+      userPermissions: ['print']
+    }
+  });
+
+  const primaryColor = '#61b146';
+  const textColor = '#424242';
+  const lightText = '#616161';
+  const a4Width = 595.28;
+  const a4Height = 841.89;
+  
+  const loadImage = (src) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = reject;
+      img.src = src;
+    });
+  };
+
+  const getSvgIcon = (type) => {
+    let svg = '';
+    if (type === 'phone') svg = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#61b146" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>';
+    if (type === 'email') svg = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#61b146" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>';
+    if (type === 'web') svg = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#61b146" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>';
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  };
+
+  try {
+    let logoData = null;
+    let logoWidth = 0;
+    let logoHeight = 0;
+    try {
+      logoData = await loadImage('assets/logo.png');
+      const imgProps = doc.getImageProperties(logoData);
+      logoHeight = 55;
+      logoWidth = (imgProps.width * logoHeight) / imgProps.height;
+    } catch (e) { console.warn("Could not load logo", e); }
+
+    const phoneIcon = await loadImage(getSvgIcon('phone'));
+    const emailIcon = await loadImage(getSvgIcon('email'));
+    const webIcon = await loadImage(getSvgIcon('web'));
+
+    const drawHeaderShapes = () => {
+      // Green background - flat at the bottom as requested
+      doc.setFillColor(97, 177, 70); 
+      doc.rect(0, 0, a4Width, 110, 'F');
+      
+      // Dark Slate perfect smooth curve
+      doc.setFillColor(49, 58, 67); 
+      doc.ellipse(a4Width, -158, 500, 258, 'F');
+      
+      if (logoData) doc.addImage(logoData, 'PNG', 40, 25, logoWidth, logoHeight);
+    };
+
+    // --- 1. Watermark ---
+    doc.setTextColor(245, 245, 245);
+    doc.setFontSize(45); // Reduced size so it fits inside the PDF
+    doc.setFont("helvetica", "bold");
+    doc.text("Town Treasure Limited", 100, 550, { angle: 30 });
+    doc.setTextColor(textColor);
+
+    // --- 2. Header ---
+    drawHeaderShapes();
+
+    // --- 3. Title Row ---
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(26);
+    doc.setTextColor(primaryColor);
+    doc.text("INVOICE", 40, 160);
+
+    doc.setFontSize(10);
+    doc.setTextColor(textColor);
+    doc.text("Receipt No:", 480, 150, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(lightText);
+    doc.text(inv.number, 555, 150, { align: "right" });
+    
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(textColor);
+    doc.text("Order Date:", 480, 165, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(lightText);
+    doc.text(fmtDate(inv.date), 555, 165, { align: "right" });
+
+    // --- 4. FROM and TO ---
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(textColor);
+    doc.text("FROM:", 40, 205);
+    doc.text("BILLED TO:", 555, 205, { align: "right" });
+
+    doc.setFontSize(11);
+    doc.setTextColor(primaryColor);
+    doc.text("Town Treasure Limited", 40, 223);
+    
+    doc.setTextColor(textColor);
+    doc.text(inv.restaurantName, 555, 223, { align: "right" });
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(lightText);
+    
+    // Icons & Text for FROM
+    doc.addImage(phoneIcon, 'PNG', 40, 233, 10, 10);
+    doc.text("0708567696", 55, 242);
+    
+    doc.addImage(emailIcon, 'PNG', 40, 248, 10, 10);
+    doc.text("towntreasuregroceries@gmail.com", 55, 257);
+    
+    doc.addImage(webIcon, 'PNG', 40, 263, 10, 10);
+    doc.text("towntreasuregroceries.com", 55, 272);
+
+    if (rest.address) doc.text(rest.address, 555, 242, { align: "right" });
+    if (rest.phone) doc.text(rest.phone, 555, 257, { align: "right" });
+
+    // --- 5. Line Items ---
+    const tableColumn = ["SL\nNO.", "ITEM DESCRIPTION", "UNIT PRICE", "QUANTITY", "TOTAL"];
+    const tableRows = inv.items.map((it, idx) => [
+      (idx + 1).toString().padStart(2, '0'),
+      it.desc,
+      `KSh ${fmtMoney(it.sellPrice)}`,
+      `${it.qty} ${it.unit || 'kgs'}`,
+      `KSh ${fmtMoney(it.total)}`
+    ]);
+
+    doc.autoTable({
+      startY: 295,
+      margin: { top: 160, bottom: 60 },
+      head: [tableColumn],
+      body: tableRows,
+      theme: 'plain',
+      styles: { fontSize: 9.5, cellPadding: 10, textColor: '#424242' },
+      headStyles: { fillColor: '#313a43', textColor: '#ffffff', fontStyle: 'bold', valign: 'middle' },
+      alternateRowStyles: { fillColor: '#f8fafc' },
+      columnStyles: {
+        0: { halign: 'center', cellWidth: 40 },
+        2: { halign: 'right' },
+        3: { halign: 'center' },
+        4: { halign: 'right' }
+      },
+      didDrawPage: function (data) {
+        // Redraw header on new pages if it breaks across pages
+        if (data.pageNumber > 1) {
+          drawHeaderShapes();
+        }
+      }
+    });
+
+    // --- 6. Totals & QR on Last Page ---
+    let finalY = doc.lastAutoTable.finalY + 20;
+    
+    // Ensure we have enough space for the totals and QR code (approx 120pt needed)
+    if (finalY > a4Height - 140) {
+      doc.addPage();
+      finalY = 160; // start below the header on the new page
+    }
+
+    doc.setFontSize(9.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(textColor);
+    doc.text("Sub Total:", 420, finalY + 18, { align: "right" });
+    doc.text(`KSh ${fmtMoney(inv.totalSell)}`, 545, finalY + 18, { align: "right" });
+    
+    doc.setFillColor(97, 177, 70);
+    doc.rect(340, finalY + 28, 215, 26, 'F');
+    doc.setTextColor('#ffffff');
+    doc.text("Grand Total:", 420, finalY + 45, { align: "right" });
+    doc.text(`KSh ${fmtMoney(inv.totalSell)}`, 545, finalY + 45, { align: "right" });
+
+    // QR Code anchored just above the footer
+    try {
+      const qrData = await loadImage('assets/qr%20code.jpg');
+      const qrY = a4Height - 145; // Fixed absolute coordinate above footer
+      doc.addImage(qrData, 'JPEG', 40, qrY, 70, 70);
+      
+      doc.setFontSize(9.5);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(textColor);
+      doc.text("Visit Us Online:", 40, qrY - 8);
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(lightText);
+      doc.text("Scan to visit our website\nand explore our fresh\ngrocery catalog online.", 120, qrY + 25);
+    } catch(e) {}
+
+    // --- 7. Footer on ALL Pages ---
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFillColor(49, 58, 67);
+      doc.ellipse(a4Width / 2, a4Height - 40, a4Width * 0.8, 20, 'F');
+      doc.rect(0, a4Height - 40, a4Width, 40, 'F');
+      
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(9);
+      doc.setTextColor('#ffffff');
+      doc.text(`Thank you, ${inv.restaurantName}, for Shopping with us`, 40, a4Height - 15);
+    }
+
+    const filename = `Invoice_${inv.number}_${inv.restaurantName.replace(/\s+/g, '_')}.pdf`;
+    doc.save(filename);
+
+  } catch (error) {
+    console.error("PDF Generation Error: ", error);
+    toast("Error generating PDF", "error");
+  }
 }
 
 /* ══ Expenses & Capital ══ */

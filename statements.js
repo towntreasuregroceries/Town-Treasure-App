@@ -205,10 +205,322 @@ function buildStatementHTML(rest, month) {
   </div>`;
 }
 
-function downloadStatementPDF() {
-  const el = document.getElementById('statementOutput');
-  if (!el || !el.innerHTML.trim()) return toast('Generate a statement first', 'error');
-  downloadPDF('statementOutput', 'Statement');
+async function downloadStatementPDF() {
+  const restId = document.getElementById('stmtRestaurant')?.value;
+  const month = document.getElementById('stmtMonth')?.value;
+  if (!restId || !month) return toast('Select a restaurant and month first', 'error');
+  
+  if (restId === '__all__') {
+    toast('Batch PDF generation requires individual processing. Generating for first restaurant...', 'info');
+    // For simplicity, handle just one or alert.
+    return toast('Please select a specific restaurant to generate PDF.', 'warning');
+  }
+
+  const rest = DB.restaurants.find(r => r.id === restId);
+  if (!rest) return;
+
+  if (!window.jspdf) {
+    toast('PDF generator is still loading. Please try again.', 'warning');
+    return;
+  }
+
+  toast('Generating Statement PDF...', 'info');
+
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({
+    orientation: 'p', unit: 'pt', format: 'a4',
+    encryption: {
+      userPassword: '',
+      ownerPassword: 'TownTreasure2025!',
+      userPermissions: ['print']
+    }
+  });
+
+  const a4Width = 595.28;
+  const a4Height = 841.89;
+
+  const loadImage = (src) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = reject;
+      img.src = src;
+    });
+  };
+
+  const getSvgIcon = (type) => {
+    let svg = '';
+    if (type === 'phone') svg = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#61b146" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg>';
+    if (type === 'email') svg = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#61b146" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>';
+    return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  };
+
+  try {
+    let logoData = null;
+    let logoWidth = 0, logoHeight = 0;
+    try {
+      logoData = await loadImage('assets/logo.png');
+      const imgProps = doc.getImageProperties(logoData);
+      logoHeight = 55;
+      logoWidth = (imgProps.width * logoHeight) / imgProps.height;
+    } catch (e) { console.warn("Could not load logo", e); }
+
+    const phoneIcon = await loadImage(getSvgIcon('phone'));
+    const emailIcon = await loadImage(getSvgIcon('email'));
+
+    const drawHeaderShapes = (isFirstPage) => {
+      doc.setFillColor(97, 177, 70); 
+      doc.rect(0, 0, a4Width, 110, 'F');
+      doc.setFillColor(49, 58, 67); 
+      doc.ellipse(a4Width, -158, 500, 258, 'F');
+      if (logoData) doc.addImage(logoData, 'PNG', 40, 25, logoWidth, logoHeight);
+
+      // Watermark
+      doc.saveGraphicsState();
+      doc.setGState(new doc.GState({ opacity: 0.06 }));
+      doc.setTextColor(180, 180, 180);
+      doc.setFontSize(45);
+      doc.setFont("helvetica", "bold");
+      doc.text("Town Treasure Limited", 100, 550, { angle: 30 });
+      doc.restoreGraphicsState();
+    };
+
+    drawHeaderShapes(true);
+
+    const [yr, mo] = month.split('-').map(Number);
+    const monthName = new Date(yr, mo - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+    const monthStart = `${month}-01`;
+    const monthEnd = new Date(yr, mo, 0).toISOString().slice(0, 10);
+    
+    // --- Title Row ---
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(26);
+    doc.setTextColor('#61b146');
+    doc.text("MONTHLY", 40, 150);
+    doc.text("STATEMENT", 40, 180);
+
+    doc.setFontSize(10);
+    doc.setTextColor('#424242');
+    doc.text("Period:", 480, 150, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor('#616161');
+    doc.text(monthName, 555, 150, { align: "right" });
+    
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor('#424242');
+    doc.text("Generated:", 480, 165, { align: "right" });
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor('#616161');
+    doc.text(fmtDate(new Date().toISOString().slice(0, 10)), 555, 165, { align: "right" });
+
+    // --- Addresses ---
+    let startY = 220;
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor('#424242');
+    doc.text("FROM:", 40, startY);
+    doc.text("TO:", 555, startY, { align: "right" });
+    
+    doc.setFontSize(11);
+    doc.setTextColor('#61b146');
+    doc.text("Town Treasure Limited", 40, startY + 18);
+    
+    doc.setTextColor('#424242');
+    doc.text(rest.name, 555, startY + 18, { align: "right" });
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor('#616161');
+    
+    if (phoneIcon) doc.addImage(phoneIcon, 'PNG', 40, startY + 26, 10, 10);
+    doc.text("0708567696", 55, startY + 34);
+    
+    if (emailIcon) doc.addImage(emailIcon, 'PNG', 40, startY + 41, 10, 10);
+    doc.text("towntreasuregroceries@gmail.com", 55, startY + 49);
+
+    if (rest.address) doc.text(rest.address, 555, startY + 34, { align: "right" });
+    if (rest.phone) doc.text(rest.phone, 555, startY + 49, { align: "right" });
+
+    // --- Data Processing ---
+    const allInvoices = DB.invoices.filter(i => i.restaurantId === rest.id && i.status !== 'draft');
+    const priorInvoices = allInvoices.filter(i => i.date < monthStart);
+    const priorPaidTotal = priorInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.totalSell, 0);
+    const priorInvoicedTotal = priorInvoices.reduce((s, i) => s + i.totalSell, 0);
+    const openingBalance = priorInvoicedTotal - priorPaidTotal;
+
+    const monthInvoices = allInvoices.filter(i => i.date >= monthStart && i.date <= monthEnd);
+    const monthInvoicedTotal = monthInvoices.reduce((s, i) => s + i.totalSell, 0);
+    const monthPaidTotal = monthInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.totalSell, 0);
+
+    let runningBalance = openingBalance;
+    const transactions = [];
+
+    monthInvoices.sort((a, b) => a.date.localeCompare(b.date)).forEach(inv => {
+      runningBalance += inv.totalSell;
+      transactions.push([
+        fmtDate(inv.date),
+        `Invoice ${inv.number}`,
+        `${inv.items.length} items`,
+        `KES ${fmtMoney(inv.totalSell)}`,
+        '',
+        `KES ${fmtMoney(runningBalance)}`
+      ]);
+
+      if (inv.status === 'paid') {
+        runningBalance -= inv.totalSell;
+        transactions.push([
+          fmtDate(inv.date),
+          `Payment — ${inv.number}`,
+          '',
+          '',
+          `KES ${fmtMoney(inv.totalSell)}`,
+          `KES ${fmtMoney(runningBalance)}`
+        ]);
+      }
+    });
+    const closingBalance = runningBalance;
+
+    // --- Opening Balance Banner ---
+    startY += 90;
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.rect(40, startY, a4Width - 80, 30, 'FD');
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor('#424242');
+    doc.text(`Previous Unpaid Balance (Prior to 1 ${monthName.split(' ')[0]}):`, 50, startY + 20);
+    doc.setTextColor(openingBalance > 0 ? '#dc2626' : '#2E7D32');
+    doc.text(`KES ${fmtMoney(openingBalance)}`, a4Width - 50, startY + 20, { align: "right" });
+
+    // --- Transactions Table ---
+    doc.autoTable({
+      startY: startY + 45,
+      head: [["Date", "Description", "Details", "Debit", "Credit", "Balance"]],
+      body: transactions.length ? transactions : [["", "No transactions this month", "", "", "", ""]],
+      theme: 'plain',
+      styles: { fontSize: 9.5, cellPadding: 8, textColor: '#424242' },
+      headStyles: { fillColor: '#313a43', textColor: '#ffffff', fontStyle: 'bold', valign: 'middle' },
+      alternateRowStyles: { fillColor: '#f8fafc' },
+      columnStyles: {
+        3: { halign: 'right', textColor: '#dc2626' },
+        4: { halign: 'right', textColor: '#2E7D32' },
+        5: { halign: 'right', fontStyle: 'bold' }
+      },
+      margin: { left: 40, right: 40, bottom: 60 },
+      didDrawPage: function (data) {
+        if (data.pageNumber > 1) drawHeaderShapes(false);
+      }
+    });
+
+    let finalY = doc.lastAutoTable.finalY + 30;
+    if (finalY > a4Height - 180) {
+      doc.addPage();
+      finalY = 160;
+    }
+
+    // --- Summary & Age Analysis ---
+    doc.setFontSize(10);
+    doc.setTextColor('#424242');
+    doc.text("Total Invoiced:", a4Width - 160, finalY, { align: "right" });
+    doc.setTextColor('#dc2626');
+    doc.text(`KES ${fmtMoney(monthInvoicedTotal)}`, a4Width - 40, finalY, { align: "right" });
+    
+    doc.setTextColor('#424242');
+    doc.text("Total Paid:", a4Width - 160, finalY + 20, { align: "right" });
+    doc.setTextColor('#2E7D32');
+    doc.text(`KES ${fmtMoney(monthPaidTotal)}`, a4Width - 40, finalY + 20, { align: "right" });
+    
+    doc.setDrawColor(97, 177, 70);
+    doc.setLineWidth(1.5);
+    doc.line(a4Width - 220, finalY + 30, a4Width - 40, finalY + 30);
+    
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor('#424242');
+    doc.text("Total Amount Owed:", a4Width - 160, finalY + 45, { align: "right" });
+    doc.setTextColor(closingBalance > 0 ? '#dc2626' : '#2E7D32');
+    doc.text(`KES ${fmtMoney(closingBalance)}`, a4Width - 40, finalY + 45, { align: "right" });
+
+    if (closingBalance > 0) {
+      const unpaidInvoices = allInvoices.filter(i => i.status !== 'paid' && i.date <= monthEnd);
+      const now = new Date(yr, mo - 1, new Date().getDate());
+      let current = 0, days30 = 0, days60 = 0, days90 = 0;
+      unpaidInvoices.forEach(inv => {
+        const invDate = new Date(inv.date);
+        const daysDiff = Math.floor((now - invDate) / (1000 * 60 * 60 * 24));
+        if (daysDiff <= 30) current += inv.totalSell;
+        else if (daysDiff <= 60) days30 += inv.totalSell;
+        else if (daysDiff <= 90) days60 += inv.totalSell;
+        else days90 += inv.totalSell;
+      });
+
+      doc.setFillColor(255, 247, 237);
+      doc.setDrawColor(254, 215, 170);
+      doc.setLineWidth(1);
+      doc.rect(40, finalY, 320, 60, 'FD');
+      
+      // Draw Debt Age Analysis Icon (simple bar chart svg)
+      const chartIconSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#92400e" stroke-width="2.5"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>';
+      const chartIconData = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(chartIconSvg);
+      
+      try {
+        const chartImg = await loadImage(chartIconData);
+        doc.addImage(chartImg, 'PNG', 48, finalY + 5, 12, 12);
+      } catch(e) {}
+      
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor('#92400e');
+      doc.text("Debt Age Analysis", 65, finalY + 15);
+      
+      doc.setFontSize(8);
+      doc.setTextColor('#616161');
+      doc.setFont("helvetica", "normal");
+      doc.text("Current", 50, finalY + 35);
+      doc.text("30 Days", 120, finalY + 35);
+      doc.text("60 Days", 190, finalY + 35);
+      doc.text("90+ Days", 260, finalY + 35);
+
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor('#2E7D32'); doc.text(`KES ${fmtMoney(current)}`, 50, finalY + 50);
+      doc.setTextColor('#d97706'); doc.text(`KES ${fmtMoney(days30)}`, 120, finalY + 50);
+      doc.setTextColor('#ea580c'); doc.text(`KES ${fmtMoney(days60)}`, 190, finalY + 50);
+      doc.setTextColor('#dc2626'); doc.text(`KES ${fmtMoney(days90)}`, 260, finalY + 50);
+    }
+
+    // --- Footer on ALL Pages ---
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFillColor(49, 58, 67);
+      doc.ellipse(a4Width / 2, a4Height - 40, a4Width * 0.8, 20, 'F');
+      doc.rect(0, a4Height - 40, a4Width, 40, 'F');
+      
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(9);
+      doc.setTextColor('#ffffff');
+      doc.text(`Thank you for your business, ${rest.name}!`, 40, a4Height - 15);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8);
+      doc.text(`Account Statement — ${monthName}`, a4Width - 40, a4Height - 15, { align: "right" });
+    }
+
+    const filename = `Statement_${rest.name.replace(/\s+/g, '_')}_${monthName}.pdf`;
+    doc.save(filename);
+    toast('PDF Downloaded!', 'success');
+
+  } catch (error) {
+    console.error("PDF Generation Error: ", error);
+    toast("Error generating Statement PDF", "error");
+  }
 }
 
 function shareStatementWhatsApp() {

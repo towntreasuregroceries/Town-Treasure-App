@@ -23,7 +23,8 @@ function renderPriceLists() {
       <td>${fmtDate(pl.updatedAt || pl.createdAt)}</td>
       <td><span class="badge ${statusCls}">${pl.status}</span></td>
       <td>
-        <button class="btn btn-sm btn-primary" onclick="editPriceList('${pl.id}')">Edit</button>
+        <button class="btn btn-sm btn-primary" onclick="viewPriceList('${pl.id}')">View</button>
+        <button class="btn btn-sm btn-secondary" onclick="editPriceList('${pl.id}')">Edit</button>
         <button class="btn btn-sm btn-secondary" onclick="duplicatePriceList('${pl.id}')">Duplicate</button>
         <button class="btn btn-sm btn-danger" onclick="deletePriceList('${pl.id}')">Del</button>
       </td>
@@ -35,6 +36,7 @@ function createNewPriceList() {
   const pl = {
     id: genId(),
     name: 'Price List — ' + new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+    subtitle: 'Food Supplies (Veg and Fruits)',
     status: 'draft',
     items: [
       { id: genId(), name: '', category: 'vegetables', unit: 'kgs', price: 0, notes: '' }
@@ -54,6 +56,7 @@ function editPriceList(id) {
   currentPriceListId = id;
 
   document.getElementById('plEditName').value = pl.name;
+  document.getElementById('plEditSubtitle').value = pl.subtitle || 'Food Supplies (Veg and Fruits)';
   document.getElementById('plEditStatus').value = pl.status;
   renderPriceListItems(pl);
   navigateTo('pricelist-edit');
@@ -69,8 +72,22 @@ function renderPriceListItems(pl) {
     return;
   }
 
-  body.innerHTML = pl.items.map((item, idx) => buildPriceListRow(item, idx)).join('');
+  body.innerHTML = pl.items.map((item, idx) => item.isHeader ? buildCategoryHeaderRow(item) : buildPriceListRow(item, idx)).join('');
   attachPriceListListeners();
+}
+
+function buildCategoryHeaderRow(item) {
+  return `<tr data-item-id="${item.id}" data-type="header" style="background: linear-gradient(135deg, #61b146, #4a9e36); cursor: move;">
+    <td colspan="5" style="padding: 10px 16px; border: none;">
+      <input type="text" class="pl-header-name" value="${item.name || ''}" placeholder="e.g. Fruits, Meat, Vegetables…" 
+        style="background:transparent; border:none; color:white; font-weight:700; font-size:1rem; letter-spacing:0.5px; text-transform:uppercase; width:100%; outline:none;">
+    </td>
+    <td style="border: none; text-align: center;">
+      <button type="button" class="btn-remove-row" onclick="removePriceListRow(this)" style="color:rgba(255,255,255,0.8);">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </td>
+  </tr>`;
 }
 
 function buildPriceListRow(item, idx) {
@@ -102,6 +119,19 @@ function addPriceListRow() {
   triggerPriceListAutoSave();
 }
 
+function addCategoryHeader() {
+  const body = document.getElementById('plItemsBody');
+  if (!body) return;
+  const item = { id: genId(), name: '', isHeader: true };
+  const temp = document.createElement('tbody');
+  temp.innerHTML = buildCategoryHeaderRow(item);
+  const row = temp.firstElementChild;
+  body.appendChild(row);
+  attachPriceListListeners();
+  row.querySelector('.pl-header-name')?.focus();
+  triggerPriceListAutoSave();
+}
+
 function removePriceListRow(btn) {
   const body = document.getElementById('plItemsBody');
   if (body.rows.length <= 1) return toast('Must have at least one item', 'warning');
@@ -125,14 +155,23 @@ function triggerPriceListAutoSave() {
 function collectPriceListData() {
   const items = [];
   document.querySelectorAll('#plItemsBody tr').forEach(row => {
-    items.push({
-      id: row.getAttribute('data-item-id') || genId(),
-      name: row.querySelector('.pl-item-name')?.value.trim() || '',
-      category: row.querySelector('.pl-item-cat')?.value || 'other',
-      unit: row.querySelector('.pl-item-unit')?.value || 'kgs',
-      price: parseFloat(row.querySelector('.pl-item-price')?.value) || 0,
-      notes: row.querySelector('.pl-item-notes')?.value.trim() || ''
-    });
+    const isHeader = row.getAttribute('data-type') === 'header';
+    if (isHeader) {
+      items.push({
+        id: row.getAttribute('data-item-id') || genId(),
+        name: row.querySelector('.pl-header-name')?.value.trim() || '',
+        isHeader: true
+      });
+    } else {
+      items.push({
+        id: row.getAttribute('data-item-id') || genId(),
+        name: row.querySelector('.pl-item-name')?.value.trim() || '',
+        category: row.querySelector('.pl-item-cat')?.value || 'other',
+        unit: row.querySelector('.pl-item-unit')?.value || 'kgs',
+        price: parseFloat(row.querySelector('.pl-item-price')?.value) || 0,
+        notes: row.querySelector('.pl-item-notes')?.value.trim() || ''
+      });
+    }
   });
   return items;
 }
@@ -144,6 +183,7 @@ function savePriceListDraft() {
   if (idx < 0) return;
 
   list[idx].name = document.getElementById('plEditName')?.value.trim() || list[idx].name;
+  list[idx].subtitle = document.getElementById('plEditSubtitle')?.value.trim() || list[idx].subtitle || '';
   list[idx].items = collectPriceListData();
   list[idx].updatedAt = new Date().toISOString();
   DB.priceLists = list;
@@ -159,12 +199,26 @@ function publishPriceList() {
   if (!items.length) return toast('Add at least one item with a name', 'error');
 
   list[idx].name = document.getElementById('plEditName')?.value.trim() || list[idx].name;
+  list[idx].subtitle = document.getElementById('plEditSubtitle')?.value.trim() || list[idx].subtitle || '';
   list[idx].status = document.getElementById('plEditStatus')?.value || 'active';
   list[idx].items = items;
   list[idx].updatedAt = new Date().toISOString();
   DB.priceLists = list;
   toast('Price list saved!');
-  navigateTo('pricelists');
+  viewPriceList(currentPriceListId);
+}
+
+function viewPriceList(id) {
+  const pl = DB.priceLists.find(x => x.id === id);
+  if (!pl) return;
+  currentPriceListId = id;
+  const previewEl = buildPriceListPreview(pl);
+  const container = document.getElementById('pricelistPreviewHtml');
+  if (container) {
+    container.innerHTML = '';
+    container.appendChild(previewEl);
+  }
+  navigateTo('pricelist-view');
 }
 
 /* ── Smart Import from Past Invoices ── */
@@ -274,37 +328,231 @@ function restorePriceList(id) {
 }
 
 /* ── Download / Share Price List ── */
-function downloadPriceListPDF() {
-  if (!currentPriceListId) return;
-  savePriceListDraft();
+async function downloadPriceListPDF() {
+  console.log('[PriceList PDF] Starting download, currentPriceListId:', currentPriceListId);
+  if (!currentPriceListId) { toast('No price list selected', 'warning'); return; }
   const pl = DB.priceLists.find(x => x.id === currentPriceListId);
-  if (!pl) return;
+  if (!pl) { toast('Price list not found', 'error'); return; }
 
-  // Build preview and download
-  const previewEl = buildPriceListPreview(pl);
-  const wrapper = document.createElement('div');
-  wrapper.appendChild(previewEl);
-  document.body.appendChild(wrapper);
+  if (!window.jspdf) {
+    toast('PDF generator is still loading. Please try again.', 'warning');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const doc = new jsPDF({
+    orientation: 'p', unit: 'pt', format: 'a4',
+    encryption: {
+      userPassword: '',
+      ownerPassword: 'TownTreasure2025!',
+      userPermissions: ['print']
+    }
+  });
 
-  const opt = {
-    margin: [0, 0, 0, 0],
-    filename: `${pl.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`,
-    image: { type: 'jpeg', quality: 1.0 },
-    html2canvas: { scale: 2, useCORS: true },
-    jsPDF: { unit: 'in', format: 'a4', orientation: 'portrait' }
+  const a4Width = 595.28;
+  const a4Height = 841.89;
+
+  const loadImage = (src) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = reject;
+      img.src = src;
+    });
   };
 
-  document.body.classList.add('exporting-pdf');
-  html2pdf().set(opt).from(previewEl).save().then(() => {
-    document.body.classList.remove('exporting-pdf');
-    document.body.removeChild(wrapper);
-  });
-  toast('Downloading PDF...');
+  toast('Generating Price List PDF...', 'info');
+
+  try {
+    const drawBrandElements = (isFirstPage) => {
+      // Top Green & Slate bars
+      doc.setFillColor(97, 177, 70); 
+      doc.rect(0, 0, a4Width, 8, 'F');
+      doc.setFillColor(49, 58, 67); 
+      doc.rect(0, 8, a4Width, 3, 'F');
+
+      // Watermark with transparency so it never obscures content
+      doc.saveGraphicsState();
+      doc.setGState(new doc.GState({ opacity: 0.06 }));
+      doc.setTextColor(180, 180, 180);
+      doc.setFontSize(50);
+      doc.setFont("helvetica", "bold");
+      doc.text("Town Treasure Limited", 90, 500, { angle: 30 });
+      doc.restoreGraphicsState();
+      doc.setTextColor(49, 58, 67); // Reset
+    };
+
+    drawBrandElements(true);
+
+    let logoData = null;
+    try {
+      logoData = await loadImage('assets/61367-removebg-preview.png');
+      const imgProps = doc.getImageProperties(logoData);
+      const logoHeight = 85; // Increased size as requested
+      const logoWidth = (imgProps.width * logoHeight) / imgProps.height;
+      doc.addImage(logoData, 'PNG', (a4Width - logoWidth) / 2, 35, logoWidth, logoHeight);
+    } catch (e) { console.warn("Could not load logo", e); }
+
+    let startY = 145; // Shifted down due to larger logo
+    const subtitle = pl.subtitle || 'Food Supplies (Veg and Fruits)';
+
+    // Subtitle (editable)
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.setTextColor(49, 58, 67);
+    doc.text(subtitle, a4Width / 2, startY, { align: "center" });
+
+    // Email & Tel
+    startY += 18;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(49, 58, 67);
+    doc.text("Email: thetowntreasure25@gmail.com | TEL: 0708567696", a4Width / 2, startY, { align: "center" });
+
+    // Horizontal Line
+    startY += 15;
+    doc.setDrawColor(220, 220, 220);
+    doc.setLineWidth(1);
+    doc.line(70, startY, a4Width - 70, startY);
+
+    // Title "Price List"
+    startY += 30;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(24);
+    doc.setTextColor(97, 177, 70);
+    doc.text("Price List", a4Width / 2, startY, { align: "center" });
+
+    // Split items by category headers into sections
+    const allItems = (pl.items || []).filter(i => i.name || i.isHeader);
+    const unitMap = { 
+      'kgs': 'Kilogram', 'litres': 'Litre', 'pieces': 'Each', 'crates': 'Crate', 
+      'bags': 'Bag', 'trays': 'Tray', 'bundles': 'Bundle', 'dozen': 'Dozen', 
+      'packets': 'Packet', 'banch': 'Bunch', 'bunch': 'Bunch', 'each': 'Each'
+    };
+
+    const sections = [];
+    let curSec = { header: null, items: [] };
+    allItems.forEach(it => {
+      if (it.isHeader) {
+        if (curSec.items.length || curSec.header) sections.push(curSec);
+        curSec = { header: it.name, items: [] };
+      } else {
+        curSec.items.push(it);
+      }
+    });
+    if (curSec.items.length || curSec.header) sections.push(curSec);
+
+    const tableMargin = { left: 70, right: 70, bottom: 60, top: 40 };
+    const tableColumn = ["Commodity Description", "Measurement", "Price (KES)"];
+    let currentY = startY + 20;
+
+    sections.forEach(sec => {
+      // Draw category header banner
+      if (sec.header) {
+        // Check if we need a new page
+        if (currentY > a4Height - 120) {
+          doc.addPage();
+          drawBrandElements(false);
+          currentY = 40;
+        }
+        const bannerX = 70;
+        const bannerW = a4Width - 140;
+        const bannerH = 28;
+        // Green gradient banner
+        doc.setFillColor(97, 177, 70);
+        doc.roundedRect(bannerX, currentY, bannerW, bannerH, 3, 3, 'F');
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(11);
+        doc.setTextColor(255, 255, 255);
+        doc.text(sec.header.toUpperCase(), bannerX + 10, currentY + 18);
+        currentY += bannerH + 2;
+      }
+
+      if (!sec.items.length) return;
+
+      const tableRows = sec.items.map(it => {
+        let unitLabel = unitMap[(it.unit || 'kgs').toLowerCase()] || (it.unit.charAt(0).toUpperCase() + it.unit.slice(1));
+        if (it.unit === 'pieces') unitLabel = 'Each';
+        return [it.name, unitLabel, fmtMoney(it.price)];
+      });
+
+      doc.autoTable({
+        startY: currentY,
+        head: [tableColumn],
+        body: tableRows,
+        theme: 'grid',
+        styles: {
+          fontSize: 10, cellPadding: 8, textColor: '#333333',
+          lineColor: '#d1d5db', lineWidth: 0.5, font: "helvetica", valign: 'middle'
+        },
+        headStyles: {
+          fillColor: '#61b146', textColor: '#ffffff', fontStyle: 'bold',
+          lineWidth: 0.5, lineColor: '#d1d5db'
+        },
+        columnStyles: {
+          0: { halign: 'left', cellWidth: 'auto', fontStyle: 'normal' },
+          1: { halign: 'left', cellWidth: 120, textColor: '#6b7280' },
+          2: { halign: 'right', cellWidth: 100, fontStyle: 'bold', textColor: [46, 125, 50] }
+        },
+        margin: tableMargin,
+        didDrawPage: function (data) {
+          if (data.pageNumber > 1) {
+            drawBrandElements(false);
+          }
+        }
+      });
+      currentY = doc.lastAutoTable.finalY + 15;
+    });
+
+    // --- QR Code on Last Page ---
+    try {
+      const qrData = await loadImage('assets/qr%20code.jpg');
+      const qrY = a4Height - 145;
+      doc.addImage(qrData, 'JPEG', 40, qrY, 70, 70);
+      
+      doc.setFontSize(9.5);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(49, 58, 67);
+      doc.text("Visit Us Online:", 40, qrY - 8);
+      
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor('#6b7280');
+      doc.text("Scan to visit our website\nand explore our fresh\ngrocery catalog online.", 120, qrY + 25);
+    } catch(e) { console.warn("Could not load QR code", e); }
+
+    // --- Footer on ALL Pages ---
+    const pageCount = doc.internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFillColor(49, 58, 67);
+      doc.rect(0, a4Height - 40, a4Width, 40, 'F');
+      
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(9);
+      doc.setTextColor('#ffffff');
+      doc.text("Town Treasure Groceries — Fresh & Affordable", a4Width / 2, a4Height - 15, { align: "center" });
+    }
+
+    const filename = `${pl.name.replace(/[^a-zA-Z0-9]/g, '_')}.pdf`;
+    doc.save(filename);
+    toast('PDF Downloaded!', 'success');
+
+  } catch (error) {
+    console.error("PDF Generation Error: ", error);
+    toast("Error generating PDF", "error");
+  }
 }
 
 function sharePriceListWhatsApp() {
   if (!currentPriceListId) return;
-  savePriceListDraft();
   const pl = DB.priceLists.find(x => x.id === currentPriceListId);
   if (!pl) return;
 
@@ -338,51 +586,103 @@ function sharePriceListWhatsApp() {
 }
 
 function buildPriceListPreview(pl) {
-  const items = (pl.items || []).filter(i => i.name);
-  const grouped = {};
-  items.forEach(i => {
-    if (!grouped[i.category]) grouped[i.category] = [];
-    grouped[i.category].push(i);
-  });
+  const allItems = (pl.items || []).filter(i => i.name || i.isHeader);
+  const subtitle = pl.subtitle || 'Food Supplies (Veg and Fruits)';
+  
+  const unitMap = { 
+    'kgs': 'Kilogram', 
+    'litres': 'Litre', 
+    'pieces': 'Each', 
+    'crates': 'Crate', 
+    'bags': 'Bag', 
+    'trays': 'Tray', 
+    'bundles': 'Bundle', 
+    'dozen': 'Dozen', 
+    'packets': 'Packet', 
+    'banch': 'Bunch',
+    'bunch': 'Bunch',
+    'each': 'Each'
+  };
 
-  const catEmoji = { vegetables: '🥕', fruits: '🍎', cereals: '🌾', dairy: '🥛', meat: '🍖', fish: '🐟', legumes: '🫘', spices: '🧂', packaged: '🥫', other: '📦' };
-
-  let tablesHtml = '';
-  Object.entries(grouped).forEach(([cat, catItems]) => {
-    tablesHtml += `
-      <div style="margin-bottom:20px;">
-        <h3 style="font-size:0.95rem;color:#2E7D32;margin-bottom:8px;text-transform:uppercase;letter-spacing:1px;">${catEmoji[cat] || '📦'} ${cat}</h3>
-        <table class="receipt-table" style="margin-bottom:0;">
-          <thead><tr><th>Item</th><th style="text-align:right;">Unit</th><th style="text-align:right;">Price (KES)</th>${catItems.some(i => i.notes) ? '<th>Notes</th>' : ''}</tr></thead>
-          <tbody>${catItems.map(i => `<tr><td>${i.name}</td><td style="text-align:right;text-transform:capitalize;">${i.unit}</td><td style="text-align:right;font-weight:600;">KES ${fmtMoney(i.price)}</td>${catItems.some(x => x.notes) ? `<td style="font-size:0.8rem;color:#616161;">${i.notes || ''}</td>` : ''}</tr>`).join('')}</tbody>
-        </table>
-      </div>`;
+  // Split items into sections — each header starts a new section
+  const sections = [];
+  let currentSection = { header: null, items: [] };
+  allItems.forEach(it => {
+    if (it.isHeader) {
+      if (currentSection.items.length || currentSection.header) {
+        sections.push(currentSection);
+      }
+      currentSection = { header: it.name, items: [] };
+    } else {
+      currentSection.items.push(it);
+    }
   });
+  if (currentSection.items.length || currentSection.header) {
+    sections.push(currentSection);
+  }
+
+  const theadRow = `<tr style="background:#61b146;color:white;">
+    <th style="padding:12px;text-align:left;border:1px solid #d1d5db;border-left:none;">Commodity Description</th>
+    <th style="padding:12px;text-align:left;border:1px solid #d1d5db;">Measurement</th>
+    <th style="padding:12px;text-align:right;border:1px solid #d1d5db;border-right:none;">Price (KES)</th>
+  </tr>`;
+
+  let sectionsHtml = sections.map(sec => {
+    const headerBanner = sec.header 
+      ? `<div style="background:linear-gradient(135deg,#61b146,#4a9e36);color:white;font-weight:700;font-size:15px;letter-spacing:0.5px;text-transform:uppercase;padding:10px 14px;margin-top:24px;border-radius:4px 4px 0 0;">${sec.header}</div>` 
+      : '';
+    
+    if (!sec.items.length) return headerBanner;
+
+    const rows = sec.items.map(it => {
+      let unitLabel = unitMap[(it.unit || 'kgs').toLowerCase()] || (it.unit.charAt(0).toUpperCase() + it.unit.slice(1));
+      if (it.unit === 'pieces') unitLabel = 'Each';
+      return `<tr>
+        <td style="padding:12px;border:1px solid #d1d5db;border-left:none;">${it.name}</td>
+        <td style="padding:12px;border:1px solid #d1d5db;color:#6b7280;">${unitLabel}</td>
+        <td style="padding:12px;border:1px solid #d1d5db;border-right:none;text-align:right;font-weight:700;color:#2e7d32;">${fmtMoney(it.price)}</td>
+      </tr>`;
+    }).join('');
+
+    const topRadius = sec.header ? 'border-radius:0;' : '';
+    return `${headerBanner}
+      <table style="width:100%;border-collapse:collapse;font-size:14px;border:1px solid #d1d5db;${topRadius}">
+        <thead>${theadRow}</thead>
+        <tbody>${rows}</tbody>
+      </table>`;
+  }).join('');
 
   const el = document.createElement('div');
   el.className = 'invoice-preview';
-  el.style.maxWidth = '800px';
+  el.style.width = '210mm';
+  el.style.minHeight = '297mm';
+  el.style.margin = '0 auto';
+  el.style.backgroundColor = '#ffffff';
+  el.style.position = 'relative';
+  el.style.boxSizing = 'border-box';
+  
   el.innerHTML = `
-    <div class="invoice-header-shape" style="position:relative;height:140px;overflow:hidden;border-top-left-radius:8px;border-top-right-radius:8px;">
-      <svg width="100%" height="140" viewBox="0 0 800 140" preserveAspectRatio="none" style="display:block;position:absolute;top:0;left:0;width:100%;height:100%;"><rect x="0" y="0" width="800" height="140" fill="#61b146"/><path d="M240,0 L810,0 L810,80 Q610,120 240,80 Z" fill="#313a43"/><path d="M-50,140 Q400,60 850,140 Z" fill="white"/></svg>
-      <div class="header-content"><img src="assets/logo.png" alt="Logo" class="invoice-logo-img"></div>
-    </div>
-    <div class="invoice-title-row">
-      <div class="invoice-title">PRICE LIST</div>
-      <div style="text-align:right;font-size:0.85rem;color:#616161;">${pl.name}</div>
-    </div>
-    <div style="padding:0 50px 20px;">
-      ${tablesHtml}
-    </div>
-    <div style="padding:10px 50px 20px;font-size:0.82rem;color:#616161;border-top:1px solid #e0e0e0;margin:0 50px;">
-      <p>📞 Orders: 0708567696 &nbsp;|&nbsp; 📧 towntreasuregroceries@gmail.com</p>
-      <p style="margin-top:4px;">⚠️ Prices are subject to market changes without prior notice.</p>
-    </div>
-    <div class="invoice-footer-shape">
-      <div style="position:absolute;bottom:20px;left:0;right:0;display:flex;justify-content:space-between;padding:0 50px;color:white;z-index:5;">
-        <div style="font-style:italic;font-size:0.9rem;">Town Treasure Groceries — Fresh & Affordable</div>
-        <div style="font-size:0.8rem;">towntreasuregroceries.com</div>
+    <div style="position:absolute;top:0;left:0;right:0;height:12px;background:#61b146;"></div>
+    <div style="position:absolute;top:12px;left:0;right:0;height:4px;background:#313a43;"></div>
+    
+    <div style="position:absolute;top:50%;left:50%;transform:translate(-50%, -50%) rotate(-30deg);font-size:80px;color:rgba(245,245,245,0.7);font-weight:bold;white-space:nowrap;z-index:0;pointer-events:none;">Town Treasure Limited</div>
+
+    <div style="position:relative;z-index:1;padding:40px 60px 80px;">
+      <div style="text-align:center;margin-top:20px;">
+        <img src="assets/61367-removebg-preview.png" style="height:110px;object-fit:contain;display:block;margin:0 auto;" alt="Logo">
+        <h2 style="font-size:18px;color:#313a43;margin:20px 0 5px;">${subtitle}</h2>
+        <p style="font-size:14px;color:#313a43;font-weight:600;margin:0;">Email: thetowntreasure25@gmail.com | TEL: 0708567696</p>
+        <hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 20px;">
+        <h1 style="font-size:28px;color:#61b146;margin:30px 0;">Price List</h1>
       </div>
-    </div>`;
+
+      ${sectionsHtml}
+    </div>
+
+    <div style="position:absolute;bottom:0;left:0;right:0;height:45px;background:#313a43;color:white;display:flex;align-items:center;justify-content:center;font-style:italic;font-size:12px;z-index:2;">
+      Town Treasure Groceries — Fresh & Affordable
+    </div>
+  `;
   return el;
 }
+
