@@ -14,7 +14,9 @@ async function openSignatureScanner() {
     sigStream = await navigator.mediaDevices.getUserMedia({ 
       video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
     });
-    document.getElementById('sigVideo').srcObject = sigStream;
+    const videoEl = document.getElementById('sigVideo');
+    videoEl.srcObject = sigStream;
+    videoEl.play().catch(e => console.log("Video play error:", e));
   } catch (err) {
     console.error("Camera access failed", err);
     toast("Could not access camera. Please allow camera permissions.", "error");
@@ -70,6 +72,7 @@ function retakeSignature() {
   document.getElementById('btnSigRetake').style.display = 'none';
   document.getElementById('btnSigSave').style.display = 'none';
   document.getElementById('btnSigCapture').style.display = 'inline-block';
+  document.getElementById('sigVideo').play().catch(e => console.log("Retake play error:", e));
 }
 
 function processSignatureImage(ctx, width, height) {
