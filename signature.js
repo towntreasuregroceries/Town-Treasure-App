@@ -7,12 +7,14 @@ async function openSignatureScanner() {
   document.getElementById('btnSigRetake').style.display = 'none';
   document.getElementById('btnSigSave').style.display = 'none';
   document.getElementById('btnSigCapture').style.display = 'inline-block';
+  const uploadBtn = document.getElementById('btnSigUpload');
+  if (uploadBtn) uploadBtn.style.display = 'inline-block';
   document.getElementById('sigVideo').style.display = 'block';
   document.getElementById('signatureScannerModal').style.display = 'flex';
 
   try {
     sigStream = await navigator.mediaDevices.getUserMedia({ 
-      video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } } 
+      video: { facingMode: 'environment' } 
     });
     const videoEl = document.getElementById('sigVideo');
     videoEl.srcObject = sigStream;
@@ -59,6 +61,8 @@ function captureSignature() {
     preview.style.display = 'block';
     
     document.getElementById('btnSigCapture').style.display = 'none';
+    const uploadBtn = document.getElementById('btnSigUpload');
+    if (uploadBtn) uploadBtn.style.display = 'none';
     document.getElementById('btnSigRetake').style.display = 'inline-block';
     document.getElementById('btnSigSave').style.display = 'inline-block';
     
@@ -72,7 +76,59 @@ function retakeSignature() {
   document.getElementById('btnSigRetake').style.display = 'none';
   document.getElementById('btnSigSave').style.display = 'none';
   document.getElementById('btnSigCapture').style.display = 'inline-block';
+  const uploadBtn = document.getElementById('btnSigUpload');
+  if (uploadBtn) uploadBtn.style.display = 'inline-block';
+  
+  const uploadInput = document.getElementById('sigUploadInput');
+  if (uploadInput) uploadInput.value = '';
+  
   document.getElementById('sigVideo').play().catch(e => console.log("Retake play error:", e));
+}
+
+function handleSignatureUpload(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.getElementById('sigCanvas');
+      const preview = document.getElementById('sigPreview');
+      const video = document.getElementById('sigVideo');
+      const loading = document.getElementById('sigLoading');
+
+      loading.style.display = 'flex';
+
+      setTimeout(() => {
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+
+        processSignatureImage(ctx, canvas.width, canvas.height);
+
+        preview.src = canvas.toDataURL('image/png');
+        video.style.display = 'none';
+        preview.style.display = 'block';
+
+        document.getElementById('btnSigCapture').style.display = 'none';
+        const uploadBtn = document.getElementById('btnSigUpload');
+        if (uploadBtn) uploadBtn.style.display = 'none';
+        document.getElementById('btnSigRetake').style.display = 'inline-block';
+        document.getElementById('btnSigSave').style.display = 'inline-block';
+
+        if (sigStream) {
+          sigStream.getTracks().forEach(track => track.stop());
+          sigStream = null;
+        }
+
+        loading.style.display = 'none';
+      }, 100);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
 }
 
 function processSignatureImage(ctx, width, height) {
