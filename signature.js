@@ -1,130 +1,50 @@
-/* ══ Signature Scanner ══ */
+/* ══ Signature Scanner — Mobile-First ══ */
 
-let sigStream = null;
-
-async function openSignatureScanner() {
+function openSignatureScanner() {
+  // Reset UI
   document.getElementById('sigPreview').style.display = 'none';
-  document.getElementById('btnSigRetake').style.display = 'none';
+  document.getElementById('sigPreview').src = '';
+  document.getElementById('sigPlaceholder').style.display = 'flex';
   document.getElementById('btnSigSave').style.display = 'none';
-  document.getElementById('btnSigCapture').style.display = 'inline-block';
-  const uploadBtn = document.getElementById('btnSigUpload');
-  if (uploadBtn) uploadBtn.style.display = 'inline-block';
-  document.getElementById('sigVideo').style.display = 'block';
+  document.getElementById('sigCameraInput').value = '';
+  document.getElementById('sigGalleryInput').value = '';
   document.getElementById('signatureScannerModal').style.display = 'flex';
-
-  try {
-    sigStream = await navigator.mediaDevices.getUserMedia({ 
-      video: { facingMode: 'environment' } 
-    });
-    const videoEl = document.getElementById('sigVideo');
-    videoEl.srcObject = sigStream;
-    videoEl.play().catch(e => console.log("Video play error:", e));
-  } catch (err) {
-    console.error("Camera access failed", err);
-    toast("Could not access camera. Please allow camera permissions.", "error");
-  }
 }
 
 function closeSignatureScanner() {
   document.getElementById('signatureScannerModal').style.display = 'none';
-  if (sigStream) {
-    sigStream.getTracks().forEach(track => track.stop());
-    sigStream = null;
-  }
 }
 
-function captureSignature() {
-  const video = document.getElementById('sigVideo');
-  const canvas = document.getElementById('sigCanvas');
-  const preview = document.getElementById('sigPreview');
-  const loading = document.getElementById('sigLoading');
-
-  if (!sigStream) return;
-
-  loading.style.display = 'flex';
-
-  // Small delay to allow UI to update
-  setTimeout(() => {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    const ctx = canvas.getContext('2d');
-    
-    // Draw current frame
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    // Process image to extract signature
-    processSignatureImage(ctx, canvas.width, canvas.height);
-    
-    preview.src = canvas.toDataURL('image/png');
-    
-    video.style.display = 'none';
-    preview.style.display = 'block';
-    
-    document.getElementById('btnSigCapture').style.display = 'none';
-    const uploadBtn = document.getElementById('btnSigUpload');
-    if (uploadBtn) uploadBtn.style.display = 'none';
-    document.getElementById('btnSigRetake').style.display = 'inline-block';
-    document.getElementById('btnSigSave').style.display = 'inline-block';
-    
-    loading.style.display = 'none';
-  }, 100);
-}
-
-function retakeSignature() {
-  document.getElementById('sigPreview').style.display = 'none';
-  document.getElementById('sigVideo').style.display = 'block';
-  document.getElementById('btnSigRetake').style.display = 'none';
-  document.getElementById('btnSigSave').style.display = 'none';
-  document.getElementById('btnSigCapture').style.display = 'inline-block';
-  const uploadBtn = document.getElementById('btnSigUpload');
-  if (uploadBtn) uploadBtn.style.display = 'inline-block';
-  
-  const uploadInput = document.getElementById('sigUploadInput');
-  if (uploadInput) uploadInput.value = '';
-  
-  document.getElementById('sigVideo').play().catch(e => console.log("Retake play error:", e));
-}
-
-function handleSignatureUpload(event) {
+function handleSignatureFile(event) {
   const file = event.target.files[0];
   if (!file) return;
+
+  const loading = document.getElementById('sigLoading');
+  loading.style.display = 'flex';
 
   const reader = new FileReader();
   reader.onload = function(e) {
     const img = new Image();
     img.onload = function() {
       const canvas = document.getElementById('sigCanvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+
+      // Process: remove background, tint ink blue, crop
+      processSignatureImage(ctx, canvas.width, canvas.height);
+
       const preview = document.getElementById('sigPreview');
-      const video = document.getElementById('sigVideo');
-      const loading = document.getElementById('sigLoading');
-
-      loading.style.display = 'flex';
-
-      setTimeout(() => {
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-
-        processSignatureImage(ctx, canvas.width, canvas.height);
-
-        preview.src = canvas.toDataURL('image/png');
-        video.style.display = 'none';
-        preview.style.display = 'block';
-
-        document.getElementById('btnSigCapture').style.display = 'none';
-        const uploadBtn = document.getElementById('btnSigUpload');
-        if (uploadBtn) uploadBtn.style.display = 'none';
-        document.getElementById('btnSigRetake').style.display = 'inline-block';
-        document.getElementById('btnSigSave').style.display = 'inline-block';
-
-        if (sigStream) {
-          sigStream.getTracks().forEach(track => track.stop());
-          sigStream = null;
-        }
-
-        loading.style.display = 'none';
-      }, 100);
+      preview.src = canvas.toDataURL('image/png');
+      preview.style.display = 'block';
+      document.getElementById('sigPlaceholder').style.display = 'none';
+      document.getElementById('btnSigSave').style.display = 'inline-block';
+      loading.style.display = 'none';
+    };
+    img.onerror = function() {
+      loading.style.display = 'none';
+      toast('Could not load image. Try again.', 'error');
     };
     img.src = e.target.result;
   };
@@ -134,38 +54,26 @@ function handleSignatureUpload(event) {
 function processSignatureImage(ctx, width, height) {
   const imageData = ctx.getImageData(0, 0, width, height);
   const data = imageData.data;
-  
-  // Convert to grayscale and find average brightness
+
+  // Find average brightness for adaptive threshold
   let totalBrightness = 0;
   for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    const brightness = 0.34 * r + 0.5 * g + 0.16 * b;
-    totalBrightness += brightness;
+    totalBrightness += 0.34 * data[i] + 0.5 * data[i + 1] + 0.16 * data[i + 2];
   }
-  
-  const avgBrightness = totalBrightness / (width * height);
-  // Adaptive threshold based on average brightness (darker marks get kept)
-  const threshold = avgBrightness * 0.85;
+  const threshold = (totalBrightness / (width * height)) * 0.85;
 
   let minX = width, minY = height, maxX = 0, maxY = 0;
 
   for (let i = 0; i < data.length; i += 4) {
-    const r = data[i];
-    const g = data[i + 1];
-    const b = data[i + 2];
-    
-    const brightness = 0.34 * r + 0.5 * g + 0.16 * b;
-    
+    const brightness = 0.34 * data[i] + 0.5 * data[i + 1] + 0.16 * data[i + 2];
+
     if (brightness < threshold) {
-      // It's part of the signature: turn it to a deep blue ink color
-      data[i] = 10;     // R
-      data[i + 1] = 20; // G
-      data[i + 2] = 120;// B
-      data[i + 3] = 255;// Alpha
-      
-      // Track bounding box
+      // Signature ink → deep biro blue
+      data[i] = 10;
+      data[i + 1] = 20;
+      data[i + 2] = 120;
+      data[i + 3] = 255;
+
       const x = (i / 4) % width;
       const y = Math.floor((i / 4) / width);
       if (x < minX) minX = x;
@@ -173,24 +81,23 @@ function processSignatureImage(ctx, width, height) {
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
     } else {
-      // Background: make transparent
+      // Background → transparent
       data[i + 3] = 0;
     }
   }
-  
+
   ctx.putImageData(imageData, 0, 0);
 
-  // Crop to bounding box with some padding
+  // Crop to bounding box
   if (maxX > minX && maxY > minY) {
-    const padding = 20;
-    minX = Math.max(0, minX - padding);
-    minY = Math.max(0, minY - padding);
-    maxX = Math.min(width, maxX + padding);
-    maxY = Math.min(height, maxY + padding);
-    
+    const pad = 20;
+    minX = Math.max(0, minX - pad);
+    minY = Math.max(0, minY - pad);
+    maxX = Math.min(width, maxX + pad);
+    maxY = Math.min(height, maxY + pad);
+
     const cropW = maxX - minX;
     const cropH = maxY - minY;
-    
     const croppedData = ctx.getImageData(minX, minY, cropW, cropH);
     ctx.canvas.width = cropW;
     ctx.canvas.height = cropH;
@@ -201,11 +108,11 @@ function processSignatureImage(ctx, width, height) {
 function saveSignature() {
   const canvas = document.getElementById('sigCanvas');
   const dataUrl = canvas.toDataURL('image/png');
-  
+
   const settings = DB.settings || {};
   settings.signature = dataUrl;
   DB.settings = settings;
-  
+
   toast("Signature saved to vault!", "success");
   closeSignatureScanner();
 }
