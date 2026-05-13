@@ -140,15 +140,20 @@ function base64urlToBuffer(base64url) {
 }
 
 function updateLockUI() {
-  const isLocked = localStorage.getItem('ttg_device_lock');
+  // Auto-migrate legacy device lock
+  if (localStorage.getItem('ttg_device_lock')) {
+    localStorage.setItem('ttg_webauthn_cred', localStorage.getItem('ttg_device_lock'));
+    localStorage.removeItem('ttg_device_lock');
+  }
+  const isLocked = localStorage.getItem('ttg_webauthn_cred');
   const txt = document.getElementById('lockStatusText');
   if (txt) txt.textContent = isLocked ? 'Disable App Lock' : 'Enable App Lock';
 }
 
 async function toggleDeviceLock() {
-  if (localStorage.getItem('ttg_device_lock')) {
+  if (localStorage.getItem('ttg_webauthn_cred')) {
     customConfirm('Are you sure you want to disable the app lock?', 'Disable Lock', 'Yes, Disable', true, () => {
-      localStorage.removeItem('ttg_device_lock');
+      localStorage.removeItem('ttg_webauthn_cred');
       updateLockUI();
       toast('App Lock disabled');
     });
@@ -177,7 +182,7 @@ async function toggleDeviceLock() {
     });
 
     if (credential) {
-      localStorage.setItem('ttg_device_lock', bufferToBase64url(credential.rawId));
+      localStorage.setItem('ttg_webauthn_cred', bufferToBase64url(credential.rawId));
       updateLockUI();
       toast('App Lock enabled successfully!');
     }
@@ -187,41 +192,8 @@ async function toggleDeviceLock() {
   }
 }
 
-async function unlockDevice() {
-  const credIdStr = localStorage.getItem('ttg_device_lock');
-  if (!credIdStr) {
-    document.getElementById('lockScreen').style.display = 'none';
-    return;
-  }
-  try {
-    const challenge = new Uint8Array(32);
-    crypto.getRandomValues(challenge);
-    const assertion = await navigator.credentials.get({
-      publicKey: {
-        challenge: challenge,
-        allowCredentials: [{ type: 'public-key', id: base64urlToBuffer(credIdStr) }],
-        userVerification: 'required',
-        timeout: 60000
-      }
-    });
-    if (assertion) {
-      document.getElementById('lockScreen').style.display = 'none';
-    }
-  } catch (err) {
-    console.error(err);
-    toast('Authentication failed', 'error');
-  }
-}
-
-function initLockScreen() {
-  if (localStorage.getItem('ttg_device_lock')) {
-    document.getElementById('lockScreen').style.display = 'flex';
-  }
-  updateLockUI();
-}
-
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initLockScreen);
+  document.addEventListener('DOMContentLoaded', updateLockUI);
 } else {
-  initLockScreen();
+  updateLockUI();
 }
