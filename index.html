@@ -1564,6 +1564,8 @@
           </div>
         </div>
         <div style="margin-top:16px; display:flex; justify-content:center; gap:10px;">
+          <input type="file" id="sigUploadInput" accept="image/*" style="display:none;" onchange="handleSignatureUpload(event)">
+          <button id="btnSigUpload" class="btn btn-secondary" onclick="document.getElementById('sigUploadInput').click()">Upload Image</button>
           <button id="btnSigCapture" class="btn btn-primary" onclick="captureSignature()">Capture</button>
           <button id="btnSigRetake" class="btn btn-secondary" onclick="retakeSignature()" style="display:none;">Retake</button>
         </div>
@@ -1601,7 +1603,7 @@
   <script src="invoices.js?v=1.1.7"></script>
   <script src="views.js?v=1.1.7"></script>
   <script src="dashboard.js"></script>
-  <script src="signature.js"></script>
+  <script src="signature.js?v=1.2.1"></script>
   <script src="payroll.js?v=1.2.0"></script>
   <script src="pricelist.js?v=1.2.2"></script>
   <script src="statements.js?v=1.2.0"></script>
