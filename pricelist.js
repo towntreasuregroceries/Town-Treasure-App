@@ -351,22 +351,48 @@ async function downloadPriceListPDF() {
   const a4Width = 595.28;
   const a4Height = 841.89;
 
-  const loadImage = (src) => {
-    return new Promise((resolve, reject) => {
-      const img = new Image();
-      img.crossOrigin = 'Anonymous';
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        canvas.width = img.width;
-        canvas.height = img.height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0);
-        resolve(canvas.toDataURL('image/png'));
-      };
-      img.onerror = reject;
-      img.src = src;
-    });
-  };
+    const loadImage = (src) => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = reject;
+        img.src = src;
+      });
+    };
+
+    const loadGrayscaleImage = (src) => {
+      return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.crossOrigin = 'Anonymous';
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.width;
+          canvas.height = img.height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0);
+          try {
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            for (let i = 0; i < data.length; i += 4) {
+              const avg = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+              data[i] = avg; data[i+1] = avg; data[i+2] = avg;
+            }
+            ctx.putImageData(imageData, 0, 0);
+          } catch(e) {}
+          resolve(canvas.toDataURL('image/png'));
+        };
+        img.onerror = reject;
+        img.src = src;
+      });
+    };
 
   toast('Generating Price List PDF...', 'info');
 
@@ -528,6 +554,69 @@ async function downloadPriceListPDF() {
       doc.text("Scan to visit our website\nand explore our fresh\ngrocery catalog online.", 120, qrY + 25);
     } catch(e) { console.warn("Could not load QR code", e); }
 
+    // --- Official Stamp ---
+    try {
+      const stampX = a4Width - 200;
+      const stampY = a4Height - 175;
+      const boxW = 180;
+      const boxH = 100;
+      
+      doc.setDrawColor(30, 30, 30);
+      doc.setLineWidth(2.5);
+      doc.roundedRect(stampX, stampY, boxW, boxH, 10, 10, 'D');
+      
+      try {
+        const stampData = await loadGrayscaleImage('assets/stamp.png');
+        const props = doc.getImageProperties(stampData);
+        let sH = 35;
+        let sW = (sH * props.width) / props.height;
+        if (sW > 140) {
+          sW = 140;
+          sH = (sW * props.height) / props.width;
+        }
+        doc.addImage(stampData, 'PNG', stampX + 90 - (sW/2), stampY + 5, sW, sH);
+      } catch(e) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(0, 0, 0);
+        doc.text("TOWN TREASURE GROCERIES", stampX + 90, stampY + 25, { align: "center" });
+      }
+      
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text("APPROVED PRICING", stampX + 90, stampY + 55, { align: "center" });
+      
+      doc.setFont("courier", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(220, 38, 38);
+      doc.text(`DATE: ${fmtDate(new Date().toISOString().slice(0,10))}`, stampX + 90, stampY + 67, { align: "center" });
+      
+      try {
+        if (DB.settings && DB.settings.signature) {
+          const sigData = await loadImage(DB.settings.signature);
+          const props = doc.getImageProperties(sigData);
+          const maxSigW = 120;
+          let sigH = 25;
+          let sigW = (sigH * props.width) / props.height;
+          if (sigW > maxSigW) {
+            sigW = maxSigW;
+            sigH = (sigW * props.height) / props.width;
+          }
+          doc.addImage(sigData, 'PNG', stampX + 90 - (sigW/2), stampY + 70, sigW, sigH);
+        } else {
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.5);
+          doc.line(stampX + 30, stampY + 88, stampX + 150, stampY + 88);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(6);
+          doc.setTextColor(0, 0, 0);
+          doc.text("Sign Here", stampX + 90, stampY + 95, { align: "center" });
+        }
+      } catch(e) {}
+    } catch(err) {
+      console.warn("Failed to draw stamp on PDF", err);
+    }
+
     // --- Footer on ALL Pages ---
     const pageCount = doc.internal.getNumberOfPages();
     for (let i = 1; i <= pageCount; i++) {
@@ -667,7 +756,7 @@ function buildPriceListPreview(pl) {
     
     <div style="position:absolute;top:50%;left:50%;transform:translate(-50%, -50%) rotate(-30deg);font-size:80px;color:rgba(245,245,245,0.7);font-weight:bold;white-space:nowrap;z-index:0;pointer-events:none;">Town Treasure Limited</div>
 
-    <div style="position:relative;z-index:1;padding:40px 60px 80px;">
+    <div style="position:relative;z-index:1;padding:40px 60px 240px;">
       <div style="text-align:center;margin-top:20px;">
         <img src="assets/61367-removebg-preview.png" style="height:110px;object-fit:contain;display:block;margin:0 auto;" alt="Logo">
         <h2 style="font-size:18px;color:#313a43;margin:20px 0 5px;">${subtitle}</h2>
@@ -677,6 +766,14 @@ function buildPriceListPreview(pl) {
       </div>
 
       ${sectionsHtml}
+      
+      <!-- Official Stamp -->
+      <div class="official-stamp" style="position:absolute; right:60px; bottom:80px; width:220px; border:3px solid rgba(20,20,20,0.85); border-radius:10px; padding:10px; text-align:center; transform:rotate(-4deg); z-index:10; background:transparent; mix-blend-mode:multiply; box-shadow:none;">
+        <img src="assets/stamp.png" style="max-width: 140px; max-height: 50px; object-fit: contain; filter: grayscale(100%); mix-blend-mode: multiply; margin-bottom: 5px;">
+        <div style="font-size:1.1rem; font-weight:900; color:#000000; letter-spacing:1px; margin-bottom:5px;">APPROVED PRICING</div>
+        <div style="font-size:0.7rem; color:#dc2626; font-family:monospace;">DATE: ${fmtDate(new Date().toISOString().slice(0,10))}</div>
+        ${(DB.settings && DB.settings.signature) ? `<img src="${DB.settings.signature}" style="max-width:140px; max-height:60px; margin-top:5px; display:inline-block; mix-blend-mode:multiply;">` : `<div style="height:40px; margin-top:5px; border-bottom:1px solid #000000; width:80%; margin:5px auto 0 auto; line-height:50px; font-size:0.6rem; color:#000000;">Sign Here</div>`}
+      </div>
     </div>
 
     <div style="position:absolute;bottom:0;left:0;right:0;height:45px;background:#313a43;color:white;display:flex;align-items:center;justify-content:center;font-style:italic;font-size:12px;z-index:2;">

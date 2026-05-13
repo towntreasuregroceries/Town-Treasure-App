@@ -399,6 +399,16 @@
             <div class="user-dropdown" id="userDropdown">
               <div class="user-dropdown-email" id="userDropdownEmail">user@email.com</div>
               <hr style="border:none;border-top:1px solid var(--border);margin:6px 0;">
+              <button class="user-dropdown-item" onclick="openSignatureScanner()">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 19l7-7 3 3-7 7-3-3z"></path>
+                  <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"></path>
+                  <path d="M2 2l7.586 7.586"></path>
+                  <circle cx="11" cy="11" r="2"></circle>
+                </svg>
+                My Signature
+              </button>
+              <hr style="border:none;border-top:1px solid var(--border);margin:6px 0;">
               <button class="user-dropdown-item" onclick="handleLogout()">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4" />
@@ -553,7 +563,18 @@
                   </div>
                 </div>
 
-                <div class="form-group" style="margin-top:16px">
+                <div class="form-row" style="margin-top:16px">
+                  <div class="form-group">
+                    <label>Delivery / Transport Cost (KES)</label>
+                    <input type="number" min="0" step="any" class="form-control" id="invDeliveryCost" placeholder="0.00" oninput="calcInvoiceTotals()">
+                  </div>
+                  <div class="form-group">
+                    <label>Other Operational Costs (KES)</label>
+                    <input type="number" min="0" step="any" class="form-control" id="invOtherCost" placeholder="0.00" oninput="calcInvoiceTotals()">
+                  </div>
+                </div>
+
+                <div class="form-group">
                   <label>Notes (optional)</label>
                   <textarea class="form-control" id="invNotes" rows="2"
                     placeholder="Payment terms, delivery notes…"></textarea>
@@ -701,6 +722,12 @@
                   <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                   <circle cx="12" cy="7" r="4"></circle>
                 </svg> Personal</button>
+              <button class="tab-btn" onclick="switchExpenseTab('borrowings',this)"><svg width="14" height="14"
+                  viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                  style="margin-right:4px;vertical-align:text-bottom;">
+                  <line x1="12" y1="1" x2="12" y2="23"></line>
+                  <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
+                </svg> Boss's Account</button>
             </div>
             <button class="btn btn-primary" id="expenseAddBtn" onclick="openModal('expenseModal')">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -850,6 +877,40 @@
                       </tr>
                     </thead>
                     <tbody id="personalBody"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Borrowings Tab -->
+          <div class="expense-tab-content" id="expTab-borrowings" style="display:none;">
+            <div class="stats-grid" id="borrowingStats"></div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+              <p style="color:var(--text-2);font-size:.9rem">Track Boss's Account (Veronica) - Loans and Partial Repayments</p>
+              <button class="btn btn-primary" onclick="openBorrowingModal()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                Record New Loan
+              </button>
+            </div>
+            <div class="card">
+              <div class="card-body">
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Description</th>
+                        <th>Borrowed</th>
+                        <th>Repaid</th>
+                        <th>Balance</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody id="borrowingsBody"></tbody>
                   </table>
                 </div>
               </div>
@@ -1308,31 +1369,115 @@
       <div class="modal-body">
         <input type="hidden" id="editRecurringId">
         <div class="form-group"><label>Description</label><input type="text" class="form-control" id="recurringDesc"
-            placeholder="e.g. Shop Rent, Electricity"></div>
+            placeholder="e.g. Shop Rent" required></div>
         <div class="form-row">
           <div class="form-group"><label>Category</label>
             <select class="form-control" id="recurringCategory">
               <option value="rent">Rent</option>
               <option value="utilities">Utilities</option>
-              <option value="transport">Transport</option>
-              <option value="supplies">Supplies</option>
+              <option value="software">Software/Subscriptions</option>
               <option value="insurance">Insurance</option>
-              <option value="subscriptions">Subscriptions</option>
               <option value="other">Other</option>
             </select>
           </div>
           <div class="form-group"><label>Amount (KES)</label><input type="number" class="form-control"
-              id="recurringAmount" min="0" step="any" placeholder="25000"></div>
+              id="recurringAmount" min="0" step="any" placeholder="10000"></div>
         </div>
-        <div class="form-group"><label>Due Day (day of month)</label><input type="number" class="form-control"
+        <div class="form-group"><label>Due Day (1-31)</label><input type="number" class="form-control"
             id="recurringDueDay" min="1" max="31" value="1"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeModal('recurringModal')">Cancel</button>
-        <button class="btn btn-primary" onclick="saveRecurring()">Save</button>
+        <button class="btn btn-primary" onclick="saveRecurring()">Save Expense</button>
       </div>
     </div>
   </div>
+
+  <!-- Borrowing Modal -->
+  <div class="modal-overlay" id="borrowingModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="borrowingModalTitle">Record New Loan</h2><button onclick="closeModal('borrowingModal')"
+          class="btn-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="editBorrowingId">
+        <div class="form-row">
+          <div class="form-group"><label>Date</label><input type="date" class="form-control" id="borrowingDate"></div>
+          <div class="form-group"><label>Amount (KES)</label><input type="number" class="form-control"
+            id="borrowingAmount" min="0" step="any" placeholder="0.00"></div>
+        </div>
+        <div class="form-group"><label>Description / Reason</label><input type="text" class="form-control" id="borrowingDesc"
+            placeholder="e.g. Cash advance for personal use"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('borrowingModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveBorrowing()">Save Loan</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Repay Modal -->
+  <div class="modal-overlay" id="repayModal">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="repayModalTitle">Record Repayment</h2><button onclick="closeModal('repayModal')"
+          class="btn-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="repayBorrowingId">
+        <div class="form-row">
+          <div class="form-group"><label>Date</label><input type="date" class="form-control" id="repayDate"></div>
+          <div class="form-group"><label>Repayment Amount (KES)</label><input type="number" class="form-control"
+            id="repayAmount" min="0" step="any" placeholder="0.00"></div>
+        </div>
+        <div class="form-group"><label>Notes</label><input type="text" class="form-control" id="repayDesc"
+            placeholder="e.g. Paid via M-Pesa"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('repayModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="saveRepayment()">Save Repayment</button>
+      </div>
+    </div>
+  </div>
+  
+  <!-- Repayments History Modal -->
+  <div class="modal-overlay" id="repaymentsHistoryModal">
+    <div class="modal" style="max-width: 500px;">
+      <div class="modal-header">
+        <h2>Repayment History</h2><button onclick="closeModal('repaymentsHistoryModal')"
+          class="btn-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Amount</th>
+                <th>Notes</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="repaymentsHistoryBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeModal('repaymentsHistoryModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
 
   <!-- Personal Expense Modal -->
   <div class="modal-overlay" id="personalExpenseModal">
@@ -1400,6 +1545,36 @@
   </div>
 
   <!-- Toast container -->
+  <div class="modal-overlay" id="signatureScannerModal">
+    <div class="modal" style="max-width:500px;text-align:center;">
+      <div class="modal-header">
+        <h2>Scan Signature</h2><button onclick="closeSignatureScanner()" class="btn-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p style="color:var(--text-2);margin-bottom:12px;font-size:0.9rem;">Sign on a blank white paper. Point your camera at it and capture.</p>
+        <div style="position:relative; width:100%; max-width:400px; margin:0 auto; border:2px dashed var(--border); border-radius:8px; overflow:hidden; background:#f1f5f9; min-height:200px; display:flex; align-items:center; justify-content:center;">
+          <video id="sigVideo" autoplay playsinline style="width:100%; display:block;"></video>
+          <canvas id="sigCanvas" style="display:none;"></canvas>
+          <img id="sigPreview" style="display:none; width:100%; background:url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAFElEQVQIW2NkYGD4z8DAwMgAI0AMDA4YAQlZzQwAAAAASUVORK5CYII=');" />
+          <div id="sigLoading" style="display:none; position:absolute; inset:0; background:rgba(255,255,255,0.8); z-index:10; align-items:center; justify-content:center; flex-direction:column;">
+            <div class="auth-spinner" style="display:block; width:30px; height:30px; border-color:var(--primary); border-bottom-color:transparent;"></div>
+            <div style="margin-top:10px; font-weight:600; color:var(--primary);">Processing...</div>
+          </div>
+        </div>
+        <div style="margin-top:16px; display:flex; justify-content:center; gap:10px;">
+          <button id="btnSigCapture" class="btn btn-primary" onclick="captureSignature()">Capture</button>
+          <button id="btnSigRetake" class="btn btn-secondary" onclick="retakeSignature()" style="display:none;">Retake</button>
+        </div>
+      </div>
+      <div class="modal-footer" style="justify-content:space-between;">
+        <button class="btn btn-secondary" onclick="closeSignatureScanner()">Cancel</button>
+        <button id="btnSigSave" class="btn btn-success" onclick="saveSignature()" style="display:none;">Save to Vault</button>
+      </div>
+    </div>
+  </div>
+
   <div class="toast-container" id="toastContainer"></div>
 
   <script>
@@ -1425,7 +1600,8 @@
   <script src="nav.js?v=1.2.2"></script>
   <script src="invoices.js?v=1.1.7"></script>
   <script src="views.js?v=1.1.7"></script>
-  <script src="dashboard.js?v=1.2.0"></script>
+  <script src="dashboard.js"></script>
+  <script src="signature.js"></script>
   <script src="payroll.js?v=1.2.0"></script>
   <script src="pricelist.js?v=1.2.2"></script>
   <script src="statements.js?v=1.2.0"></script>

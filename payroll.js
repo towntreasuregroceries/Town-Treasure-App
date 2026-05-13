@@ -431,4 +431,213 @@ function switchExpenseTab(tab, btn) {
   if (tab === 'salaries') renderPayrollTab();
   if (tab === 'recurring') renderRecurringTab();
   if (tab === 'personal') renderPersonalTab();
+  if (tab === 'borrowings') renderBorrowingsTab();
 }
+
+/* ── Boss's Account (Borrowings) ── */
+function openBorrowingModal(id) {
+  document.getElementById('borrowingModalTitle').textContent = id ? 'Edit Loan' : "Record New Loan";
+  if (id) {
+    const b = DB.borrowings.find(x => x.id === id);
+    if (!b) return;
+    document.getElementById('editBorrowingId').value = b.id;
+    document.getElementById('borrowingDate').value = b.date || new Date().toISOString().slice(0, 10);
+    document.getElementById('borrowingDesc').value = b.desc || '';
+    document.getElementById('borrowingAmount').value = b.amount || '';
+  } else {
+    document.getElementById('editBorrowingId').value = '';
+    document.getElementById('borrowingDate').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('borrowingDesc').value = '';
+    document.getElementById('borrowingAmount').value = '';
+  }
+  openModal('borrowingModal');
+}
+
+function saveBorrowing() {
+  const id = document.getElementById('editBorrowingId').value;
+  const date = document.getElementById('borrowingDate').value || new Date().toISOString().slice(0, 10);
+  const desc = document.getElementById('borrowingDesc').value.trim();
+  const amount = parseFloat(document.getElementById('borrowingAmount').value) || 0;
+
+  if (!amount) return toast('Amount is required', 'error');
+
+  const list = DB.borrowings;
+  const idx = list.findIndex(x => x.id === id);
+  if (idx >= 0) {
+    list[idx].date = date;
+    list[idx].desc = desc;
+    list[idx].amount = amount;
+    updateLinkedExpense(list[idx].id, amount, date, desc, 'borrow');
+  } else {
+    const item = { id: genId(), date, desc, amount, repayments: [], createdAt: new Date().toISOString() };
+    list.push(item);
+    createLinkedExpense(item.id, amount, date, desc, 'borrow');
+  }
+  
+  DB.borrowings = list;
+  closeModal('borrowingModal');
+  renderBorrowingsTab();
+  toast(id ? 'Loan updated' : 'Loan saved');
+}
+
+function deleteBorrowing(id) {
+  customConfirm('Delete this loan and all its partial repayments?', 'Delete Loan', 'Yes, Delete', true, () => {
+    const loan = DB.borrowings.find(x => x.id === id);
+    if(loan) {
+      deleteLinkedExpense(loan.id, 'borrow');
+      (loan.repayments || []).forEach(r => deleteLinkedExpense(r.id, 'repay'));
+    }
+    DB.borrowings = DB.borrowings.filter(x => x.id !== id);
+    renderBorrowingsTab();
+    toast('Loan deleted');
+  });
+}
+
+function openRepayModal(loanId) {
+  document.getElementById('repayBorrowingId').value = loanId;
+  document.getElementById('repayDate').value = new Date().toISOString().slice(0, 10);
+  document.getElementById('repayAmount').value = '';
+  document.getElementById('repayDesc').value = '';
+  openModal('repayModal');
+}
+
+function saveRepayment() {
+  const loanId = document.getElementById('repayBorrowingId').value;
+  const date = document.getElementById('repayDate').value || new Date().toISOString().slice(0, 10);
+  const amount = parseFloat(document.getElementById('repayAmount').value) || 0;
+  const desc = document.getElementById('repayDesc').value.trim();
+
+  if (!amount) return toast('Amount is required', 'error');
+
+  const list = DB.borrowings;
+  const loan = list.find(x => x.id === loanId);
+  if (!loan) return;
+  if (!loan.repayments) loan.repayments = [];
+
+  const repayId = genId();
+  loan.repayments.push({ id: repayId, date, amount, desc });
+  
+  createLinkedExpense(repayId, amount, date, 'Repayment: ' + (loan.desc || 'Loan'), 'repay');
+
+  DB.borrowings = list;
+  closeModal('repayModal');
+  renderBorrowingsTab();
+  toast('Repayment saved');
+}
+
+function viewRepayments(loanId) {
+  const loan = DB.borrowings.find(x => x.id === loanId);
+  if (!loan || !loan.repayments || !loan.repayments.length) return toast('No repayments found', 'info');
+  
+  const body = document.getElementById('repaymentsHistoryBody');
+  body.innerHTML = loan.repayments.map(r => `
+    <tr>
+      <td>${fmtDate(r.date)}</td>
+      <td style="color:var(--green-700)">KES ${fmtMoney(r.amount)}</td>
+      <td>${r.desc || '—'}</td>
+      <td><button class="btn btn-sm btn-danger" onclick="deleteRepayment('${loanId}', '${r.id}')">Del</button></td>
+    </tr>
+  `).join('');
+  openModal('repaymentsHistoryModal');
+}
+
+function deleteRepayment(loanId, repayId) {
+  if(!confirm('Delete this repayment?')) return;
+  const list = DB.borrowings;
+  const loan = list.find(x => x.id === loanId);
+  if(loan && loan.repayments) {
+    loan.repayments = loan.repayments.filter(r => r.id !== repayId);
+    deleteLinkedExpense(repayId, 'repay');
+    DB.borrowings = list;
+    viewRepayments(loanId);
+    renderBorrowingsTab();
+    toast('Repayment deleted');
+    if(!loan.repayments.length) closeModal('repaymentsHistoryModal');
+  }
+}
+
+function createLinkedExpense(refId, amount, date, desc, type) {
+  const expList = DB.expenses;
+  if (type === 'borrow') {
+    expList.push({ id: genId(), refId, refType: 'boss_loan', type: 'expense', date, desc: `Boss Loan: ${desc}`, category: 'personal', amount });
+  } else if (type === 'repay') {
+    expList.push({ id: genId(), refId, refType: 'boss_repay', type: 'capital', date, desc: `Boss Repayment`, category: 'capital', amount });
+  }
+  DB.expenses = expList;
+}
+
+function updateLinkedExpense(refId, amount, date, desc, type) {
+  const expList = DB.expenses;
+  const exp = expList.find(e => e.refId === refId && e.refType === (type === 'borrow' ? 'boss_loan' : 'boss_repay'));
+  if (exp) {
+    exp.amount = amount;
+    exp.date = date;
+    if(type === 'borrow') exp.desc = `Boss Loan: ${desc}`;
+    DB.expenses = expList;
+  }
+}
+
+function deleteLinkedExpense(refId, type) {
+  DB.expenses = DB.expenses.filter(e => !(e.refId === refId && e.refType === (type === 'borrow' ? 'boss_loan' : 'boss_repay')));
+}
+
+function renderBorrowingsTab() {
+  const loans = DB.borrowings.filter(b => b.type !== 'repay').map(b => {
+    if (!b.repayments) b.repayments = [];
+    return b;
+  }).slice().reverse();
+  
+  const body = document.getElementById('borrowingsBody');
+  if (!body) return;
+
+  let totalBorrowed = 0;
+  let totalRepaid = 0;
+
+  loans.forEach(loan => {
+    totalBorrowed += loan.amount || 0;
+    const repaid = loan.repayments.reduce((s, r) => s + (r.amount || 0), 0);
+    totalRepaid += repaid;
+  });
+
+  const balance = totalBorrowed - totalRepaid;
+
+  const stats = document.getElementById('borrowingStats');
+  if (stats) {
+    stats.innerHTML = `
+      <div class="stat-card fade-up"><div class="stat-icon red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="stat-info"><h4>Total Loans</h4><div class="stat-value">KES ${fmtMoney(totalBorrowed)}</div></div></div>
+      <div class="stat-card fade-up"><div class="stat-icon green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="stat-info"><h4>Total Repaid</h4><div class="stat-value">KES ${fmtMoney(totalRepaid)}</div></div></div>
+      <div class="stat-card fade-up"><div class="stat-icon ${balance > 0 ? 'orange' : 'blue'}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></div><div class="stat-info"><h4>Outstanding Balance</h4><div class="stat-value">KES ${fmtMoney(balance)}</div></div></div>
+    `;
+  }
+
+  if (!loans.length) {
+    body.innerHTML = '<tr><td colspan="7" class="empty-state"><h3>No loans yet</h3><p>Record a new loan above.</p></td></tr>';
+    return;
+  }
+
+  body.innerHTML = loans.map(b => {
+    const repaid = b.repayments.reduce((s, r) => s + (r.amount || 0), 0);
+    const bal = b.amount - repaid;
+    
+    let statusBadge = '';
+    if (bal <= 0) statusBadge = '<span class="badge badge-success">Paid</span>';
+    else if (repaid > 0) statusBadge = '<span class="badge badge-warning">Partial</span>';
+    else statusBadge = '<span class="badge badge-danger">Unpaid</span>';
+    
+    return `<tr>
+      <td>${fmtDate(b.date)}</td>
+      <td>${b.desc}</td>
+      <td style="font-weight:600; color: var(--danger)">KES ${fmtMoney(b.amount)}</td>
+      <td style="color: var(--green-700)">KES ${fmtMoney(repaid)}</td>
+      <td style="font-weight:600;">KES ${fmtMoney(bal)}</td>
+      <td>${statusBadge}</td>
+      <td>
+        <button class="btn btn-sm btn-primary" onclick="openRepayModal('${b.id}')" ${bal <= 0 ? 'disabled' : ''}>Repay</button>
+        <button class="btn btn-sm btn-secondary" onclick="viewRepayments('${b.id}')" ${repaid === 0 ? 'disabled' : ''}>History</button>
+        <button class="btn btn-sm btn-secondary" onclick="openBorrowingModal('${b.id}')">Edit</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteBorrowing('${b.id}')">Del</button>
+      </td>
+    </tr>`;
+  }).join('');
+}
+

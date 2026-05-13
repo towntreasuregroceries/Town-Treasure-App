@@ -22,9 +22,12 @@ function calcInvoiceTotals() {
     sell += t;
     buy += q * b;
   });
-  document.getElementById('invSubtotal').textContent = fmtMoney(sell);
-  document.getElementById('invCost').textContent = fmtMoney(buy);
-  document.getElementById('invProfit').textContent = fmtMoney(sell - buy);
+  const deliveryCost = parseFloat(document.getElementById('invDeliveryCost')?.value) || 0;
+  const otherCost = parseFloat(document.getElementById('invOtherCost')?.value) || 0;
+  
+  if (document.getElementById('invSubtotal')) document.getElementById('invSubtotal').textContent = fmtMoney(sell);
+  if (document.getElementById('invCost')) document.getElementById('invCost').textContent = fmtMoney(buy) + (deliveryCost || otherCost ? ` (+ ${fmtMoney(deliveryCost+otherCost)} ops)` : '');
+  if (document.getElementById('invProfit')) document.getElementById('invProfit').textContent = fmtMoney(sell - buy - deliveryCost - otherCost);
 }
 function attachLineListeners(row) {
   row.querySelectorAll('input').forEach(inp => inp.addEventListener('input', calcInvoiceTotals));
@@ -81,19 +84,32 @@ function saveInvoice() {
   }
   if (!invId) { invId = genId(); invNumber = generateSecureInvoiceNumber(invDateVal); }
 
-  const inv = {
-    id: invId, number: invNumber || generateSecureInvoiceNumber(invDateVal), restaurantId: restId,
-    restaurantName: rest ? rest.name : 'Unknown',
-    date: invDateVal,
-    dueDate: document.getElementById('invDueDate').value || '',
-    items, totalSell, totalBuy, profit: totalSell - totalBuy,
-    notes: document.getElementById('invNotes').value.trim(),
-    status: 'pending', createdAt
-  };
+    const deliveryCost = parseFloat(document.getElementById('invDeliveryCost').value) || 0;
+    const otherCost = parseFloat(document.getElementById('invOtherCost').value) || 0;
+    
+    const inv = {
+      id: invId, number: invNumber || generateSecureInvoiceNumber(invDateVal), restaurantId: restId,
+      restaurantName: rest ? rest.name : 'Unknown',
+      date: invDateVal,
+      dueDate: document.getElementById('invDueDate').value || '',
+      items, totalSell, totalBuy, deliveryCost, otherCost, profit: totalSell - totalBuy - deliveryCost - otherCost,
+      notes: document.getElementById('invNotes').value.trim(),
+      status: 'pending', createdAt
+    };
   const list = DB.invoices; 
   const idx = list.findIndex(i => i.id === invId);
   if (idx >= 0) list[idx] = inv; else list.push(inv);
   DB.invoices = list;
+  
+  // Create or update associated expenses
+  let expList = DB.expenses.filter(e => e.invId !== invId); // Remove existing tied expenses
+  if (deliveryCost > 0) {
+    expList.push({ id: genId(), invId, type: 'expense', date: invDateVal, desc: `Delivery: ${inv.number} (${inv.restaurantName})`, category: 'transport', amount: deliveryCost });
+  }
+  if (otherCost > 0) {
+    expList.push({ id: genId(), invId, type: 'expense', date: invDateVal, desc: `Ops Cost: ${inv.number} (${inv.restaurantName})`, category: 'other', amount: otherCost });
+  }
+  DB.expenses = expList;
   toast('Invoice ' + inv.number + ' created!');
   document.getElementById('editInvoiceId').value = '';
   if(typeof checkInvoiceDraft === 'function') checkInvoiceDraft();
@@ -106,6 +122,8 @@ function resetInvoiceForm() {
   document.getElementById('invDate').value = new Date().toISOString().slice(0,10);
   document.getElementById('invDueDate').value = '';
   document.getElementById('invNotes').value = '';
+  document.getElementById('invDeliveryCost').value = '';
+  document.getElementById('invOtherCost').value = '';
   const body = document.getElementById('lineItemsBody');
   body.innerHTML = '';
   addLineItem();
@@ -139,6 +157,9 @@ function saveInvoiceDraft(silent = false) {
   }
   if (!invId) { invId = genId(); invNumber = generateSecureInvoiceNumber(invDateVal) + '-D'; }
 
+  const deliveryCost = parseFloat(document.getElementById('invDeliveryCost')?.value) || 0;
+  const otherCost = parseFloat(document.getElementById('invOtherCost')?.value) || 0;
+
   const draft = {
     id: invId,
     number: invNumber,
@@ -146,7 +167,7 @@ function saveInvoiceDraft(silent = false) {
     restaurantName: rest ? rest.name : 'Unknown',
     date: invDateVal,
     dueDate: document.getElementById('invDueDate').value || '',
-    items, totalSell, totalBuy, profit: totalSell - totalBuy,
+    items, totalSell, totalBuy, deliveryCost, otherCost, profit: totalSell - totalBuy - deliveryCost - otherCost,
     notes: document.getElementById('invNotes').value.trim(),
     status: 'draft',
     createdAt
@@ -178,6 +199,10 @@ function loadInvoiceDraft(id) {
   if (draft.date) document.getElementById('invDate').value = draft.date;
   if (draft.dueDate) document.getElementById('invDueDate').value = draft.dueDate;
   if (draft.notes) document.getElementById('invNotes').value = draft.notes;
+  if (draft.deliveryCost) document.getElementById('invDeliveryCost').value = draft.deliveryCost;
+  else document.getElementById('invDeliveryCost').value = '';
+  if (draft.otherCost) document.getElementById('invOtherCost').value = draft.otherCost;
+  else document.getElementById('invOtherCost').value = '';
   
   const body = document.getElementById('lineItemsBody');
   body.innerHTML = '';
@@ -282,6 +307,7 @@ function deleteInvoice(id) {
       DB.deletedInvoices = bin;
     }
     DB.invoices = DB.invoices.filter(i => i.id !== id);
+    DB.expenses = DB.expenses.filter(e => e.invId !== id);
     renderInvoicesList();
     toast('Invoice moved to Recycle Bin');
   });
@@ -368,6 +394,12 @@ function restoreInvoice(id) {
   delete restored.deletedAt; delete restored.originalStatus;
   const list = DB.invoices; list.push(restored); DB.invoices = list;
   DB.deletedInvoices = bin.filter(i => i.id !== id);
+  
+  let expList = DB.expenses.filter(e => e.invId !== id);
+  if (restored.deliveryCost > 0) expList.push({ id: genId(), invId: id, type: 'expense', date: restored.date, desc: `Delivery: ${restored.number} (${restored.restaurantName})`, category: 'transport', amount: restored.deliveryCost });
+  if (restored.otherCost > 0) expList.push({ id: genId(), invId: id, type: 'expense', date: restored.date, desc: `Ops Cost: ${restored.number} (${restored.restaurantName})`, category: 'other', amount: restored.otherCost });
+  DB.expenses = expList;
+  
   renderBin(); toast('Invoice restored!');
 }
 
@@ -378,12 +410,17 @@ function restoreSelectedBinItems() {
   
   customConfirm(`Restore ${ids.length} selected item(s)?`, 'Restore Items', 'Yes, Restore', false, () => {
     if (binTab === 'invoices') {
-      const bin = DB.deletedInvoices; const list = DB.invoices;
+      const bin = DB.deletedInvoices; const list = DB.invoices; let expList = DB.expenses;
       ids.forEach(id => {
         const inv = bin.find(i => i.id === id);
-        if (inv) { const r = { ...inv }; r.status = inv.originalStatus || inv.status || 'pending'; delete r.deletedAt; delete r.originalStatus; list.push(r); }
+        if (inv) { 
+          const r = { ...inv }; r.status = inv.originalStatus || inv.status || 'pending'; delete r.deletedAt; delete r.originalStatus; list.push(r);
+          expList = expList.filter(e => e.invId !== id);
+          if (r.deliveryCost > 0) expList.push({ id: genId(), invId: id, type: 'expense', date: r.date, desc: `Delivery: ${r.number} (${r.restaurantName})`, category: 'transport', amount: r.deliveryCost });
+          if (r.otherCost > 0) expList.push({ id: genId(), invId: id, type: 'expense', date: r.date, desc: `Ops Cost: ${r.number} (${r.restaurantName})`, category: 'other', amount: r.otherCost });
+        }
       });
-      DB.invoices = list; DB.deletedInvoices = bin.filter(i => !ids.includes(i.id));
+      DB.invoices = list; DB.deletedInvoices = bin.filter(i => !ids.includes(i.id)); DB.expenses = expList;
     } 
     else if (binTab === 'staff') {
       const bin = DB.deletedStaff; const list = DB.staff;
@@ -439,6 +476,10 @@ function editInvoice(id) {
   if (inv.date) document.getElementById('invDate').value = inv.date;
   if (inv.dueDate) document.getElementById('invDueDate').value = inv.dueDate;
   if (inv.notes) document.getElementById('invNotes').value = inv.notes;
+  if (inv.deliveryCost) document.getElementById('invDeliveryCost').value = inv.deliveryCost;
+  else document.getElementById('invDeliveryCost').value = '';
+  if (inv.otherCost) document.getElementById('invOtherCost').value = inv.otherCost;
+  else document.getElementById('invOtherCost').value = '';
   
   const body = document.getElementById('lineItemsBody');
   body.innerHTML = '';

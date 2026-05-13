@@ -64,6 +64,24 @@ function generateInsights() {
     insights.attention.push(`<strong>${name}</strong> owes KES ${fmtMoney(d.total)} — oldest invoice is ${d.days} days old`);
   });
 
+  // 🟡 ATTENTION: Borrowed Loans (Boss's Account)
+  const borrowings = DB.borrowings;
+  if (borrowings && borrowings.length > 0) {
+    let totalBorrowed = 0;
+    let totalRepaid = 0;
+    borrowings.forEach(loan => {
+      if (loan.type !== 'repay') {
+        totalBorrowed += loan.amount || 0;
+        const repaid = (loan.repayments || []).reduce((s, r) => s + (r.amount || 0), 0);
+        totalRepaid += repaid;
+      }
+    });
+    const outstanding = totalBorrowed - totalRepaid;
+    if (outstanding > 0) {
+      insights.attention.push(`<strong>Boss's Account</strong> has an outstanding loan balance of KES ${fmtMoney(outstanding)}. Consider making partial repayments to clear it.`);
+    }
+  }
+
   // 🟡 ATTENTION: Expense category spikes vs last month
   const thisMonthExps = DB.expenses.filter(e => e.type === 'expense' && e.date && e.date.startsWith(thisMonth));
   const lastMonthExps = DB.expenses.filter(e => e.type === 'expense' && e.date && e.date.startsWith(lastMonth));

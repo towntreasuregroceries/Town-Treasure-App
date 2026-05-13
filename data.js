@@ -78,6 +78,8 @@ const state = {
   priceLists: JSON.parse(localStorage.getItem('ttg_price_lists') || '[]'),
   deletedStaff: JSON.parse(localStorage.getItem('ttg_deleted_staff') || '[]'),
   deletedPriceLists: JSON.parse(localStorage.getItem('ttg_deleted_pricelists') || '[]'),
+  borrowings: JSON.parse(localStorage.getItem('ttg_borrowings') || '[]'),
+  settings: JSON.parse(localStorage.getItem('ttg_settings') || '{}'),
   nextInvNum: 1001
 };
 
@@ -102,6 +104,10 @@ const DB = {
   set deletedStaff(v) { state.deletedStaff = v; localStorage.setItem('ttg_deleted_staff', JSON.stringify(v)); this.syncToSupabase(); },
   get deletedPriceLists() { return state.deletedPriceLists; },
   set deletedPriceLists(v) { state.deletedPriceLists = v; localStorage.setItem('ttg_deleted_pricelists', JSON.stringify(v)); this.syncToSupabase(); },
+  get borrowings() { return state.borrowings; },
+  set borrowings(v) { state.borrowings = v; localStorage.setItem('ttg_borrowings', JSON.stringify(v)); this.syncToSupabase(); },
+  get settings() { return state.settings; },
+  set settings(v) { state.settings = v; localStorage.setItem('ttg_settings', JSON.stringify(v)); this.syncToSupabase(); },
   
   get nextInvNum() {
     if (state.invoices.length === 0) return state.nextInvNum;
@@ -138,7 +144,8 @@ const DB = {
         recurringExpenses: state.recurringExpenses,
         priceLists: state.priceLists,
         deletedStaff: state.deletedStaff,
-        deletedPriceLists: state.deletedPriceLists
+        deletedPriceLists: state.deletedPriceLists,
+        borrowings: state.borrowings
       };
 
       // 2. Encrypt it completely
@@ -198,6 +205,7 @@ const DB = {
           state.priceLists = appState.priceLists || [];
           state.deletedStaff = appState.deletedStaff || [];
           state.deletedPriceLists = appState.deletedPriceLists || [];
+          state.borrowings = appState.borrowings || [];
           
           localStorage.setItem('ttg_invoices', JSON.stringify(state.invoices));
           localStorage.setItem('ttg_expenses', JSON.stringify(state.expenses));
@@ -209,6 +217,7 @@ const DB = {
           localStorage.setItem('ttg_price_lists', JSON.stringify(state.priceLists));
           localStorage.setItem('ttg_deleted_staff', JSON.stringify(state.deletedStaff));
           localStorage.setItem('ttg_deleted_pricelists', JSON.stringify(state.deletedPriceLists));
+          localStorage.setItem('ttg_borrowings', JSON.stringify(state.borrowings));
           
           console.log('Loaded and decrypted data from vault');
           return true;
@@ -236,7 +245,8 @@ const DB = {
     state.priceLists = [];
     state.deletedStaff = [];
     state.deletedPriceLists = [];
-    ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices', 'ttg_staff', 'ttg_salary_payments', 'ttg_recurring_expenses', 'ttg_price_lists', 'ttg_deleted_staff', 'ttg_deleted_pricelists'].forEach(k => localStorage.removeItem(k));
+    state.borrowings = [];
+    ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices', 'ttg_staff', 'ttg_salary_payments', 'ttg_recurring_expenses', 'ttg_price_lists', 'ttg_deleted_staff', 'ttg_deleted_pricelists', 'ttg_borrowings'].forEach(k => localStorage.removeItem(k));
   }
 };
 

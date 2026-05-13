@@ -195,6 +195,8 @@ function buildStatementHTML(rest, month) {
       </div>
     </div>` : ''}
 
+    <div style="height: 180px;"></div>
+
     <div class="invoice-footer-shape">
       <div style="position:absolute;bottom:20px;left:0;right:0;display:flex;justify-content:space-between;padding:0 50px;color:white;z-index:5;">
         <div style="font-style:italic;font-size:0.9rem;">Thank you for your business, ${rest.name}!</div>
@@ -202,6 +204,14 @@ function buildStatementHTML(rest, month) {
       </div>
     </div>
     <div class="watermark-overlay" style="z-index:1;"><img src="assets/logo.png" alt="Stamp" class="watermark-stamp"><div class="watermark-text">Town Treasure Limited</div></div>
+    
+    <!-- Official Stamp -->
+    <div class="official-stamp" style="position:absolute; right:60px; bottom:80px; width:220px; border:3px solid rgba(20,20,20,0.85); border-radius:10px; padding:10px; text-align:center; transform:rotate(-4deg); z-index:10; background:transparent; mix-blend-mode:multiply; box-shadow:none;">
+      <img src="assets/stamp.png" style="max-width: 140px; max-height: 50px; object-fit: contain; filter: grayscale(100%); mix-blend-mode: multiply; margin-bottom: 5px;">
+      <div style="font-size:1.1rem; font-weight:900; color:#000000; letter-spacing:1px; margin-bottom:5px;">ACCOUNT VERIFIED</div>
+      <div style="font-size:0.7rem; color:#dc2626; font-family:monospace;">DATE: ${fmtDate(new Date().toISOString().slice(0,10))}</div>
+      ${(DB.settings && DB.settings.signature) ? `<img src="${DB.settings.signature}" style="max-width:140px; max-height:60px; margin-top:5px; display:inline-block; mix-blend-mode:multiply;">` : `<div style="height:40px; margin-top:5px; border-bottom:1px solid #000000; width:80%; margin:5px auto 0 auto; line-height:50px; font-size:0.6rem; color:#000000;">Sign Here</div>`}
+    </div>
   </div>`;
 }
 
@@ -249,6 +259,32 @@ async function downloadStatementPDF() {
         canvas.height = img.height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(img, 0, 0);
+        resolve(canvas.toDataURL('image/png'));
+      };
+      img.onerror = reject;
+      img.src = src;
+    });
+  };
+
+  const loadGrayscaleImage = (src) => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.crossOrigin = 'Anonymous';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        try {
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imageData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            const avg = 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+            data[i] = avg; data[i+1] = avg; data[i+2] = avg;
+          }
+          ctx.putImageData(imageData, 0, 0);
+        } catch(e) {}
         resolve(canvas.toDataURL('image/png'));
       };
       img.onerror = reject;
@@ -421,7 +457,7 @@ async function downloadStatementPDF() {
     });
 
     let finalY = doc.lastAutoTable.finalY + 30;
-    if (finalY > a4Height - 180) {
+    if (finalY > a4Height - 240) {
       doc.addPage();
       finalY = 160;
     }
@@ -494,6 +530,69 @@ async function downloadStatementPDF() {
       doc.setTextColor('#d97706'); doc.text(`KES ${fmtMoney(days30)}`, 120, finalY + 50);
       doc.setTextColor('#ea580c'); doc.text(`KES ${fmtMoney(days60)}`, 190, finalY + 50);
       doc.setTextColor('#dc2626'); doc.text(`KES ${fmtMoney(days90)}`, 260, finalY + 50);
+    }
+
+    // --- Official Stamp ---
+    try {
+      const stampX = a4Width - 200;
+      const stampY = finalY + 70;
+      const boxW = 180;
+      const boxH = 100;
+      
+      doc.setDrawColor(30, 30, 30);
+      doc.setLineWidth(2.5);
+      doc.roundedRect(stampX, stampY, boxW, boxH, 10, 10, 'D');
+      
+      try {
+        const stampData = await loadGrayscaleImage('assets/stamp.png');
+        const props = doc.getImageProperties(stampData);
+        let sH = 35;
+        let sW = (sH * props.width) / props.height;
+        if (sW > 140) {
+          sW = 140;
+          sH = (sW * props.height) / props.width;
+        }
+        doc.addImage(stampData, 'PNG', stampX + 90 - (sW/2), stampY + 5, sW, sH);
+      } catch(e) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(0, 0, 0);
+        doc.text("TOWN TREASURE GROCERIES", stampX + 90, stampY + 25, { align: "center" });
+      }
+      
+      doc.setFontSize(12);
+      doc.setTextColor(0, 0, 0);
+      doc.text("ACCOUNT VERIFIED", stampX + 90, stampY + 55, { align: "center" });
+      
+      doc.setFont("courier", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(220, 38, 38);
+      doc.text(`DATE: ${fmtDate(new Date().toISOString().slice(0,10))}`, stampX + 90, stampY + 67, { align: "center" });
+      
+      try {
+        if (DB.settings && DB.settings.signature) {
+          const sigData = await loadImage(DB.settings.signature);
+          const props = doc.getImageProperties(sigData);
+          const maxSigW = 120;
+          let sigH = 25;
+          let sigW = (sigH * props.width) / props.height;
+          if (sigW > maxSigW) {
+            sigW = maxSigW;
+            sigH = (sigW * props.height) / props.width;
+          }
+          doc.addImage(sigData, 'PNG', stampX + 90 - (sigW/2), stampY + 70, sigW, sigH);
+        } else {
+          doc.setDrawColor(0, 0, 0);
+          doc.setLineWidth(0.5);
+          doc.line(stampX + 30, stampY + 88, stampX + 150, stampY + 88);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(6);
+          doc.setTextColor(0, 0, 0);
+          doc.text("Sign Here", stampX + 90, stampY + 95, { align: "center" });
+        }
+      } catch(e) {}
+    } catch(err) {
+      console.warn("Failed to draw stamp on PDF", err);
     }
 
     // --- Footer on ALL Pages ---
