@@ -1027,6 +1027,84 @@ async function handlePasswordLogin() {
   }
 }
 
+/* ══ Change Password ══ */
+function openChangePasswordModal() {
+  document.getElementById('changePasswordError').style.display = 'none';
+  document.getElementById('cpCurrentPassword').value = '';
+  document.getElementById('cpNewPassword').value = '';
+  document.getElementById('cpConfirmPassword').value = '';
+  document.getElementById('cpShowPassword').checked = false;
+  document.getElementById('cpUnderstandCheckbox').checked = false;
+  document.getElementById('cpNewPassword').type = 'password';
+  document.getElementById('cpConfirmPassword').type = 'password';
+  document.getElementById('userDropdown').classList.remove('open');
+  openModal('changePasswordModal');
+}
+
+async function handleChangePassword() {
+  const currentPass = document.getElementById('cpCurrentPassword').value;
+  const newPass = document.getElementById('cpNewPassword').value;
+  const confirmPass = document.getElementById('cpConfirmPassword').value;
+  const understand = document.getElementById('cpUnderstandCheckbox').checked;
+  const errorEl = document.getElementById('changePasswordError');
+  const btnText = document.getElementById('btnSavePasswordText');
+  const spinner = document.getElementById('btnSavePasswordSpinner');
+
+  errorEl.style.display = 'none';
+
+  if (!currentPass || !newPass || !confirmPass) {
+    errorEl.textContent = 'Please fill in all password fields.';
+    errorEl.style.display = 'block';
+    return;
+  }
+  if (newPass.length < 6) {
+    errorEl.textContent = 'New password must be at least 6 characters long.';
+    errorEl.style.display = 'block';
+    return;
+  }
+  if (newPass !== confirmPass) {
+    errorEl.textContent = 'New passwords do not match.';
+    errorEl.style.display = 'block';
+    return;
+  }
+  if (!understand) {
+    errorEl.textContent = 'Please acknowledge that you have recorded your new password by checking the box below.';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  btnText.style.display = 'none';
+  spinner.style.display = 'inline-block';
+
+  try {
+    const user = await getCurrentUser();
+    if (!user || !user.email) throw new Error('Not authenticated.');
+
+    // 1. Verify old password by attempting to sign in
+    await signIn(user.email, currentPass);
+
+    // 2. Update to new password in Supabase
+    const { error: updateError } = await supabaseClient.auth.updateUser({ password: newPass });
+    if (updateError) throw updateError;
+
+    // 3. Derive new encryption key
+    const newJwkKey = await Crypto.deriveKey(newPass);
+    localStorage.setItem('ttg_e2e_key', JSON.stringify(newJwkKey));
+
+    // 4. Re-encrypt all data with new key and sync to vault
+    await DB.syncToSupabase();
+
+    closeModal('changePasswordModal');
+    toast('Password changed successfully!', 'success');
+  } catch (err) {
+    errorEl.textContent = err.message || 'Error changing password. Ensure your current password is correct.';
+    errorEl.style.display = 'block';
+  } finally {
+    btnText.style.display = 'inline';
+    spinner.style.display = 'none';
+  }
+}
+
 /* ══ Logout ══ */
 async function handleLogout() {
   customConfirm('Are you sure you want to sign out?', 'Sign Out', 'Yes, Sign Out', false, async () => {

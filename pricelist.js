@@ -82,9 +82,13 @@ function buildCategoryHeaderRow(item) {
       <input type="text" class="pl-header-name" value="${item.name || ''}" placeholder="e.g. Fruits, Meat, Vegetables…" 
         style="background:transparent; border:none; color:white; font-weight:700; font-size:1rem; letter-spacing:0.5px; text-transform:uppercase; width:100%; outline:none;">
     </td>
-    <td style="border: none; text-align: center;">
-      <button type="button" class="btn-remove-row" onclick="removePriceListRow(this)" style="color:rgba(255,255,255,0.8);">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    <td style="border: none; text-align: right; padding-right: 16px; white-space: nowrap;">
+      <button type="button" onclick="insertPriceListHeaderBelow(this)" style="color:rgba(255,255,255,0.9); background:rgba(0,0,0,0.15); border:none; cursor:pointer; padding:4px 6px; border-radius:4px; margin-right:4px; font-weight:bold; font-size:12px; vertical-align:middle;" title="Add Header Below">H+</button>
+      <button type="button" onclick="insertPriceListRowBelow(this)" style="color:rgba(255,255,255,0.9); background:rgba(0,0,0,0.15); border:none; cursor:pointer; padding:4px; border-radius:4px; margin-right:4px; vertical-align:middle;" title="Add Item Below">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button type="button" class="btn-remove-row" onclick="removePriceListRow(this)" style="color:rgba(255,255,255,0.9); background:rgba(220,38,38,0.8); border:none; cursor:pointer; padding:4px; border-radius:4px; vertical-align:middle;" title="Remove Header">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </td>
   </tr>`;
@@ -102,7 +106,15 @@ function buildPriceListRow(item, idx) {
     <td><select class="pl-item-unit form-control" style="padding:6px 4px;font-size:0.8rem;">${unitOptions}</select></td>
     <td><input type="number" class="pl-item-price" min="0" step="any" value="${item.price || ''}" placeholder="0.00"></td>
     <td><input type="text" class="pl-item-notes" value="${item.notes || ''}" placeholder="Grade A, etc."></td>
-    <td><button type="button" class="btn-remove-row" onclick="removePriceListRow(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>
+    <td style="white-space:nowrap; text-align:right;">
+      <button type="button" style="color:var(--primary); background:var(--primary-lt); border:none; cursor:pointer; padding:5px 7px; border-radius:4px; margin-right:4px; font-weight:bold; font-size:12px; vertical-align:middle;" onclick="insertPriceListHeaderBelow(this)" title="Add Header Below">H+</button>
+      <button type="button" style="color:var(--primary); background:var(--primary-lt); border:none; cursor:pointer; padding:6px; border-radius:4px; margin-right:4px; vertical-align:middle;" onclick="insertPriceListRowBelow(this)" title="Add Item Below">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      </button>
+      <button type="button" class="btn-remove-row" onclick="removePriceListRow(this)" style="padding:6px; border-radius:4px; vertical-align:middle;" title="Remove Row">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:block;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </td>
   </tr>`;
 }
 
@@ -136,6 +148,95 @@ function removePriceListRow(btn) {
   const body = document.getElementById('plItemsBody');
   if (body.rows.length <= 1) return toast('Must have at least one item', 'warning');
   btn.closest('tr').remove();
+  triggerPriceListAutoSave();
+}
+
+function insertPriceListRowBelow(btn) {
+  const currentRow = btn.closest('tr');
+  let category = 'vegetables';
+  let unit = 'kgs';
+  
+  if (currentRow.getAttribute('data-type') !== 'header') {
+    category = currentRow.querySelector('.pl-item-cat')?.value || 'vegetables';
+    unit = currentRow.querySelector('.pl-item-unit')?.value || 'kgs';
+  } else {
+    // If inserting below a header, try to guess the category from the header name
+    const headerName = currentRow.querySelector('.pl-header-name')?.value || '';
+    category = guessPriceListCategory(headerName);
+  }
+
+  const item = { id: genId(), name: '', category, unit, price: 0, notes: '' };
+  const temp = document.createElement('tbody');
+  temp.innerHTML = buildPriceListRow(item, 0);
+  const newRow = temp.firstElementChild;
+  
+  currentRow.insertAdjacentElement('afterend', newRow);
+  attachPriceListListeners();
+  
+  // Focus the newly inserted row's name input
+  const nameInput = newRow.querySelector('.pl-item-name');
+  if (nameInput) nameInput.focus();
+  
+  triggerPriceListAutoSave();
+}
+
+function insertPriceListHeaderBelow(btn) {
+  const currentRow = btn.closest('tr');
+  const item = { id: genId(), name: '', isHeader: true };
+  const temp = document.createElement('tbody');
+  temp.innerHTML = buildCategoryHeaderRow(item);
+  const newRow = temp.firstElementChild;
+  
+  currentRow.insertAdjacentElement('afterend', newRow);
+  attachPriceListListeners();
+  
+  const nameInput = newRow.querySelector('.pl-header-name');
+  if (nameInput) nameInput.focus();
+  
+  triggerPriceListAutoSave();
+}
+
+function insertPriceListRowTop() {
+  const body = document.getElementById('plItemsBody');
+  if (!body) return;
+  const item = { id: genId(), name: '', category: 'vegetables', unit: 'kgs', price: 0, notes: '' };
+  
+  const firstRow = body.firstElementChild;
+  if (firstRow && firstRow.getAttribute('data-type') !== 'header') {
+    item.category = firstRow.querySelector('.pl-item-cat')?.value || 'vegetables';
+    item.unit = firstRow.querySelector('.pl-item-unit')?.value || 'kgs';
+  } else if (firstRow && firstRow.getAttribute('data-type') === 'header') {
+    const headerName = firstRow.querySelector('.pl-header-name')?.value || '';
+    item.category = guessPriceListCategory(headerName);
+  }
+
+  const temp = document.createElement('tbody');
+  temp.innerHTML = buildPriceListRow(item, 0);
+  const newRow = temp.firstElementChild;
+  
+  body.prepend(newRow);
+  attachPriceListListeners();
+  
+  const nameInput = newRow.querySelector('.pl-item-name');
+  if (nameInput) nameInput.focus();
+  
+  triggerPriceListAutoSave();
+}
+
+function insertPriceListHeaderTop() {
+  const body = document.getElementById('plItemsBody');
+  if (!body) return;
+  const item = { id: genId(), name: '', isHeader: true };
+  const temp = document.createElement('tbody');
+  temp.innerHTML = buildCategoryHeaderRow(item);
+  const newRow = temp.firstElementChild;
+  
+  body.prepend(newRow);
+  attachPriceListListeners();
+  
+  const nameInput = newRow.querySelector('.pl-header-name');
+  if (nameInput) nameInput.focus();
+  
   triggerPriceListAutoSave();
 }
 
