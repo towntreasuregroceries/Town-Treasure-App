@@ -1719,28 +1719,48 @@
   <script src="insights.js?v=1.2.0"></script>
   <script src="app.js?v=1.2.0"></script>
   <script>
-    // Register Service Worker for PWA + auto-updates
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('./sw.js').then(reg => {
+    // NUCLEAR CACHE CLEAR: Unregister old SWs, delete all caches, then re-register
+    (async function() {
+      if (!('serviceWorker' in navigator)) return;
+      try {
+        var EXPECTED_VERSION = 'ttg-v1.2.4';
+        var currentVersion = localStorage.getItem('ttg_sw_version');
+        
+        if (currentVersion !== EXPECTED_VERSION) {
+          console.log('[PWA] Version mismatch. Clearing ALL caches...');
+          // Unregister all service workers
+          var regs = await navigator.serviceWorker.getRegistrations();
+          for (var r of regs) { await r.unregister(); }
+          // Delete all caches
+          var keys = await caches.keys();
+          for (var k of keys) { await caches.delete(k); }
+          // Mark version
+          localStorage.setItem('ttg_sw_version', EXPECTED_VERSION);
+          // Reload to get completely fresh page
+          if (currentVersion) {
+            window.location.reload(true);
+            return;
+          }
+        }
+        
+        // Register fresh SW
+        var reg = await navigator.serviceWorker.register('./sw.js');
         console.log('[PWA] Service Worker registered');
-        // Check for updates every 60 seconds
-        setInterval(() => { reg.update(); }, 60000);
-        let updateNotified = false;
-        reg.addEventListener('updatefound', () => {
-          const newWorker = reg.installing;
-          newWorker.addEventListener('statechange', () => {
-            // Listen for 'installed' state (which happens before activated)
+        setInterval(function() { reg.update(); }, 60000);
+        var updateNotified = false;
+        reg.addEventListener('updatefound', function() {
+          var newWorker = reg.installing;
+          newWorker.addEventListener('statechange', function() {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller && !updateNotified) {
               updateNotified = true;
-              // New version available — prompt user to reload
-              customConfirm('A new update is available! Reload now to get the latest features and fixes.', 'Update Available', 'Reload Now', false, () => {
-                window.location.reload();
+              customConfirm('A new update is available! Reload now to get the latest features and fixes.', 'Update Available', 'Reload Now', false, function() {
+                window.location.reload(true);
               });
             }
           });
         });
-      }).catch(err => console.error('[PWA] SW registration failed:', err));
-    }
+      } catch(err) { console.error('[PWA] Error:', err); }
+    })();
   </script>
 </body>
 
