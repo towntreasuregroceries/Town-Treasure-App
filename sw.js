@@ -39,7 +39,7 @@ self.addEventListener('install', event => {
   );
 });
 
-// Activate: delete old caches so phone gets fresh code
+// Activate: delete old caches AND force all tabs to reload with fresh code
 self.addEventListener('activate', event => {
   console.log('[SW] Activating version:', CACHE_VERSION);
   event.waitUntil(
@@ -51,7 +51,14 @@ self.addEventListener('activate', event => {
               return caches.delete(key);
             })
       )
-    ).then(() => self.clients.claim()) // Take control of all tabs
+    ).then(() => self.clients.claim())
+     .then(() => {
+       // Force all open tabs to reload with fresh code
+       return self.clients.matchAll({ type: 'window' });
+     })
+     .then(clients => {
+       clients.forEach(client => client.navigate(client.url));
+     })
   );
 });
 
