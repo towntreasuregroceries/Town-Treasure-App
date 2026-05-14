@@ -1774,15 +1774,63 @@
       }
     }
     
-    // 4. Despeckle (Remove Noise) and Calculate Bounding Box
+    // 4. Remove Thick Blocks (table edges/shadows) and Despeckle
     var minX = width, minY = height, maxX = 0, maxY = 0;
     var inkCount = 0;
     var inkMap = new Uint8Array(width * height);
+    var isBlock = new Uint8Array(width * height);
     
     for (var i = 0; i < data.length; i += 4) {
       if (data[i+3] > 0) inkMap[i/4] = 1;
     }
+    if (isPhoto) {
+      // 4.1 Border Flood-Fill (Table Edge Removal)
+      // Any "ink" connected to the border of the image is erased. 
+      // A dark table edge touches the border, but a signature is usually centered.
+      var queueX = new Int32Array(width * height);
+      var queueY = new Int32Array(width * height);
+      var head = 0;
+      var tail = 0;
+      
+      // Seed the edges
+      for (var x = 0; x < width; x++) {
+        if (inkMap[x]) { queueX[tail] = x; queueY[tail] = 0; tail++; inkMap[x] = 0; data[x * 4 + 3] = 0; }
+        if (inkMap[(height - 1) * width + x]) { queueX[tail] = x; queueY[tail] = height - 1; tail++; inkMap[(height - 1) * width + x] = 0; data[((height - 1) * width + x) * 4 + 3] = 0; }
+      }
+      for (var y = 0; y < height; y++) {
+        if (inkMap[y * width]) { queueX[tail] = 0; queueY[tail] = y; tail++; inkMap[y * width] = 0; data[(y * width) * 4 + 3] = 0; }
+        if (inkMap[y * width + width - 1]) { queueX[tail] = width - 1; queueY[tail] = y; tail++; inkMap[y * width + width - 1] = 0; data[(y * width + width - 1) * 4 + 3] = 0; }
+      }
+      
+      // Fast Flood fill using flat arrays
+      while (head < tail) {
+        var px = queueX[head];
+        var py = queueY[head];
+        head++;
+        
+        var neighbors = [
+          {x: px - 1, y: py}, {x: px + 1, y: py},
+          {x: px, y: py - 1}, {x: px, y: py + 1}
+        ];
+        
+        for (var n = 0; n < 4; n++) {
+          var nx = neighbors[n].x;
+          var ny = neighbors[n].y;
+          if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+            var nIdx = ny * width + nx;
+            if (inkMap[nIdx]) {
+              inkMap[nIdx] = 0; // erase from map
+              data[nIdx * 4 + 3] = 0; // erase from image
+              queueX[tail] = nx;
+              queueY[tail] = ny;
+              tail++;
+            }
+          }
+        }
+      }
+    }
     
+    // Despeckle and calculate bounding box
     for (var y = 1; y < height - 1; y++) {
       for (var x = 1; x < width - 1; x++) {
         var idx = y * width + x;
@@ -1793,7 +1841,6 @@
                           inkMap[idx+width-1] + inkMap[idx+width+1];
                           
           if (neighbors < 2 && isPhoto) {
-            // Isolated speck of noise, remove it
             data[idx * 4 + 3] = 0; 
           } else {
             if (x < minX) minX = x;
@@ -1812,7 +1859,7 @@
     
     ctx.putImageData(imageData, 0, 0);
     
-    // 5. Crop to Bounding Box
+    // 5. Crop and Auto-Rotate
     if (maxX > minX && maxY > minY) {
       var pad = 20;
       minX = Math.max(0, minX - pad);
@@ -1824,10 +1871,16 @@
       
       if (cropW > 0 && cropH > 0) {
         var croppedData = ctx.getImageData(minX, minY, cropW, cropH);
+        
+        // Auto-rotation: if height is significantly larger than width
+        var isVertical = isPhoto && (cropH > cropW * 1.1);
+        var finalW = isVertical ? cropH : cropW;
+        var finalH = isVertical ? cropW : cropH;
+        
         var maxDim = 800;
         var cropScale = 1;
-        if (cropW > maxDim || cropH > maxDim) {
-          cropScale = Math.min(maxDim / cropW, maxDim / cropH);
+        if (finalW > maxDim || finalH > maxDim) {
+          cropScale = Math.min(maxDim / finalW, maxDim / finalH);
         }
         
         var tCanvas = document.createElement('canvas');
@@ -1835,10 +1888,17 @@
         tCanvas.height = cropH;
         tCanvas.getContext('2d').putImageData(croppedData, 0, 0);
         
-        ctx.canvas.width = Math.floor(cropW * cropScale);
-        ctx.canvas.height = Math.floor(cropH * cropScale);
+        ctx.canvas.width = Math.floor(finalW * cropScale);
+        ctx.canvas.height = Math.floor(finalH * cropScale);
         ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
-        ctx.drawImage(tCanvas, 0, 0, ctx.canvas.width, ctx.canvas.height);
+        
+        if (isVertical) {
+          ctx.translate(ctx.canvas.width / 2, ctx.canvas.height / 2);
+          ctx.rotate(-Math.PI / 2); // Rotate 90 degrees CCW
+          ctx.drawImage(tCanvas, -(cropW * cropScale) / 2, -(cropH * cropScale) / 2, cropW * cropScale, cropH * cropScale);
+        } else {
+          ctx.drawImage(tCanvas, 0, 0, cropW * cropScale, cropH * cropScale);
+        }
       }
     }
   }
