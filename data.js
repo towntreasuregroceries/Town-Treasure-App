@@ -145,7 +145,8 @@ const DB = {
         priceLists: state.priceLists,
         deletedStaff: state.deletedStaff,
         deletedPriceLists: state.deletedPriceLists,
-        borrowings: state.borrowings
+        borrowings: state.borrowings,
+        settings: state.settings
       };
 
       // 2. Encrypt it completely
@@ -206,6 +207,7 @@ const DB = {
           state.deletedStaff = appState.deletedStaff || [];
           state.deletedPriceLists = appState.deletedPriceLists || [];
           state.borrowings = appState.borrowings || [];
+          state.settings = appState.settings || {};
           
           localStorage.setItem('ttg_invoices', JSON.stringify(state.invoices));
           localStorage.setItem('ttg_expenses', JSON.stringify(state.expenses));
@@ -218,6 +220,7 @@ const DB = {
           localStorage.setItem('ttg_deleted_staff', JSON.stringify(state.deletedStaff));
           localStorage.setItem('ttg_deleted_pricelists', JSON.stringify(state.deletedPriceLists));
           localStorage.setItem('ttg_borrowings', JSON.stringify(state.borrowings));
+          localStorage.setItem('ttg_settings', JSON.stringify(state.settings));
           
           console.log('Loaded and decrypted data from vault');
           return true;
