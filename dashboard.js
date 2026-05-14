@@ -1094,6 +1094,13 @@ async function handleChangePassword() {
     // 4. Re-encrypt all data with new key and sync to vault
     await DB.syncToSupabase();
 
+    // 5. Force logout on all other devices/sessions
+    try {
+      await supabaseClient.auth.signOut({ scope: 'others' });
+    } catch (soErr) {
+      console.warn('Could not sign out other sessions immediately:', soErr);
+    }
+
     closeModal('changePasswordModal');
     toast('Password changed successfully!', 'success');
   } catch (err) {
