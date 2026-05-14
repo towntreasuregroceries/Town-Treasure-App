@@ -210,7 +210,7 @@ function buildStatementHTML(rest, month) {
       <img src="assets/stamp.png" style="max-width: 140px; max-height: 50px; object-fit: contain; filter: grayscale(100%); mix-blend-mode: multiply; margin-bottom: 5px;">
       <div style="font-size:1.1rem; font-weight:900; color:#000000; letter-spacing:1px; margin-bottom:5px;">ACCOUNT VERIFIED</div>
       <div style="font-size:0.7rem; color:#dc2626; font-family:monospace;">DATE: ${fmtDate(new Date().toISOString().slice(0,10))}</div>
-      ${(DB.settings && DB.settings.signature) ? `<img src="${DB.settings.signature}" style="max-width:140px; max-height:60px; margin-top:5px; display:inline-block; mix-blend-mode:multiply;">` : `<div style="height:40px; margin-top:5px; border-bottom:1px solid #000000; width:80%; margin:5px auto 0 auto; line-height:50px; font-size:0.6rem; color:#000000;">Sign Here</div>`}
+      ${(DB.settings && DB.settings.signature) ? `<img src="${DB.settings.signature}" style="max-width:200px; max-height:80px; margin-top:5px; display:inline-block; mix-blend-mode:multiply;">` : `<div style="height:40px; margin-top:5px; border-bottom:1px solid #000000; width:80%; margin:5px auto 0 auto; line-height:50px; font-size:0.6rem; color:#000000;">Sign Here</div>`}
     </div>
   </div>`;
 }
@@ -573,8 +573,8 @@ async function downloadStatementPDF() {
         if (DB.settings && DB.settings.signature) {
           const sigData = await loadImage(DB.settings.signature);
           const props = doc.getImageProperties(sigData);
-          const maxSigW = 120;
-          let sigH = 25;
+          const maxSigW = 160;
+          let sigH = 45;
           let sigW = (sigH * props.width) / props.height;
           if (sigW > maxSigW) {
             sigW = maxSigW;
