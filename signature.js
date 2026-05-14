@@ -8,11 +8,11 @@ function openSignatureScanner() {
   document.getElementById('btnSigSave').style.display = 'none';
   document.getElementById('sigCameraInput').value = '';
   document.getElementById('sigGalleryInput').value = '';
-  document.getElementById('signatureScannerModal').style.display = 'flex';
+  document.getElementById('signatureScannerModal').classList.add('active');
 }
 
 function closeSignatureScanner() {
-  document.getElementById('signatureScannerModal').style.display = 'none';
+  document.getElementById('signatureScannerModal').classList.remove('active');
 }
 
 function handleSignatureFile(event) {

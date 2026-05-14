@@ -1630,10 +1630,10 @@
     document.getElementById('btnSigSave').style.display = 'none';
     document.getElementById('sigCameraInput').value = '';
     document.getElementById('sigGalleryInput').value = '';
-    document.getElementById('signatureScannerModal').style.display = 'flex';
+    document.getElementById('signatureScannerModal').classList.add('active');
   }
   function closeSignatureScanner() {
-    document.getElementById('signatureScannerModal').style.display = 'none';
+    document.getElementById('signatureScannerModal').classList.remove('active');
   }
   function handleSignatureFile(event) {
     var file = event.target.files[0];
@@ -1723,7 +1723,7 @@
     (async function() {
       if (!('serviceWorker' in navigator)) return;
       try {
-        var EXPECTED_VERSION = 'ttg-v1.2.4';
+        var EXPECTED_VERSION = 'ttg-v1.2.5';
         var currentVersion = localStorage.getItem('ttg_sw_version');
         
         if (currentVersion !== EXPECTED_VERSION) {
