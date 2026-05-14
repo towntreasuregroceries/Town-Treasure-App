@@ -51,8 +51,10 @@ const Crypto = {
   bufferToBase64(buffer) {
     const bytes = new Uint8Array(buffer);
     let binary = '';
-    for (let i = 0; i < bytes.byteLength; i++) {
-      binary += String.fromCharCode(bytes[i]);
+    const len = bytes.byteLength;
+    const chunkSize = 0x8000; 
+    for (let i = 0; i < len; i += chunkSize) {
+      binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
     }
     return btoa(binary);
   },
