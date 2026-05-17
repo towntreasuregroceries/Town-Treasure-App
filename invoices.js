@@ -1,7 +1,7 @@
 /* ══ Invoice Line Items ══ */
 function addLineItem() {
   const row = document.createElement('tr');
-  row.innerHTML = `<td><input type="text" placeholder="e.g. Onions" class="item-desc"></td><td><input type="number" min="0" step="any" value="1" class="item-qty"></td><td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs" selected>Kgs</option><option value="litres">Litres</option><option value="pieces">Pieces</option><option value="crates">Crates</option><option value="bags">Bags</option><option value="trays">Trays</option><option value="bundles">Bundles</option><option value="dozen">Dozen</option><option value="packets">Packets</option><option value="banch">Banch</option></select></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy"></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell"></td><td class="item-total" style="font-weight:600">0.00</td><td><button type="button" class="btn-remove-row" onclick="removeLineItem(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>`;
+  row.innerHTML = `<td><input type="text" placeholder="e.g. Onions" class="item-desc"></td><td><input type="number" min="0" step="any" value="1" class="item-qty"></td><td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs" selected>Kgs</option><option value="litres">Litres</option><option value="pieces">Pieces</option><option value="crates">Crates</option><option value="bags">Bags</option><option value="trays">Trays</option><option value="bundles">Bundles</option><option value="dozen">Dozen</option><option value="packets">Packets</option><option value="bunch">Bunch</option></select></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy"></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell"></td><td class="item-total" style="font-weight:600">0.00</td><td><button type="button" class="btn-remove-row" onclick="removeLineItem(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>`;
   document.getElementById('lineItemsBody').appendChild(row);
   attachLineListeners(row);
 }
@@ -293,7 +293,7 @@ function renderInvoicesList() {
   if (!invs.length) { body.innerHTML = '<tr><td colspan="8" class="empty-state"><h3>No invoices found</h3></td></tr>'; return; }
   body.innerHTML = invs.map(i => {
     const badgeCls = i.status === 'paid' ? 'badge-success' : i.status === 'overdue' ? 'badge-danger' : 'badge-warning';
-    return `<tr><td><strong>${i.number}</strong></td><td>${i.restaurantName}</td><td>${fmtDate(i.date)}</td><td>${i.items.length}</td><td>KES ${fmtMoney(i.totalSell)}</td><td style="color:var(--green-700)">KES ${fmtMoney(i.profit)}</td><td><span class="badge ${badgeCls}">${i.status}</span></td><td><button class="btn btn-sm btn-secondary" onclick="viewInvoice('${i.id}')">View</button> <button class="btn btn-sm btn-primary" onclick="editInvoice('${i.id}')">Edit</button> <button class="btn btn-sm btn-danger" onclick="deleteInvoice('${i.id}')">Del</button></td></tr>`;
+    return `<tr><td><strong>${escapeHtml(i.number)}</strong></td><td>${escapeHtml(i.restaurantName)}</td><td>${fmtDate(i.date)}</td><td>${i.items.length}</td><td>KES ${fmtMoney(i.totalSell)}</td><td style="color:var(--green-700)">KES ${fmtMoney(i.profit)}</td><td><span class="badge ${badgeCls}">${i.status}</span></td><td><button class="btn btn-sm btn-secondary" onclick="viewInvoice('${i.id}')">View</button> <button class="btn btn-sm btn-primary" onclick="editInvoice('${i.id}')">Edit</button> <button class="btn btn-sm btn-danger" onclick="deleteInvoice('${i.id}')">Del</button></td></tr>`;
   }).join('');
 }
 function deleteInvoice(id) {
@@ -462,7 +462,13 @@ function updateBinSelection() {
 function markAsPaid(id) {
   const list = DB.invoices;
   const inv = list.find(i => i.id === id);
-  if (inv) { inv.status = 'paid'; DB.invoices = list; toast('Marked as paid'); viewInvoice(id); }
+  if (inv) {
+    inv.status = 'paid';
+    inv.paidDate = new Date().toISOString().slice(0, 10);
+    DB.invoices = list;
+    toast('Marked as paid');
+    viewInvoice(id);
+  }
 }
 
 function editInvoice(id) {

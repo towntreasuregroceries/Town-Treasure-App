@@ -33,7 +33,7 @@ function generateInsights() {
     return now.getDate() >= payDay;
   });
   if (unpaidStaff.length > 0) {
-    const names = unpaidStaff.map(s => s.name).join(', ');
+    const names = unpaidStaff.map(s => escapeHtml(s.name)).join(', ');
     const total = unpaidStaff.reduce((s, x) => s + x.salary, 0);
     insights.urgent.push(`Unpaid salaries: <strong>${names}</strong> — KES ${fmtMoney(total)}`);
   }
@@ -46,7 +46,7 @@ function generateInsights() {
   });
   if (recurringDue.length > 0) {
     recurringDue.forEach(r => {
-      insights.urgent.push(`<strong>${r.desc}</strong> (KES ${fmtMoney(r.amount)}) is due — not yet paid this month`);
+      insights.urgent.push(`<strong>${escapeHtml(r.desc)}</strong> (KES ${fmtMoney(r.amount)}) is due — not yet paid this month`);
     });
   }
 
@@ -60,8 +60,8 @@ function generateInsights() {
       restDebts[inv.restaurantName].days = Math.max(restDebts[inv.restaurantName].days, days);
     }
   });
-  Object.entries(restDebts).forEach(([name, d]) => {
-    insights.attention.push(`<strong>${name}</strong> owes KES ${fmtMoney(d.total)} — oldest invoice is ${d.days} days old`);
+  Object.entries(restDebts).forEach(([name, data]) => {
+    insights.attention.push(`<strong>${escapeHtml(name)}</strong> owes KES ${fmtMoney(data.total)} (oldest is ${data.days} days old)`);
   });
 
   // 🟡 ATTENTION: Borrowed Loans (Boss's Account)

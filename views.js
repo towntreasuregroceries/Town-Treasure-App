@@ -10,9 +10,9 @@ function viewInvoice(id) {
   const itemsRows = inv.items.map((it, idx) => `
     <tr>
       <td style="text-align: center; width: 50px;">${(idx + 1).toString().padStart(2, '0')}</td>
-      <td>${it.desc}</td>
+      <td>${escapeHtml(it.desc)}</td>
       <td style="text-align: right;">KSh ${fmtMoney(it.sellPrice)}</td>
-      <td style="text-align: center;">${it.qty} ${it.unit || 'kgs'}</td>
+      <td style="text-align: center;">${it.qty} ${escapeHtml(it.unit || 'kgs')}</td>
       <td style="text-align: right;">KSh ${fmtMoney(it.total)}</td>
     </tr>
   `).join('');
@@ -56,9 +56,9 @@ function viewInvoice(id) {
       </div>
       <div style="text-align: right; padding-right: 5px;">
         <h4 style="margin-bottom: 12px; color: #424242;">BILLED TO:</h4>
-        <p style="font-weight: 700; font-size: 1rem; margin-bottom: 8px; color: #424242;">${inv.restaurantName}</p>
-        <p style="font-size: 0.85rem; margin-bottom: 4px;">${rest.address || ''}</p>
-        <p style="font-size: 0.85rem;">${rest.phone || ''}</p>
+         <p style="font-weight: 700; font-size: 1rem; margin-bottom: 8px; color: #424242;">${escapeHtml(inv.restaurantName)}</p>
+         <p style="font-size: 0.85rem; margin-bottom: 4px;">${escapeHtml(rest.address || '')}</p>
+         <p style="font-size: 0.85rem;">${escapeHtml(rest.phone || '')}</p>
       </div>
     </div>
 
@@ -192,7 +192,7 @@ async function generateInvoicePDF(id) {
     orientation: 'p', unit: 'pt', format: 'a4',
     encryption: {
       userPassword: '',
-      ownerPassword: 'TownTreasure2025!',
+      ownerPassword: 'TTG-' + (getUserId() || 'secure').slice(0, 12) + '-pdf',
       userPermissions: ['print']
     }
   });
@@ -539,7 +539,7 @@ function renderExpenses() {
   if (!filtered.length) { body.innerHTML = '<tr><td colspan="6" class="empty-state"><h3>No entries yet</h3></td></tr>'; return; }
   body.innerHTML = filtered.map(e => {
     const typeBadge = e.type === 'capital' ? 'badge-success' : 'badge-warning';
-    return `<tr><td>${fmtDate(e.date)}</td><td>${e.desc}</td><td style="text-transform:capitalize">${e.category}</td><td>KES ${fmtMoney(e.amount)}</td><td><span class="badge ${typeBadge}">${e.type}</span></td><td><button class="btn btn-sm btn-danger" onclick="deleteExpense('${e.id}')">Del</button></td></tr>`;
+    return `<tr><td>${fmtDate(e.date)}</td><td>${escapeHtml(e.desc)}</td><td style="text-transform:capitalize">${escapeHtml(e.category)}</td><td>KES ${fmtMoney(e.amount)}</td><td><span class="badge ${typeBadge}">${e.type}</span></td><td><button class="btn btn-sm btn-danger" onclick="deleteExpense('${e.id}')">Del</button></td></tr>`;
   }).join('');
   // Capital stats
   const totalCap = DB.expenses.filter(e => e.type === 'capital').reduce((s, e) => s + e.amount, 0);

@@ -143,9 +143,9 @@ function buildStatementHTML(rest, month) {
       </div>
       <div style="text-align:right;padding-right:5px;">
         <h4 style="margin-bottom:12px;color:#424242;">TO:</h4>
-        <p style="font-weight:700;font-size:1rem;margin-bottom:8px;color:#424242;">${rest.name}</p>
-        <p style="font-size:0.85rem;">${rest.address || ''}</p>
-        <p style="font-size:0.85rem;">${rest.phone || ''}</p>
+        <p style="font-weight:700;font-size:1rem;margin-bottom:8px;color:#424242;">${escapeHtml(rest.name)}</p>
+        <p style="font-size:0.85rem;">${escapeHtml(rest.address || '')}</p>
+        <p style="font-size:0.85rem;">${escapeHtml(rest.phone || '')}</p>
       </div>
     </div>
 
@@ -199,7 +199,7 @@ function buildStatementHTML(rest, month) {
 
     <div class="invoice-footer-shape">
       <div style="position:absolute;bottom:20px;left:0;right:0;display:flex;justify-content:space-between;padding:0 50px;color:white;z-index:5;">
-        <div style="font-style:italic;font-size:0.9rem;">Thank you for your business, ${rest.name}!</div>
+        <div style="font-style:italic;font-size:0.9rem;">Thank you for your business, ${escapeHtml(rest.name)}!</div>
         <div style="font-size:0.8rem;">Account Statement — ${monthName}</div>
       </div>
     </div>
@@ -241,7 +241,7 @@ async function downloadStatementPDF() {
     orientation: 'p', unit: 'pt', format: 'a4',
     encryption: {
       userPassword: '',
-      ownerPassword: 'TownTreasure2025!',
+      ownerPassword: 'TTG-' + (getUserId() || 'secure').slice(0, 12) + '-pdf',
       userPermissions: ['print']
     }
   });

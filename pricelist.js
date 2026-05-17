@@ -10,23 +10,23 @@ function renderPriceLists() {
   const lists = DB.priceLists.slice().reverse();
 
   if (!lists.length) {
-    body.innerHTML = '<tr><td colspan="5" class="empty-state"><h3>No price lists yet</h3><p>Create your first price list to share with restaurants.</p></td></tr>';
+    body.innerHTML = '<tr><td colspan="6" class="empty-state"><h3>No price lists yet</h3><p>Create your first price list to share with restaurants.</p></td></tr>';
     return;
   }
 
-  body.innerHTML = lists.map(pl => {
-    const statusCls = pl.status === 'active' ? 'badge-success' : pl.status === 'draft' ? 'badge-warning' : 'badge-info';
-    const itemCount = pl.items ? pl.items.length : 0;
+  body.innerHTML = lists.map(l => {
+    const statusBadge = `<span class="badge ${l.status === 'active' ? 'badge-success' : l.status === 'draft' ? 'badge-warning' : 'badge-info'}">${l.status}</span>`;
     return `<tr>
-      <td><strong>${pl.name}</strong></td>
-      <td>${itemCount} items</td>
-      <td>${fmtDate(pl.updatedAt || pl.createdAt)}</td>
-      <td><span class="badge ${statusCls}">${pl.status}</span></td>
+      <td><strong>${escapeHtml(l.name)}</strong></td>
+      <td>${fmtDate(l.updatedAt)}</td>
+      <td>${l.items.filter(i => !i.isHeader).length} items</td>
+      <td>${statusBadge}</td>
+      <td><span class="badge badge-info" style="font-size:0.75rem;">${l.shareId ? 'Linked' : 'Private'}</span></td>
       <td>
-        <button class="btn btn-sm btn-primary" onclick="viewPriceList('${pl.id}')">View</button>
-        <button class="btn btn-sm btn-secondary" onclick="editPriceList('${pl.id}')">Edit</button>
-        <button class="btn btn-sm btn-secondary" onclick="duplicatePriceList('${pl.id}')">Duplicate</button>
-        <button class="btn btn-sm btn-danger" onclick="deletePriceList('${pl.id}')">Del</button>
+        <button class="btn btn-sm btn-secondary" onclick="viewPriceList('${l.id}')">View</button>
+        <button class="btn btn-sm btn-primary" onclick="editPriceList('${l.id}')">Edit</button>
+        <button class="btn btn-sm btn-secondary" onclick="duplicatePriceList('${l.id}')">Dup</button>
+        <button class="btn btn-sm btn-danger" onclick="deletePriceList('${l.id}')">Del</button>
       </td>
     </tr>`;
   }).join('');
@@ -79,7 +79,7 @@ function renderPriceListItems(pl) {
 function buildCategoryHeaderRow(item) {
   return `<tr data-item-id="${item.id}" data-type="header" style="background: linear-gradient(135deg, #61b146, #4a9e36); cursor: move;">
     <td colspan="5" style="padding: 10px 16px; border: none;">
-      <input type="text" class="pl-header-name" value="${item.name || ''}" placeholder="e.g. Fruits, Meat, Vegetables…" 
+      <input type="text" class="pl-header-name" value="${escapeHtml(item.name || '')}" placeholder="e.g. Fruits, Meat, Vegetables…" 
         style="background:transparent; border:none; color:white; font-weight:700; font-size:1rem; letter-spacing:0.5px; text-transform:uppercase; width:100%; outline:none;">
     </td>
     <td style="border: none; text-align: right; padding-right: 16px; white-space: nowrap;">
@@ -97,15 +97,15 @@ function buildCategoryHeaderRow(item) {
 function buildPriceListRow(item, idx) {
   const categories = ['vegetables', 'fruits', 'cereals', 'dairy', 'meat', 'fish', 'legumes', 'spices', 'packaged', 'other'];
   const catOptions = categories.map(c => `<option value="${c}" ${item.category === c ? 'selected' : ''}>${c.charAt(0).toUpperCase() + c.slice(1)}</option>`).join('');
-  const units = ['kgs', 'litres', 'pieces', 'crates', 'bags', 'trays', 'bundles', 'dozen', 'packets', 'banch'];
+  const units = ['kgs', 'litres', 'pieces', 'crates', 'bags', 'trays', 'bundles', 'dozen', 'packets', 'bunch'];
   const unitOptions = units.map(u => `<option value="${u}" ${item.unit === u ? 'selected' : ''}>${u.charAt(0).toUpperCase() + u.slice(1)}</option>`).join('');
 
   return `<tr data-item-id="${item.id}">
-    <td><input type="text" class="pl-item-name" value="${item.name || ''}" placeholder="e.g. Tomatoes"></td>
+    <td><input type="text" class="pl-item-name" value="${escapeHtml(item.name || '')}" placeholder="e.g. Tomatoes"></td>
     <td><select class="pl-item-cat form-control" style="padding:6px 4px;font-size:0.8rem;">${catOptions}</select></td>
     <td><select class="pl-item-unit form-control" style="padding:6px 4px;font-size:0.8rem;">${unitOptions}</select></td>
     <td><input type="number" class="pl-item-price" min="0" step="any" value="${item.price || ''}" placeholder="0.00"></td>
-    <td><input type="text" class="pl-item-notes" value="${item.notes || ''}" placeholder="Grade A, etc."></td>
+    <td><input type="text" class="pl-item-notes" value="${escapeHtml(item.notes || '')}" placeholder="Grade A, etc."></td>
     <td style="white-space:nowrap; text-align:right;">
       <button type="button" style="color:var(--primary); background:var(--primary-lt); border:none; cursor:pointer; padding:5px 7px; border-radius:4px; margin-right:4px; font-weight:bold; font-size:12px; vertical-align:middle;" onclick="insertPriceListHeaderBelow(this)" title="Add Header Below">H+</button>
       <button type="button" style="color:var(--primary); background:var(--primary-lt); border:none; cursor:pointer; padding:6px; border-radius:4px; margin-right:4px; vertical-align:middle;" onclick="insertPriceListRowBelow(this)" title="Add Item Below">
@@ -444,7 +444,7 @@ async function downloadPriceListPDF() {
     orientation: 'p', unit: 'pt', format: 'a4',
     encryption: {
       userPassword: '',
-      ownerPassword: 'TownTreasure2025!',
+      ownerPassword: 'TTG-' + (getUserId() || 'secure').slice(0, 12) + '-pdf',
       userPermissions: ['print']
     }
   });

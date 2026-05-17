@@ -2,9 +2,32 @@
 
 // === Crypto Utilities for E2EE ===
 const Crypto = {
-  async deriveKey(password) {
+  /**
+   * Derive encryption key with per-user salt (v2).
+   * If userId is provided, uses a unique salt per user for stronger isolation.
+   * Falls back to legacy static salt if userId is omitted.
+   */
+  async deriveKey(password, userId) {
     const enc = new TextEncoder();
-    const salt = enc.encode("town-treasure-secure-salt-v1"); 
+    const saltStr = userId ? `ttg-vault-v2-${userId}` : "town-treasure-secure-salt-v1";
+    const salt = enc.encode(saltStr);
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveBits", "deriveKey"]
+    );
+    const key = await crypto.subtle.deriveKey(
+      { name: "PBKDF2", salt: salt, iterations: 100000, hash: "SHA-256" },
+      keyMaterial,
+      { name: "AES-GCM", length: 256 },
+      true,
+      ["encrypt", "decrypt"]
+    );
+    return await crypto.subtle.exportKey("jwk", key);
+  },
+
+  /** Legacy key derivation (static salt) — used for migration fallback only */
+  async deriveKeyLegacy(password) {
+    const enc = new TextEncoder();
+    const salt = enc.encode("town-treasure-secure-salt-v1");
     const keyMaterial = await crypto.subtle.importKey(
       "raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveBits", "deriveKey"]
     );
@@ -123,7 +146,17 @@ const DB = {
   },
   set nextInvNum(v) { /* Computed dynamically, ignore sets */ },
   
+  // Debounce timer for sync — prevents hammering Supabase on every keystroke
+  _syncTimer: null,
+  _syncVersion: 0,
+
   async syncToSupabase() {
+    // Debounce: wait 3 seconds of inactivity before syncing
+    if (this._syncTimer) clearTimeout(this._syncTimer);
+    this._syncTimer = setTimeout(() => this._doSync(), 3000);
+  },
+
+  async _doSync() {
     if (!supabaseClient) return;
     const uid = getUserId();
     if (!uid) return; // Not logged in, skip sync
@@ -135,8 +168,11 @@ const DB = {
     }
 
     try {
-      // 1. Gather all local state
+      this._syncVersion++;
+      // 1. Gather all local state with version tracking
       const appState = {
+        _vaultVersion: this._syncVersion,
+        _lastSync: new Date().toISOString(),
         invoices: state.invoices,
         expenses: state.expenses,
         restaurants: state.restaurants,
@@ -161,7 +197,7 @@ const DB = {
         .upsert({ user_id: uid, data: encryptedPayload }, { onConflict: 'user_id' });
 
       if (error) throw error;
-      console.log('Successfully synced encrypted vault');
+      console.log('Successfully synced encrypted vault (v' + this._syncVersion + ')');
     } catch (e) {
       console.error(`Error syncing vault to Supabase:`, e);
       const now = Date.now();
@@ -170,6 +206,12 @@ const DB = {
         window.lastOfflineToast = now;
       }
     }
+  },
+
+  /** Force an immediate sync (bypasses debounce) */
+  async syncNow() {
+    if (this._syncTimer) clearTimeout(this._syncTimer);
+    await this._doSync();
   },
   
   async loadFromSupabase() {
@@ -251,13 +293,140 @@ const DB = {
     state.deletedStaff = [];
     state.deletedPriceLists = [];
     state.borrowings = [];
-    ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices', 'ttg_staff', 'ttg_salary_payments', 'ttg_recurring_expenses', 'ttg_price_lists', 'ttg_deleted_staff', 'ttg_deleted_pricelists', 'ttg_borrowings'].forEach(k => localStorage.removeItem(k));
+    state.settings = {};
+    ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices',
+     'ttg_staff', 'ttg_salary_payments', 'ttg_recurring_expenses',
+     'ttg_price_lists', 'ttg_deleted_staff', 'ttg_deleted_pricelists',
+     'ttg_borrowings', 'ttg_settings'].forEach(k => localStorage.removeItem(k));
   }
 };
 
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function fmtMoney(n) { return Number(n || 0).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+
+/** Sanitize user input before inserting into innerHTML to prevent XSS */
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  const s = String(str);
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+/**
+ * Attempt E2EE key migration: try per-user salt first, fall back to legacy.
+ * Returns the working JWK key and whether migration occurred.
+ * SAFE: Never destroys data — always falls back to old key.
+ */
+async function migrateE2EKey(password, userId) {
+  // 1. Try new per-user key
+  const newKey = await Crypto.deriveKey(password, userId);
+  localStorage.setItem('ttg_e2e_key', JSON.stringify(newKey));
+
+  // 2. Try loading vault with new key
+  const loaded = await DB.loadFromSupabase();
+  if (loaded) {
+    // New key worked (either already migrated, or no data yet)
+    localStorage.setItem('ttg_salt_version', '2');
+    console.log('[E2EE] Per-user salt key working.');
+    return { key: newKey, migrated: false };
+  }
+
+  // 3. New key failed — try legacy key (SAFE FALLBACK)
+  console.log('[E2EE] Per-user key failed, trying legacy key...');
+  const legacyKey = await Crypto.deriveKeyLegacy(password);
+  localStorage.setItem('ttg_e2e_key', JSON.stringify(legacyKey));
+
+  const legacyLoaded = await DB.loadFromSupabase();
+  if (legacyLoaded) {
+    // Legacy worked! Now migrate: re-encrypt with new key
+    console.log('[E2EE] Legacy key worked. Migrating to per-user salt...');
+    localStorage.setItem('ttg_e2e_key', JSON.stringify(newKey));
+    localStorage.setItem('ttg_salt_version', '2');
+    await DB.syncNow(); // Immediate sync with new key
+    console.log('[E2EE] Migration complete — vault re-encrypted with per-user salt.');
+    return { key: newKey, migrated: true };
+  }
+
+  // 4. Both failed — keep legacy key (safest option, probably a network error)
+  console.warn('[E2EE] Both keys failed. Keeping legacy key for offline cache.');
+  localStorage.setItem('ttg_e2e_key', JSON.stringify(legacyKey));
+  return { key: legacyKey, migrated: false };
+}
+
+/** Export data as Excel-compatible CSV for accountants */
+function exportToExcel(type, startDate = null, endDate = null) {
+  let csv = '';
+  let filename = '';
+  const today = new Date().toISOString().slice(0, 10);
+  const suffix = (startDate && endDate) ? `_${startDate}_to_${endDate}` : `_${today}`;
+
+  const filterByDate = (itemDate) => {
+    if (!itemDate) return false;
+    if (startDate && itemDate < startDate) return false;
+    if (endDate && itemDate > endDate) return false;
+    return true;
+  };
+
+  if (type === 'invoices') {
+    filename = `TTG_Invoices${suffix}.csv`;
+    csv = '"Invoice #","Restaurant","Date","Due Date","Items","Total Sell (KES)","Total Buy (KES)","Delivery Cost","Other Cost","Profit (KES)","Status"\n';
+    DB.invoices.filter(i => i.status !== 'draft' && filterByDate(i.date)).forEach(i => {
+      csv += `"${i.number}","${(i.restaurantName || '').replace(/"/g, '""')}","${i.date}","${i.dueDate || ''}","${i.items.length}","${i.totalSell}","${i.totalBuy}","${i.deliveryCost || 0}","${i.otherCost || 0}","${i.profit}","${i.status}"\n`;
+    });
+  } else if (type === 'expenses') {
+    filename = `TTG_Expenses${suffix}.csv`;
+    csv = '"Date","Description","Category","Amount (KES)","Type"\n';
+    DB.expenses.filter(e => filterByDate(e.date)).forEach(e => {
+      csv += `"${e.date}","${(e.desc || '').replace(/"/g, '""')}","${e.category}","${e.amount}","${e.type}"\n`;
+    });
+  } else if (type === 'staff') {
+    filename = `TTG_Payroll${suffix}.csv`;
+    csv = '"Name","Role","Monthly Salary (KES)","Phone","Pay Day","Status"\n';
+    DB.staff.forEach(s => {
+      csv += `"${(s.name || '').replace(/"/g, '""')}","${s.role || ''}","${s.salary}","${s.phone || ''}","${s.payDay || 5}","${s.status}"\n`;
+    });
+  } else if (type === 'restaurants') {
+    filename = `TTG_Restaurants${suffix}.csv`;
+    csv = '"Name","Contact","Phone","Address","Total Sales (KES)"\n';
+    DB.restaurants.forEach(r => {
+      const total = DB.invoices.filter(i => i.restaurantId === r.id && i.status !== 'draft' && filterByDate(i.date)).reduce((s, i) => s + (i.totalSell || 0), 0);
+      csv += `"${(r.name || '').replace(/"/g, '""')}","${r.contact || ''}","${r.phone || ''}","${r.address || ''}","${total}"\n`;
+    });
+  } else if (type === 'all') {
+    // Full financial summary
+    filename = `TTG_Full_Export${suffix}.csv`;
+    csv = '"=== INVOICES ==="\n';
+    csv += '"Invoice #","Restaurant","Date","Total Sell","Total Buy","Profit","Status"\n';
+    DB.invoices.filter(i => i.status !== 'draft' && filterByDate(i.date)).forEach(i => {
+      csv += `"${i.number}","${(i.restaurantName || '').replace(/"/g, '""')}","${i.date}","${i.totalSell}","${i.totalBuy}","${i.profit}","${i.status}"\n`;
+    });
+    csv += '\n"=== EXPENSES ==="\n';
+    csv += '"Date","Description","Category","Amount","Type"\n';
+    DB.expenses.filter(e => filterByDate(e.date)).forEach(e => {
+      csv += `"${e.date}","${(e.desc || '').replace(/"/g, '""')}","${e.category}","${e.amount}","${e.type}"\n`;
+    });
+    csv += '\n"=== STAFF ==="\n';
+    csv += '"Name","Role","Salary","Pay Day"\n';
+    DB.staff.forEach(s => {
+      csv += `"${(s.name || '').replace(/"/g, '""')}","${s.role || ''}","${s.salary}","${s.payDay || 5}"\n`;
+    });
+  }
+
+  if (!csv) return toast('No data to export', 'warning');
+
+  // Add BOM for Excel to recognize UTF-8
+  const bom = '\uFEFF';
+  const blob = new Blob([bom + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast(`Exported ${filename}`, 'success');
+}
 function toast(msg, type = 'success') {
   const c = document.getElementById('toastContainer');
   if (!c) return;

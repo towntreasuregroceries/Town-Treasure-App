@@ -270,8 +270,8 @@ function renderPayrollTab() {
     }
 
     return `<tr>
-      <td><strong>${s.name}</strong></td>
-      <td>${s.role || '—'}</td>
+      <td><strong>${escapeHtml(s.name)}</strong></td>
+      <td>${escapeHtml(s.role || '—')}</td>
       <td>KES ${fmtMoney(s.salary)}</td>
       <td>${statusBadge}</td>
       <td>${actionBtn}</td>
@@ -334,8 +334,8 @@ function renderRecurringTab() {
     }
 
     return `<tr>
-      <td><strong>${r.desc}</strong></td>
-      <td style="text-transform:capitalize">${r.category}</td>
+      <td><strong>${escapeHtml(r.desc)}</strong></td>
+      <td style="text-transform:capitalize">${escapeHtml(r.category)}</td>
       <td>KES ${fmtMoney(r.amount)}</td>
       <td>Due ${dueDay}th</td>
       <td>${statusBadge} ${actionBtn}</td>
@@ -363,7 +363,7 @@ function renderPersonalTab() {
       const catLabel = getPersonalCategoryLabel(e.category);
       return `<tr>
         <td>${fmtDate(e.date)}</td>
-        <td>${e.desc}</td>
+        <td>${escapeHtml(e.desc)}</td>
         <td><span class="badge badge-info">${catLabel}</span></td>
         <td>KES ${fmtMoney(e.amount)}</td>
         <td><button class="btn btn-sm btn-danger" onclick="deleteExpense('${e.id}')">Del</button></td>
@@ -542,18 +542,19 @@ function viewRepayments(loanId) {
 }
 
 function deleteRepayment(loanId, repayId) {
-  if(!confirm('Delete this repayment?')) return;
-  const list = DB.borrowings;
-  const loan = list.find(x => x.id === loanId);
-  if(loan && loan.repayments) {
-    loan.repayments = loan.repayments.filter(r => r.id !== repayId);
-    deleteLinkedExpense(repayId, 'repay');
-    DB.borrowings = list;
-    viewRepayments(loanId);
-    renderBorrowingsTab();
-    toast('Repayment deleted');
-    if(!loan.repayments.length) closeModal('repaymentsHistoryModal');
-  }
+  customConfirm('Delete this repayment?', 'Delete Repayment', 'Yes, Delete', true, () => {
+    const list = DB.borrowings;
+    const loan = list.find(x => x.id === loanId);
+    if(loan && loan.repayments) {
+      loan.repayments = loan.repayments.filter(r => r.id !== repayId);
+      deleteLinkedExpense(repayId, 'repay');
+      DB.borrowings = list;
+      viewRepayments(loanId);
+      renderBorrowingsTab();
+      toast('Repayment deleted');
+      if(!loan.repayments.length) closeModal('repaymentsHistoryModal');
+    }
+  });
 }
 
 function createLinkedExpense(refId, amount, date, desc, type) {
@@ -626,7 +627,7 @@ function renderBorrowingsTab() {
     
     return `<tr>
       <td>${fmtDate(b.date)}</td>
-      <td>${b.desc}</td>
+      <td>${escapeHtml(b.desc)}</td>
       <td style="font-weight:600; color: var(--danger)">KES ${fmtMoney(b.amount)}</td>
       <td style="color: var(--green-700)">KES ${fmtMoney(repaid)}</td>
       <td style="font-weight:600;">KES ${fmtMoney(bal)}</td>

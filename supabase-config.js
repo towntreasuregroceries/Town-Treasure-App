@@ -46,6 +46,9 @@ async function signOut() {
   if (!supabaseClient) return;
   await supabaseClient.auth.signOut();
   currentUser = null;
-  // Clear all local data on sign out
-  ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices', 'ttg_last_page'].forEach(k => localStorage.removeItem(k));
+  // Clear ALL local data on sign out — comprehensive cleanup
+  ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices',
+   'ttg_staff', 'ttg_salary_payments', 'ttg_recurring_expenses',
+   'ttg_price_lists', 'ttg_deleted_staff', 'ttg_deleted_pricelists',
+   'ttg_borrowings', 'ttg_settings', 'ttg_last_page'].forEach(k => localStorage.removeItem(k));
 }

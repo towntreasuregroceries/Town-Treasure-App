@@ -80,14 +80,14 @@ function renderRestaurants() {
   if (!rests.length) { body.innerHTML = '<tr><td colspan="6" class="empty-state"><h3>No restaurants yet</h3><p>Add your first restaurant client to get started.</p></td></tr>'; return; }
   body.innerHTML = rests.map(r => {
     const total = invs.filter(i => i.restaurantId === r.id).reduce((s, i) => s + (i.totalSell || 0), 0);
-    return `<tr><td><strong>${r.name}</strong></td><td>${r.contact||'—'}</td><td>${r.phone||'—'}</td><td>${r.address||'—'}</td><td><strong>KES ${fmtMoney(total)}</strong></td><td><button class="btn btn-sm btn-secondary" onclick="editRestaurant('${r.id}')">Edit</button> <button class="btn btn-sm btn-primary" onclick="quickStatement('${r.id}')">📄 Statement</button> <button class="btn btn-sm btn-danger" onclick="deleteRestaurant('${r.id}')">Del</button></td></tr>`;
+    return `<tr><td><strong>${escapeHtml(r.name)}</strong></td><td>${escapeHtml(r.contact||'—')}</td><td>${escapeHtml(r.phone||'—')}</td><td>${escapeHtml(r.address||'—')}</td><td><strong>KES ${fmtMoney(total)}</strong></td><td><button class="btn btn-sm btn-secondary" onclick="editRestaurant('${r.id}')">Edit</button> <button class="btn btn-sm btn-primary" onclick="quickStatement('${r.id}')">📄 Statement</button> <button class="btn btn-sm btn-danger" onclick="deleteRestaurant('${r.id}')">Del</button></td></tr>`;
   }).join('');
 }
 
 /* ══ Populate Restaurant Dropdowns ══ */
 function populateRestaurantDropdowns() {
   const rests = DB.restaurants;
-  const opts = rests.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+  const opts = rests.map(r => `<option value="${r.id}">${escapeHtml(r.name)}</option>`).join('');
   const sel = document.getElementById('invRestaurant');
   if (sel) sel.innerHTML = '<option value="">Select restaurant…</option>' + opts;
   const f = document.getElementById('invoiceFilterRestaurant');

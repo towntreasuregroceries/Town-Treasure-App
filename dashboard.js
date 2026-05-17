@@ -136,8 +136,8 @@ function generateReport() {
         if (item.desc.toLowerCase().trim().includes(productName)) {
           const unit = item.unit || 'kgs';
           matches.push({
-            invoiceNum: inv.number,
-            restaurant: inv.restaurantName,
+            invoiceNum: escapeHtml(inv.number),
+            restaurant: escapeHtml(inv.restaurantName),
             date: inv.date,
             qty: item.qty,
             unit: unit,
@@ -186,7 +186,7 @@ function generateReport() {
          <div class="invoice-title">PRODUCT REPORT</div>
          <div class="invoice-meta-grid">
             <div class="meta-label">Product:</div>
-            <div class="meta-value" style="text-transform: capitalize;">${productName}</div>
+            <div class="meta-value" style="text-transform: capitalize;">${escapeHtml(productName)}</div>
             <div class="meta-label">Period:</div>
             <div class="meta-value">${dateRange}</div>
          </div>
@@ -219,7 +219,7 @@ function generateReport() {
          <h3 style="font-size:0.95rem;margin-bottom:10px;color: #424242;">Sales by Restaurant</h3>
          <table class="receipt-table">
             <thead><tr><th>Restaurant</th><th style="text-align: center;">Times Ordered</th><th style="text-align: right;">Qty</th><th style="text-align: right;">Revenue</th><th style="text-align: right;">Cost</th><th style="text-align: right;">Profit</th></tr></thead>
-            <tbody>${Object.entries(byRestaurant).sort((a,b)=>b[1].sell-a[1].sell).map(([name,d])=>`<tr><td><strong>${name}</strong></td><td style="text-align: center;">${d.count}</td><td style="text-align: right;">${d.qty}</td><td style="text-align: right;">KES ${fmtMoney(d.sell)}</td><td style="text-align: right;">KES ${fmtMoney(d.buy)}</td><td style="text-align: right; color: var(--green-700);">KES ${fmtMoney(d.sell - d.buy)}</td></tr>`).join('')}</tbody>
+            <tbody>${Object.entries(byRestaurant).sort((a,b)=>b[1].sell-a[1].sell).map(([name,d])=>`<tr><td><strong>${escapeHtml(name)}</strong></td><td style="text-align: center;">${d.count}</td><td style="text-align: right;">${d.qty}</td><td style="text-align: right;">KES ${fmtMoney(d.sell)}</td><td style="text-align: right;">KES ${fmtMoney(d.buy)}</td><td style="text-align: right; color: var(--green-700);">KES ${fmtMoney(d.sell - d.buy)}</td></tr>`).join('')}</tbody>
          </table>
       </div>
       ` : ''}
@@ -230,7 +230,7 @@ function generateReport() {
          ${matches.length > 0 ? `
          <table class="receipt-table">
             <thead><tr><th>Invoice</th><th>Restaurant</th><th>Date</th><th style="text-align: right;">Qty</th><th>Unit</th><th style="text-align: right;">Sell Price</th><th style="text-align: right;">Total</th><th style="text-align: right;">Profit</th></tr></thead>
-            <tbody>${matches.sort((a,b)=>a.date.localeCompare(b.date)).map(m=>`<tr><td>${m.invoiceNum}</td><td>${m.restaurant}</td><td>${fmtDate(m.date)}</td><td style="text-align: right;">${m.qty}</td><td style="text-transform: capitalize;">${m.unit}</td><td style="text-align: right;">KES ${fmtMoney(m.sellPrice)}</td><td style="text-align: right;">KES ${fmtMoney(m.total)}</td><td style="text-align: right; color: var(--green-700);">KES ${fmtMoney(m.profit)}</td></tr>`).join('')}</tbody>
+            <tbody>${matches.sort((a,b)=>a.date.localeCompare(b.date)).map(m=>`<tr><td>${m.invoiceNum}</td><td>${m.restaurant}</td><td>${fmtDate(m.date)}</td><td style="text-align: right;">${m.qty}</td><td style="text-transform: capitalize;">${escapeHtml(m.unit)}</td><td style="text-align: right;">KES ${fmtMoney(m.sellPrice)}</td><td style="text-align: right;">KES ${fmtMoney(m.total)}</td><td style="text-align: right; color: var(--green-700);">KES ${fmtMoney(m.profit)}</td></tr>`).join('')}</tbody>
          </table>
          ` : '<p style="padding: 20px; color: #616161;">No transactions found for this product in the selected period.</p>'}
       </div>
@@ -310,7 +310,7 @@ function generateReport() {
        <div class="invoice-title">FINANCIAL REPORT</div>
        <div class="invoice-meta-grid">
           <div class="meta-label">For:</div>
-          <div class="meta-value">${restName}</div>
+          <div class="meta-value">${escapeHtml(restName)}</div>
           <div class="meta-label">Period:</div>
           <div class="meta-value">${dateRange}</div>
        </div>
@@ -369,7 +369,7 @@ function generateReport() {
        <h3 style="font-size:0.95rem;margin-bottom:10px;color: #424242;">Sales by Restaurant</h3>
        <table class="receipt-table">
           <thead><tr><th>Restaurant</th><th>Invoices</th><th style="text-align: right;">Total Sales</th><th style="text-align: right;">Total Cost</th><th style="text-align: right;">Profit</th><th style="text-align: center;">Margin</th></tr></thead>
-          <tbody>${Object.entries(byRest).sort((a,b)=>b[1].sell-a[1].sell).map(([name,d])=>`<tr><td><strong>${name}</strong></td><td>${d.count}</td><td style="text-align: right;">KES ${fmtMoney(d.sell)}</td><td style="text-align: right;">KES ${fmtMoney(d.buy)}</td><td style="text-align: right; color:var(--green-700)">KES ${fmtMoney(d.profit)}</td><td style="text-align: center;">${d.sell>0?((d.profit/d.sell)*100).toFixed(1)+'%':'—'}</td></tr>`).join('')}</tbody>
+          <tbody>${Object.entries(byRest).sort((a,b)=>b[1].sell-a[1].sell).map(([name,d])=>`<tr><td><strong>${escapeHtml(name)}</strong></td><td>${d.count}</td><td style="text-align: right;">KES ${fmtMoney(d.sell)}</td><td style="text-align: right;">KES ${fmtMoney(d.buy)}</td><td style="text-align: right; color:var(--green-700)">KES ${fmtMoney(d.profit)}</td><td style="text-align: center;">${d.sell>0?((d.profit/d.sell)*100).toFixed(1)+'%':'—'}</td></tr>`).join('')}</tbody>
        </table>
     </div>
 
@@ -379,7 +379,7 @@ function generateReport() {
        <h3 style="font-size:0.95rem;margin-bottom:10px;color: #424242;">Expenses by Category</h3>
        <table class="receipt-table">
           <thead><tr><th>Category</th><th style="text-align: center;">Entries</th><th style="text-align: right;">Total Amount</th><th style="text-align: center;">% of Expenses</th></tr></thead>
-          <tbody>${Object.entries(byCategory).sort((a,b)=>b[1].total-a[1].total).map(([cat,d])=>`<tr><td style="text-transform: capitalize;"><strong>${cat}</strong></td><td style="text-align: center;">${d.count}</td><td style="text-align: right; color: #dc2626;">KES ${fmtMoney(d.total)}</td><td style="text-align: center;">${totalExpenses>0?((d.total/totalExpenses)*100).toFixed(1)+'%':'—'}</td></tr>`).join('')}</tbody>
+          <tbody>${Object.entries(byCategory).sort((a,b)=>b[1].total-a[1].total).map(([cat,d])=>`<tr><td style="text-transform: capitalize;"><strong>${escapeHtml(cat)}</strong></td><td style="text-align: center;">${d.count}</td><td style="text-align: right; color: #dc2626;">KES ${fmtMoney(d.total)}</td><td style="text-align: center;">${totalExpenses>0?((d.total/totalExpenses)*100).toFixed(1)+'%':'—'}</td></tr>`).join('')}</tbody>
        </table>
     </div>
     ` : ''}
@@ -390,7 +390,7 @@ function generateReport() {
        <h3 style="font-size:0.95rem;margin-bottom:10px;color: #424242;">Capital Injections</h3>
        <table class="receipt-table">
           <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align: right;">Amount</th></tr></thead>
-          <tbody>${capitalItems.sort((a,b)=>a.date.localeCompare(b.date)).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${e.desc}</td><td style="text-transform: capitalize;">${e.category}</td><td style="text-align: right; color: #2563eb;">KES ${fmtMoney(e.amount)}</td></tr>`).join('')}</tbody>
+          <tbody>${capitalItems.sort((a,b)=>a.date.localeCompare(b.date)).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${escapeHtml(e.desc)}</td><td style="text-transform: capitalize;">${escapeHtml(e.category)}</td><td style="text-align: right; color: #2563eb;">KES ${fmtMoney(e.amount)}</td></tr>`).join('')}</tbody>
        </table>
     </div>
     ` : ''}
@@ -400,7 +400,7 @@ function generateReport() {
        <h3 style="font-size:0.95rem;margin-bottom:10px;color: #424242;">All Invoices</h3>
        <table class="receipt-table">
           <thead><tr><th>#</th><th>Restaurant</th><th>Date</th><th style="text-align: right;">Amount</th><th style="text-align: right;">Profit</th><th style="text-align: center;">Status</th></tr></thead>
-          <tbody>${invs.sort((a,b)=>a.date.localeCompare(b.date)).map(i=>`<tr><td>${i.number}</td><td>${i.restaurantName}</td><td>${fmtDate(i.date)}</td><td style="text-align: right;">KES ${fmtMoney(i.totalSell)}</td><td style="text-align: right;">KES ${fmtMoney(i.profit)}</td><td style="text-align: center;"><span class="badge ${i.status==='paid'?'badge-success':'badge-warning'}">${i.status}</span></td></tr>`).join('')}</tbody>
+          <tbody>${invs.sort((a,b)=>a.date.localeCompare(b.date)).map(i=>`<tr><td>${escapeHtml(i.number)}</td><td>${escapeHtml(i.restaurantName)}</td><td>${fmtDate(i.date)}</td><td style="text-align: right;">KES ${fmtMoney(i.totalSell)}</td><td style="text-align: right;">KES ${fmtMoney(i.profit)}</td><td style="text-align: center;"><span class="badge ${i.status==='paid'?'badge-success':'badge-warning'}">${i.status}</span></td></tr>`).join('')}</tbody>
        </table>
     </div>
 
@@ -410,7 +410,7 @@ function generateReport() {
        <h3 style="font-size:0.95rem;margin-bottom:10px;color: #424242;">All Expenses</h3>
        <table class="receipt-table">
           <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align: right;">Amount</th></tr></thead>
-          <tbody>${expenseItems.sort((a,b)=>a.date.localeCompare(b.date)).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${e.desc}</td><td style="text-transform: capitalize;">${e.category}</td><td style="text-align: right; color: #dc2626;">KES ${fmtMoney(e.amount)}</td></tr>`).join('')}</tbody>
+          <tbody>${expenseItems.sort((a,b)=>a.date.localeCompare(b.date)).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${escapeHtml(e.desc)}</td><td style="text-transform: capitalize;">${escapeHtml(e.category)}</td><td style="text-align: right; color: #dc2626;">KES ${fmtMoney(e.amount)}</td></tr>`).join('')}</tbody>
        </table>
     </div>
     ` : ''}
@@ -428,6 +428,21 @@ function generateReport() {
   </div>`;
 }
 function printReport() { window.print(); }
+
+function exportReportToExcel() {
+  const dateType = document.getElementById('reportDateType')?.value || 'single';
+  let from = null, to = null;
+  
+  if (dateType === 'single') {
+    from = document.getElementById('reportSingleDate').value || null;
+    to = from;
+  } else if (dateType === 'range') {
+    from = document.getElementById('reportFrom').value || null;
+    to = document.getElementById('reportTo').value || null;
+  }
+  
+  exportToExcel('all', from, to);
+}
 
 async function downloadReportPDF() {
   if (!window.jspdf) return toast('PDF generator loading...', 'warning');
@@ -455,7 +470,7 @@ async function downloadReportPDF() {
     orientation: 'p', unit: 'pt', format: 'a4',
     encryption: {
       userPassword: '',
-      ownerPassword: 'TownTreasure2025!',
+      ownerPassword: 'TTG-' + (getUserId() || 'secure').slice(0, 12) + '-pdf',
       userPermissions: ['print']
     }
   });
@@ -822,9 +837,9 @@ async function wizardCreateAccount() {
     // Also sign in immediately to check if confirmation is needed
     await signIn(email, pass);
     
-    // E2EE: Derive and store encryption key
-    const jwkKey = await Crypto.deriveKey(pass);
-    localStorage.setItem('ttg_e2e_key', JSON.stringify(jwkKey));
+    // E2EE: Derive per-user key and attempt safe migration
+    const user = await getCurrentUser();
+    await migrateE2EKey(pass, user?.id);
     
     localStorage.setItem('ttg_has_account', 'true');
     wizardNext(6); // Go to success if no email confirmation needed
@@ -868,9 +883,9 @@ async function verifyEmailCode() {
     // 2. Sign in to establish session
     await signIn(email, pass);
     
-    // 3. E2EE: Derive and store encryption key
-    const jwkKey = await Crypto.deriveKey(pass);
-    localStorage.setItem('ttg_e2e_key', JSON.stringify(jwkKey));
+    // 3. E2EE: Derive per-user key and attempt safe migration
+    const user = await getCurrentUser();
+    await migrateE2EKey(pass, user?.id);
     
     localStorage.setItem('ttg_has_account', 'true');
     wizardNext(6);
@@ -898,9 +913,9 @@ async function wizardCheckEmailConfirmed() {
   try {
     await signIn(email, pass);
     
-    // E2EE: Derive and store encryption key
-    const jwkKey = await Crypto.deriveKey(pass);
-    localStorage.setItem('ttg_e2e_key', JSON.stringify(jwkKey));
+    // E2EE: Derive per-user key and attempt safe migration
+    const user = await getCurrentUser();
+    await migrateE2EKey(pass, user?.id);
     
     localStorage.setItem('ttg_has_account', 'true');
     wizardNext(6);
@@ -1011,12 +1026,11 @@ async function handlePasswordLogin() {
   try {
     await signIn(email, password);
     
-    // E2EE: Derive and store encryption key
-    const jwkKey = await Crypto.deriveKey(password);
-    localStorage.setItem('ttg_e2e_key', JSON.stringify(jwkKey));
+    // E2EE: Derive per-user key and attempt safe migration
+    const user = await getCurrentUser();
+    await migrateE2EKey(password, user?.id);
     
     localStorage.setItem('ttg_has_account', 'true');
-    const user = await getCurrentUser();
     if (user) await enterApp(user);
   } catch (err) {
     errorEl.textContent = err.message || 'Incorrect email or password.';
@@ -1087,12 +1101,13 @@ async function handleChangePassword() {
     const { error: updateError } = await supabaseClient.auth.updateUser({ password: newPass });
     if (updateError) throw updateError;
 
-    // 3. Derive new encryption key
-    const newJwkKey = await Crypto.deriveKey(newPass);
+    // 3. Derive new per-user encryption key
+    const newJwkKey = await Crypto.deriveKey(newPass, user.id);
     localStorage.setItem('ttg_e2e_key', JSON.stringify(newJwkKey));
+    localStorage.setItem('ttg_salt_version', '2');
 
     // 4. Re-encrypt all data with new key and sync to vault
-    await DB.syncToSupabase();
+    await DB.syncNow();
 
     // 5. Force logout on all other devices/sessions
     try {
