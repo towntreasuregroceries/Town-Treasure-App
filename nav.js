@@ -8,11 +8,12 @@ function navigateTo(page) {
   if (el) el.classList.add('active');
   const nav = document.querySelector(`[data-page="${page}"]`);
   if (nav) nav.classList.add('active');
-  const titles = { dashboard:'Dashboard','new-invoice':'New Invoice',invoices:'Invoices',restaurants:'Restaurants',expenses:'Capital & Expenses',reports:'Reports','invoice-view':'Invoice','recycle-bin':'Recycle Bin',pricelists:'Price Lists','pricelist-edit':'Edit Price List','pricelist-view':'Price List',statements:'Statements' };
+  const titles = { dashboard:'Dashboard','new-invoice':'New Invoice',invoices:'Invoices','clerk-submissions':'Clerk Submissions',restaurants:'Restaurants',expenses:'Capital & Expenses',reports:'Reports','invoice-view':'Invoice','recycle-bin':'Recycle Bin',pricelists:'Price Lists','pricelist-edit':'Edit Price List','pricelist-view':'Price List',statements:'Statements' };
   document.getElementById('pageTitle').textContent = titles[page] || 'Dashboard';
   document.getElementById('sidebar').classList.remove('open');
-  if (page === 'dashboard') { refreshDashboard(); if(typeof renderInsightsPanel==='function') renderInsightsPanel(); if(typeof renderMonthlyPnL==='function') renderMonthlyPnL(); }
+  if (page === 'dashboard') { refreshDashboard(); if(typeof renderInsightsPanel==='function') renderInsightsPanel(); if(typeof renderMonthlyPnL==='function') renderMonthlyPnL(); if(typeof StagingDB !== 'undefined') StagingDB.updatePendingCountBadge(); }
   if (page === 'invoices') renderInvoicesList();
+  if (page === 'clerk-submissions' && typeof renderClerkSubmissionsPage === 'function') renderClerkSubmissionsPage();
   if (page === 'restaurants') renderRestaurants();
   if (page === 'expenses') renderExpenses();
   if (page === 'new-invoice') populateRestaurantDropdowns();

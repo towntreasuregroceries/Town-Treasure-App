@@ -1,0 +1,937 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Town Treasure Groceries — Clerk Intake Portal for paper dockets and delivery notes.">
+  <meta name="theme-color" content="#4CAF50">
+  <title>Town Treasure — Clerk Intake Portal</title>
+  <link rel="icon" href="assets/favicon.png" type="image/png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css?v=1.2.0">
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="ocr-consensus.js?v=1.2.5"></script>
+  <script src="staging.js?v=1.2.5"></script>
+  <style>
+    body {
+      background: var(--bg);
+      min-height: 100vh;
+      margin: 0;
+      padding: 0;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+    .clerk-header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .clerk-brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .clerk-brand img {
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      object-fit: cover;
+    }
+    .clerk-brand h2 {
+      margin: 0;
+      font-size: 1.15rem;
+      font-weight: 700;
+      color: var(--text);
+    }
+    .clerk-brand span {
+      font-size: 0.8rem;
+      color: var(--primary);
+      font-weight: 600;
+      letter-spacing: 0.5px;
+    }
+    .clerk-container {
+      max-width: 900px;
+      margin: 24px auto;
+      padding: 0 16px 40px;
+    }
+    .quick-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 12px;
+    }
+    .chip-btn {
+      background: var(--green-50);
+      color: var(--green-900);
+      border: 1px solid var(--green-200);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 0.8rem;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .chip-btn:hover {
+      background: var(--green-100);
+      border-color: var(--green-400);
+      transform: translateY(-1px);
+    }
+    .photo-dropzone {
+      border: 2px dashed var(--green-300);
+      background: var(--green-50);
+      border-radius: var(--radius);
+      padding: 24px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .photo-dropzone:hover {
+      background: var(--green-100);
+      border-color: var(--green-500);
+    }
+    .photo-preview-wrap {
+      position: relative;
+      display: inline-block;
+      margin-top: 12px;
+    }
+    .photo-preview-img {
+      max-height: 240px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+    }
+    .btn-remove-photo {
+      position: absolute;
+      top: -8px;
+      right: -8px;
+      background: var(--danger);
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      width: 26px;
+      height: 26px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    .ocr-status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.82rem;
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header class="clerk-header">
+    <div class="clerk-brand">
+      <img src="assets/logo.jpg" alt="Town Treasure Groceries">
+      <div>
+        <h2>Town Treasure Groceries</h2>
+        <span>CLERK / SECRETARY INTAKE PORTAL</span>
+      </div>
+    </div>
+    <div>
+      <a href="index.html" class="btn btn-sm btn-secondary" style="text-decoration:none; display:flex; align-items:center; gap:6px;">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path>
+          <polyline points="9 22 9 12 15 12 15 22"></polyline>
+        </svg>
+        <span>Veronica's Dashboard</span>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+          <polyline points="15 3 21 3 21 9"></polyline>
+          <line x1="10" y1="14" x2="21" y2="3"></line>
+        </svg>
+      </a>
+    </div>
+  </header>
+
+  <div class="clerk-container">
+
+    <!-- Notice Banner -->
+    <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:var(--radius); padding:12px 18px; margin-bottom:20px; display:flex; align-items:center; gap:12px;">
+      <div style="color:#059669; display:flex; align-items:center;">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+        </svg>
+      </div>
+      <div style="font-size:0.85rem; color:#065f46;">
+        <strong>Maker-Checker Workflow:</strong> Dockets entered or scanned here are submitted to the staging queue for <strong>Veronica's review and approval</strong> before being committed to the official encrypted ledger.
+      </div>
+    </div>
+
+    <!-- Intake Card -->
+    <div class="card">
+      <div class="card-header" style="background:#fff; border-bottom:1px solid var(--border); padding:16px 20px; display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0; font-size:1.15rem; color:var(--text); display:flex; align-items:center; gap:8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+          </svg>
+          Delivery Docket Intake
+        </h3>
+      </div>
+      <div class="card-body" style="padding:20px;">
+
+        <form id="clerkDocketForm" onsubmit="return false;">
+
+          <!-- Row 1: Clerk Name & Restaurant -->
+          <div class="form-row">
+            <div class="form-group">
+              <label><strong>Clerk / Secretary Name</strong></label>
+              <input type="text" id="clerkName" class="form-control" placeholder="e.g. John K. or Mary" required>
+            </div>
+            <div class="form-group">
+              <label><strong>Restaurant / Client</strong></label>
+              <select id="clerkRestaurantSelect" class="form-control" onchange="handleRestaurantSelect(this)">
+                <option value="">Select restaurant client…</option>
+                <option value="The Golden Crest Hotel">The Golden Crest Hotel</option>
+                <option value="Sankara Suites">Sankara Suites</option>
+                <option value="Villa Rosa Kempinski">Villa Rosa Kempinski</option>
+                <option value="Sarova Stanley">Sarova Stanley</option>
+                <option value="Hemingways Nairobi">Hemingways Nairobi</option>
+                <option value="Radisson Blu">Radisson Blu</option>
+                <option value="Nairobi Serena Hotel">Nairobi Serena Hotel</option>
+                <option value="Fairmont The Norfolk">Fairmont The Norfolk</option>
+                <option value="Tamarind Tree Hotel">Tamarind Tree Hotel</option>
+                <option value="Mövenpick Hotel">Mövenpick Hotel</option>
+                <option value="Crowne Plaza">Crowne Plaza</option>
+                <option value="Ole Sereni Hotel">Ole Sereni Hotel</option>
+                <option value="Safari Park Hotel">Safari Park Hotel</option>
+                <option value="Windsor Golf Hotel">Windsor Golf Hotel</option>
+                <option value="Eka Hotel">Eka Hotel</option>
+                <option value="Boma Nairobi">Boma Nairobi</option>
+                <option value="__other__">+ Other / Enter Custom Name</option>
+              </select>
+              <input type="text" id="clerkRestaurantCustom" class="form-control" placeholder="Type restaurant name..." style="display:none; margin-top:8px;">
+            </div>
+            <div class="form-group">
+              <label><strong>Delivery / Docket Date</strong></label>
+              <input type="date" id="clerkDocketDate" class="form-control" required>
+            </div>
+          </div>
+
+          <!-- Physical Photo & OCR Section -->
+          <div class="form-group" style="margin-top:16px;">
+            <label><strong>Physical Docket Photos (Supports 1 or 2+ Pages)</strong></label>
+            <div class="photo-dropzone" id="clerkPhotoDropzone" onclick="document.getElementById('clerkPhotoInput').click()">
+              <input type="file" id="clerkPhotoInput" accept="image/*" multiple style="display:none;" onclick="event.stopPropagation()" onchange="handlePhotoSelect(this)">
+              <div id="photoDropPrompt">
+                <div style="color:var(--primary); margin-bottom:8px;">
+                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                    <circle cx="12" cy="13" r="4"></circle>
+                  </svg>
+                </div>
+                <div style="font-weight:600; color:var(--green-900);">Take Photos or Upload Docket Pictures</div>
+                <div style="font-size:0.8rem; color:var(--text-2); margin-top:4px;">Supports 1, 2, or more pages. Upload Page 1 &amp; Page 2 — extracts both into one unified invoice.</div>
+              </div>
+
+              <!-- Multi-Page Preview Container -->
+              <div id="photoPreviewContainer" style="display:none;" onclick="event.stopPropagation()">
+                <div id="clerkPhotoGrid" style="display:flex; flex-wrap:wrap; justify-content:center; gap:10px; margin-bottom:14px;"></div>
+                <div style="margin-top:14px; display:flex; justify-content:center; gap:10px; flex-wrap:wrap;">
+                  <button type="button" class="btn btn-primary btn-sm" id="btnClerkOCR" onclick="runClerkOCR()" style="display:flex; align-items:center; gap:6px;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                    </svg>
+                    <span>Auto-Extract Line Items from Photos</span>
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('clerkPhotoInput').click()">
+                    + Add Another Page
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="clearAllClerkPhotos(event)" style="color:var(--danger, #dc2626);">
+                    Clear Photos
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- OCR Progress Bar / Status -->
+            <div id="clerkOcrProgress" style="display:none; margin-top:12px; background:var(--gray-50); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px 16px;">
+              <div style="display:flex; align-items:center; gap:10px;">
+                <div class="auth-spinner" style="border-top-color:var(--primary); width:18px; height:18px;"></div>
+                <div id="clerkOcrStatusText" style="font-size:0.85rem; color:var(--text); font-weight:500;">Running Multimodal OCR analysis...</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Produce Quick-Add Chips -->
+          <div style="margin-top:20px;">
+            <label style="display:flex; justify-content:space-between; align-items:center;">
+              <strong>Line Items</strong>
+              <span style="font-size:0.8rem; color:var(--text-2);">Tap produce to add manually:</span>
+            </label>
+            <div class="quick-chips">
+              <button type="button" class="chip-btn" onclick="quickAddItem('Red Onions', 'kgs')">+ Red Onions</button>
+              <button type="button" class="chip-btn" onclick="quickAddItem('Tomatoes', 'crates')">+ Tomatoes</button>
+              <button type="button" class="chip-btn" onclick="quickAddItem('Potatoes (Warus)', 'bags')">+ Potatoes (Warus)</button>
+              <button type="button" class="chip-btn" onclick="quickAddItem('Sukuma Wiki', 'bundles')">+ Sukuma Wiki</button>
+              <button type="button" class="chip-btn" onclick="quickAddItem('Cabbages', 'pieces')">+ Cabbages</button>
+              <button type="button" class="chip-btn" onclick="quickAddItem('Dhania', 'bundles')">+ Dhania</button>
+              <button type="button" class="chip-btn" onclick="quickAddItem('Spinach', 'bundles')">+ Spinach</button>
+              <button type="button" class="chip-btn" onclick="quickAddItem('Carrots', 'kgs')">+ Carrots</button>
+              <button type="button" class="chip-btn" onclick="quickAddItem('Capsicum (Hoho)', 'kgs')">+ Hoho</button>
+              <button type="button" class="chip-btn" onclick="quickAddItem('Garlic', 'kgs')">+ Garlic</button>
+            </div>
+          </div>
+
+          <!-- Line Items Table -->
+          <div class="table-wrap" style="margin-bottom:16px;">
+            <table class="line-items-table" style="width:100%;">
+              <thead>
+                <tr>
+                  <th style="width:38%;">Item Description</th>
+                  <th style="width:15%;">Quantity</th>
+                  <th style="width:18%;">Unit</th>
+                  <th style="width:15%;">Unit Price (KES)</th>
+                  <th style="width:14%; text-align:right;">Total (KES)</th>
+                  <th style="width:30px;"></th>
+                </tr>
+              </thead>
+              <tbody id="clerkLineItemsBody">
+                <!-- Rows dynamically added or extracted -->
+              </tbody>
+            </table>
+          </div>
+
+          <div style="margin-bottom:20px; display:flex; justify-content:space-between; align-items:center;">
+            <button type="button" class="btn btn-secondary btn-sm" onclick="addClerkLineItem()" style="font-weight:600;">
+              + Add Item Row
+            </button>
+            <button type="button" class="btn btn-secondary btn-sm" id="btnClerkDownloadCsv" onclick="downloadClerkCsv()" style="display:none;">
+              Export Table to CSV
+            </button>
+          </div>
+
+          <!-- Costs & Notes -->
+          <div class="form-row">
+            <div class="form-group">
+              <label>Delivery Cost (KES)</label>
+              <input type="number" step="any" min="0" id="clerkDeliveryCost" class="form-control" placeholder="0.00" oninput="calcClerkTotals()">
+            </div>
+            <div class="form-group">
+              <label>Other Operational Costs (KES)</label>
+              <input type="number" step="any" min="0" id="clerkOtherCost" class="form-control" placeholder="0.00" oninput="calcClerkTotals()">
+            </div>
+            <div class="form-group">
+              <label>Docket Notes / Comments</label>
+              <input type="text" id="clerkNotes" class="form-control" placeholder="e.g. Received at kitchen 6:30 AM by Chef Daniel">
+            </div>
+          </div>
+
+          <!-- Total Calculation Card -->
+          <div style="background:var(--gray-50); border:1px solid var(--border); border-radius:var(--radius); padding:16px 20px; margin:20px 0; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+            <div>
+              <div style="font-size:0.85rem; color:var(--text-2);">Items Subtotal: <strong id="clerkSubtotalText">KES 0.00</strong></div>
+              <div style="font-size:0.85rem; color:var(--text-2);">Delivery &amp; Other: <strong id="clerkOpsText">KES 0.00</strong></div>
+            </div>
+            <div style="text-align:right;">
+              <div style="font-size:0.8rem; text-transform:uppercase; color:var(--text-3); font-weight:700;">Grand Total</div>
+              <div style="font-size:1.6rem; font-weight:800; color:var(--primary-dk);" id="clerkGrandTotalText">KES 0.00</div>
+            </div>
+          </div>
+
+          <!-- Submit Button -->
+          <div style="text-align:right;">
+            <button type="button" class="btn btn-primary" id="btnSubmitDocket" onclick="submitClerkDocket()" style="padding:14px 28px; font-size:1.05rem; font-weight:700;">
+              Submit Docket for Veronica's Approval
+            </button>
+          </div>
+
+        </form>
+
+      </div>
+    </div>
+
+    <!-- Recent Submissions Table -->
+    <div class="card" style="margin-top:32px;">
+      <div class="card-header" style="display:flex; justify-content:space-between; align-items:center;">
+        <h3 style="margin:0; font-size:1.05rem; display:flex; align-items:center; gap:8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="9 11 12 14 22 4"></polyline>
+            <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path>
+          </svg>
+          My Recent Submissions
+        </h3>
+        <button class="btn btn-sm btn-secondary" onclick="loadClerkHistory()">Refresh</button>
+      </div>
+      <div class="card-body">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Restaurant</th>
+                <th>Items</th>
+                <th>Grand Total</th>
+                <th>Status</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="clerkHistoryBody">
+              <tr><td colspan="6" class="empty-state">Loading history...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toastContainer" style="position:fixed; bottom:20px; right:20px; z-index:9999;"></div>
+
+  <script>
+    let clerkDocketPhotos = [];
+    let attachedPhotoBase64 = null;
+
+    function initClerkPortal() {
+      try {
+        const savedName = localStorage.getItem('ttg_clerk_name');
+        if (savedName) {
+          const nameInput = document.getElementById('clerkName');
+          if (nameInput) nameInput.value = savedName;
+        }
+
+        const dateInput = document.getElementById('clerkDocketDate');
+        if (dateInput && !dateInput.value) {
+          dateInput.value = new Date().toISOString().slice(0, 10);
+        }
+
+        // Bind Drag and Drop on dropzone
+        const dropzone = document.getElementById('clerkPhotoDropzone');
+        if (dropzone && !dropzone._dragBound) {
+          dropzone._dragBound = true;
+          ['dragenter', 'dragover'].forEach(evt => {
+            dropzone.addEventListener(evt, (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              dropzone.style.borderColor = 'var(--primary)';
+              dropzone.style.background = 'var(--green-100)';
+            });
+          });
+          ['dragleave', 'drop'].forEach(evt => {
+            dropzone.addEventListener(evt, (e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              dropzone.style.borderColor = '';
+              dropzone.style.background = '';
+            });
+          });
+          dropzone.addEventListener('drop', (e) => {
+            if (e.dataTransfer && e.dataTransfer.files) {
+              handlePhotoFiles(e.dataTransfer.files);
+            }
+          });
+        }
+
+        // Start with 1 empty item row ready for input if table is empty
+        const tbody = document.getElementById('clerkLineItemsBody');
+        if (tbody && tbody.children.length === 0) {
+          addClerkLineItem('', 1, 'kgs', 0);
+        }
+
+        calcClerkTotals();
+      } catch (err) {
+        console.error('[Clerk] Initialization warning:', err);
+      }
+
+      loadClerkHistory();
+    }
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', initClerkPortal);
+    } else {
+      initClerkPortal();
+    }
+
+    function handleRestaurantSelect(sel) {
+      const customInput = document.getElementById('clerkRestaurantCustom');
+      if (sel.value === '__other__') {
+        customInput.style.display = 'block';
+        customInput.focus();
+      } else {
+        customInput.style.display = 'none';
+      }
+    }
+
+    function addClerkLineItem(desc = '', qty = 1, unit = 'kgs', price = 0) {
+      const tbody = document.getElementById('clerkLineItemsBody');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td><input type="text" class="form-control item-desc" value="${escapeHtml(desc)}" placeholder="Produce item" required></td>
+        <td><input type="number" step="any" min="0" class="form-control item-qty" value="${qty}" oninput="calcClerkTotals()"></td>
+        <td>
+          <select class="form-control item-unit">
+            <option value="kgs" ${unit==='kgs'?'selected':''}>Kgs</option>
+            <option value="crates" ${unit==='crates'?'selected':''}>Crates</option>
+            <option value="bags" ${unit==='bags'?'selected':''}>Bags</option>
+            <option value="pieces" ${unit==='pieces'?'selected':''}>Pieces</option>
+            <option value="bundles" ${unit==='bundles'?'selected':''}>Bundles</option>
+            <option value="litres" ${unit==='litres'?'selected':''}>Litres</option>
+            <option value="trays" ${unit==='trays'?'selected':''}>Trays</option>
+            <option value="dozen" ${unit==='dozen'?'selected':''}>Dozen</option>
+          </select>
+        </td>
+        <td><input type="number" step="any" min="0" class="form-control item-price" value="${price || ''}" placeholder="0.00" oninput="calcClerkTotals()"></td>
+        <td class="item-total" style="font-weight:600; text-align:right;">0.00</td>
+        <td>
+          <button type="button" class="btn-remove-row" onclick="removeClerkLineItem(this)" style="background:none; border:none; color:var(--text-3); cursor:pointer;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+      calcClerkTotals();
+    }
+
+    function removeClerkLineItem(btn) {
+      const tbody = document.getElementById('clerkLineItemsBody');
+      if (tbody.rows.length <= 1) return;
+      btn.closest('tr').remove();
+      calcClerkTotals();
+    }
+
+    function quickAddItem(name, unit) {
+      addClerkLineItem(name, 1, unit, 0);
+    }
+
+    function calcClerkTotals() {
+      let subtotal = 0;
+      document.querySelectorAll('#clerkLineItemsBody tr').forEach(row => {
+        const q = parseFloat(row.querySelector('.item-qty')?.value) || 0;
+        const p = parseFloat(row.querySelector('.item-price')?.value) || 0;
+        const t = q * p;
+        const cell = row.querySelector('.item-total');
+        if (cell) cell.textContent = t.toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        subtotal += t;
+      });
+
+      const del = parseFloat(document.getElementById('clerkDeliveryCost')?.value) || 0;
+      const other = parseFloat(document.getElementById('clerkOtherCost')?.value) || 0;
+      const grand = subtotal + del + other;
+
+      document.getElementById('clerkSubtotalText').textContent = 'KES ' + subtotal.toLocaleString('en-KE', { minimumFractionDigits: 2 });
+      document.getElementById('clerkOpsText').textContent = 'KES ' + (del + other).toLocaleString('en-KE', { minimumFractionDigits: 2 });
+      document.getElementById('clerkGrandTotalText').textContent = 'KES ' + grand.toLocaleString('en-KE', { minimumFractionDigits: 2 });
+    }
+
+    function handlePhotoFiles(fileList) {
+      if (!fileList || !fileList.length) return;
+      const files = Array.from(fileList);
+
+      let processed = 0;
+      const checkDone = () => {
+        processed++;
+        if (processed >= files.length) {
+          const fileInput = document.getElementById('clerkPhotoInput');
+          if (fileInput) fileInput.value = '';
+          renderClerkPhotosList();
+        }
+      };
+
+      files.forEach(file => {
+        if (file.type && !file.type.startsWith('image/')) {
+          toast('Please select an image file (e.g. JPG, PNG, WebP)', 'warning');
+          checkDone();
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const rawUrl = e.target.result;
+          const img = new Image();
+          img.onload = () => {
+            try {
+              const maxDim = 1400;
+              let w = img.width, h = img.height;
+              if (w > maxDim || h > maxDim) {
+                if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+                else { w = Math.round(w * maxDim / h); h = maxDim; }
+              }
+              const canvas = document.createElement('canvas');
+              canvas.width = w;
+              canvas.height = h;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(img, 0, 0, w, h);
+              const compressed = canvas.toDataURL('image/jpeg', 0.85);
+
+              clerkDocketPhotos.push(compressed);
+              attachedPhotoBase64 = clerkDocketPhotos[0] || null;
+            } catch (canvasErr) {
+              console.warn('[Photo] Canvas resize fallback:', canvasErr);
+              clerkDocketPhotos.push(rawUrl);
+              attachedPhotoBase64 = clerkDocketPhotos[0] || null;
+            }
+            checkDone();
+          };
+          img.onerror = () => {
+            clerkDocketPhotos.push(rawUrl);
+            attachedPhotoBase64 = clerkDocketPhotos[0] || null;
+            checkDone();
+          };
+          img.src = rawUrl;
+        };
+        reader.onerror = () => {
+          console.error('[Photo] Error reading file');
+          checkDone();
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function handlePhotoSelect(input) {
+      if (input && input.files) {
+        handlePhotoFiles(input.files);
+      }
+    }
+
+    function renderClerkPhotosList() {
+      const prompt = document.getElementById('photoDropPrompt');
+      const container = document.getElementById('photoPreviewContainer');
+      const grid = document.getElementById('clerkPhotoGrid');
+      const btn = document.getElementById('btnClerkOCR');
+
+      if (!clerkDocketPhotos.length) {
+        attachedPhotoBase64 = null;
+        if (prompt) prompt.style.display = 'block';
+        if (container) container.style.display = 'none';
+        return;
+      }
+
+      attachedPhotoBase64 = clerkDocketPhotos[0];
+      if (prompt) prompt.style.display = 'none';
+      if (container) container.style.display = 'block';
+
+      if (grid) {
+        grid.innerHTML = clerkDocketPhotos.map((dataUrl, idx) => `
+          <div style="position:relative; display:inline-block; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#fff; box-shadow:0 2px 6px rgba(0,0,0,0.08); margin:4px;">
+            <img src="${dataUrl}" style="width:115px; height:140px; object-fit:cover; display:block;" alt="Docket Page ${idx + 1}">
+            <div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.7); color:#fff; font-size:0.72rem; font-weight:700; text-align:center; padding:3px 0;">
+              Page ${idx + 1}
+            </div>
+            <button type="button" onclick="removeClerkPhoto(${idx}, event)" title="Remove page" style="position:absolute; top:4px; right:4px; background:var(--danger, #dc2626); color:#fff; border:none; border-radius:50%; width:22px; height:22px; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; line-height:1; font-weight:bold;">
+              ✕
+            </button>
+          </div>
+        `).join('') + `
+          <div onclick="document.getElementById('clerkPhotoInput').click()" style="width:115px; height:140px; border:2px dashed var(--green-400); border-radius:8px; display:inline-flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; background:var(--green-50); margin:4px;">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--primary);">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span style="font-size:0.75rem; font-weight:600; color:var(--green-900); margin-top:4px;">+ Add Page</span>
+          </div>
+        `;
+      }
+
+      if (btn) {
+        btn.innerHTML = `
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+          </svg>
+          <span>Auto-Extract Line Items from ${clerkDocketPhotos.length} Page${clerkDocketPhotos.length > 1 ? 's' : ''}</span>
+        `;
+      }
+    }
+
+    function removeClerkPhoto(idx, e) {
+      if (e) e.stopPropagation();
+      clerkDocketPhotos.splice(idx, 1);
+      renderClerkPhotosList();
+    }
+
+    function clearAllClerkPhotos(e) {
+      if (e) e.stopPropagation();
+      clerkDocketPhotos = [];
+      document.getElementById('clerkPhotoInput').value = '';
+      renderClerkPhotosList();
+    }
+
+    function removeAttachedPhoto(e) {
+      clearAllClerkPhotos(e);
+    }
+
+    /** Run the live OCR extraction on the attached docket photo(s) */
+    async function runClerkOCR() {
+      if (!clerkDocketPhotos.length) return toast('Please attach at least one docket photo first', 'warning');
+
+      const progressBox = document.getElementById('clerkOcrProgress');
+      const statusText = document.getElementById('clerkOcrStatusText');
+      progressBox.style.display = 'block';
+
+      const btn = document.getElementById('btnClerkOCR');
+      btn.disabled = true;
+
+      try {
+        const result = await OCRConsensus.processDocket(clerkDocketPhotos, msg => {
+          statusText.textContent = msg;
+        });
+
+        // Set restaurant if recognized
+        if (result.restaurantName) {
+          const sel = document.getElementById('clerkRestaurantSelect');
+          const opts = Array.from(sel.options);
+          const match = opts.find(o => o.value.toLowerCase().includes(result.restaurantName.toLowerCase()));
+          if (match) {
+            sel.value = match.value;
+          } else {
+            sel.value = '__other__';
+            document.getElementById('clerkRestaurantCustom').style.display = 'block';
+            document.getElementById('clerkRestaurantCustom').value = result.restaurantName;
+          }
+        }
+
+        // Set date if detected
+        if (result.date) {
+          document.getElementById('clerkDocketDate').value = result.date;
+        }
+
+        // Populate extracted line items
+        const tbody = document.getElementById('clerkLineItemsBody');
+        tbody.innerHTML = '';
+
+        (result.items || []).forEach(it => {
+          addClerkLineItem(it.desc, it.qty, it.unit, it.price || it.sellPrice || 0);
+        });
+
+        calcClerkTotals();
+        document.getElementById('btnClerkDownloadCsv').style.display = 'inline-block';
+
+        toast(`Extracted ${result.items.length} items across ${clerkDocketPhotos.length} page(s) using ${result.enginesUsed.join(' + ')}!`, 'success');
+
+      } catch (err) {
+        console.error('Clerk OCR failed:', err);
+        toast('OCR Extraction error: ' + err.message, 'error');
+      } finally {
+        progressBox.style.display = 'none';
+        btn.disabled = false;
+      }
+    }
+
+    function downloadClerkCsv() {
+      const items = [];
+      document.querySelectorAll('#clerkLineItemsBody tr').forEach(row => {
+        const desc = row.querySelector('.item-desc')?.value?.trim();
+        const qty = parseFloat(row.querySelector('.item-qty')?.value) || 0;
+        const unit = row.querySelector('.item-unit')?.value || 'kgs';
+        const price = parseFloat(row.querySelector('.item-price')?.value) || 0;
+        if (desc) items.push({ desc, qty, unit, price, total: qty * price });
+      });
+      if (items.length) {
+        OCRConsensus.downloadCSV(items, 'clerk_extracted_items.csv');
+        toast('CSV file downloaded');
+      }
+    }
+
+    /** Submit the docket into the staging vault */
+    async function submitClerkDocket() {
+      const clerkName = document.getElementById('clerkName').value.trim();
+      if (!clerkName) {
+        toast('Please enter your name', 'error');
+        document.getElementById('clerkName').focus();
+        return;
+      }
+      localStorage.setItem('ttg_clerk_name', clerkName);
+
+      const selRest = document.getElementById('clerkRestaurantSelect').value;
+      let restName = selRest;
+      if (selRest === '__other__') {
+        restName = document.getElementById('clerkRestaurantCustom').value.trim();
+      }
+      if (!restName) {
+        toast('Please select or enter a restaurant client', 'error');
+        return;
+      }
+
+      const invDate = document.getElementById('clerkDocketDate').value;
+      if (!invDate) {
+        toast('Please select the docket date', 'error');
+        return;
+      }
+
+      const items = [];
+      let valid = true;
+      document.querySelectorAll('#clerkLineItemsBody tr').forEach(row => {
+        const desc = row.querySelector('.item-desc').value.trim();
+        const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
+        const unit = row.querySelector('.item-unit').value || 'kgs';
+        const price = parseFloat(row.querySelector('.item-price').value) || 0;
+        if (!desc) { valid = false; return; }
+        items.push({ desc, qty, unit, sellPrice: price, buyPrice: 0, total: qty * price });
+      });
+
+      if (!valid || !items.length) {
+        toast('Please enter descriptions for all produce items', 'error');
+        return;
+      }
+
+      const delCost = parseFloat(document.getElementById('clerkDeliveryCost').value) || 0;
+      const otherCost = parseFloat(document.getElementById('clerkOtherCost').value) || 0;
+      const subtotal = items.reduce((s, i) => s + i.total, 0);
+      const grandTotal = subtotal + delCost + otherCost;
+      const notes = document.getElementById('clerkNotes').value.trim();
+
+      const btn = document.getElementById('btnSubmitDocket');
+      btn.disabled = true;
+      btn.textContent = 'Submitting to Veronica...';
+
+      try {
+        const docketData = {
+          clerk_name: clerkName,
+          restaurant_name: restName,
+          invoice_date: invDate,
+          items_json: items,
+          delivery_cost: delCost,
+          other_cost: otherCost,
+          total_sell: grandTotal,
+          total_buy: 0,
+          receipt_photo: clerkDocketPhotos[0] || attachedPhotoBase64 || null,
+          receipt_photos: clerkDocketPhotos.length ? clerkDocketPhotos : (attachedPhotoBase64 ? [attachedPhotoBase64] : []),
+          notes: notes
+        };
+
+        await StagingDB.submitDocket(docketData);
+
+        toast('Docket successfully submitted for Veronica\'s review', 'success');
+
+        removeAttachedPhoto();
+        document.getElementById('clerkNotes').value = '';
+        document.getElementById('clerkDeliveryCost').value = '';
+        document.getElementById('clerkOtherCost').value = '';
+        document.getElementById('clerkLineItemsBody').innerHTML = '';
+        addClerkLineItem('', 1, 'kgs', 0);
+        calcClerkTotals();
+        document.getElementById('btnClerkDownloadCsv').style.display = 'none';
+
+        loadClerkHistory();
+
+      } catch (err) {
+        console.error('Submission failed:', err);
+        toast('Error submitting docket: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Submit Docket for Veronica\'s Approval';
+      }
+    }
+
+    async function loadClerkHistory() {
+      const tbody = document.getElementById('clerkHistoryBody');
+      if (!tbody) return;
+
+      try {
+        let all = [];
+        if (typeof StagingDB !== 'undefined' && typeof StagingDB.getAllSubmissions === 'function') {
+          all = await StagingDB.getAllSubmissions();
+        } else {
+          const stored = localStorage.getItem('ttg_staged_invoices');
+          all = stored ? JSON.parse(stored) : [];
+        }
+
+        const list = (all || []).slice(0, 10);
+
+        if (!list.length) {
+          tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="text-align:center; padding:24px; color:var(--text-3);">No submissions recorded yet.</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = list.map(item => {
+          let badge = '';
+          if (item.status === 'pending') {
+            badge = `<span class="badge" style="background:#fef3c7; color:#b45309; font-weight:600; padding:4px 8px; border-radius:6px;">Waiting for Review</span>`;
+          } else if (item.status === 'approved') {
+            badge = `<span class="badge" style="background:#ecfdf5; color:#047857; font-weight:600; padding:4px 8px; border-radius:6px;">Approved &amp; Synced</span>`;
+          } else {
+            badge = `<span class="badge" style="background:#fef2f2; color:#b91c1c; font-weight:600; padding:4px 8px; border-radius:6px;" title="${escapeHtml(item.rejection_reason || '')}">Returned: ${escapeHtml(item.rejection_reason || 'Check details')}</span>`;
+          }
+
+          const amt = (item.total_sell || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 });
+          return `
+            <tr>
+              <td><strong>${escapeHtml(item.invoice_date || '')}</strong></td>
+              <td><strong>${escapeHtml(item.restaurant_name || '')}</strong></td>
+              <td>${(item.items_json || []).length} items</td>
+              <td><strong>KES ${amt}</strong></td>
+              <td>${badge}</td>
+              <td style="font-size:0.8rem; color:var(--text-2);">${escapeHtml(item.notes || '—')}</td>
+            </tr>
+          `;
+        }).join('');
+
+      } catch (e) {
+        console.warn('[Clerk] History load warning, reading local storage:', e);
+        try {
+          const stored = localStorage.getItem('ttg_staged_invoices');
+          const all = stored ? JSON.parse(stored) : [];
+          if (!all.length) {
+            tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="text-align:center; padding:24px; color:var(--text-3);">No submissions recorded yet.</td></tr>`;
+          } else {
+            tbody.innerHTML = all.slice(0, 10).map(item => `
+              <tr>
+                <td><strong>${escapeHtml(item.invoice_date || '')}</strong></td>
+                <td><strong>${escapeHtml(item.restaurant_name || '')}</strong></td>
+                <td>${(item.items_json || []).length} items</td>
+                <td><strong>KES ${(item.total_sell || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}</strong></td>
+                <td><span class="badge" style="background:#fef3c7; color:#b45309; font-weight:600; padding:4px 8px; border-radius:6px;">Waiting for Review</span></td>
+                <td style="font-size:0.8rem; color:var(--text-2);">${escapeHtml(item.notes || '—')}</td>
+              </tr>
+            `).join('');
+          }
+        } catch (err2) {
+          tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="text-align:center; padding:24px;">No submissions recorded yet.</td></tr>`;
+        }
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function toast(msg, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      if (!container) return;
+      const el = document.createElement('div');
+      el.className = 'toast toast-' + type;
+      el.style.background = type === 'success' ? '#047857' : (type === 'error' ? '#b91c1c' : '#334155');
+      el.style.color = '#fff';
+      el.style.padding = '12px 18px';
+      el.style.borderRadius = '8px';
+      el.style.marginBottom = '8px';
+      el.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+      el.style.fontSize = '0.9rem';
+      el.style.fontWeight = '500';
+      el.textContent = msg;
+      container.appendChild(el);
+      setTimeout(() => el.remove(), 4000);
+    }
+  </script>
+</body>
+</html>

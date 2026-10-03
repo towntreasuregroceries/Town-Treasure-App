@@ -299,6 +299,14 @@
           </svg>
           Invoices
         </a>
+        <a class="nav-item" data-page="clerk-submissions" id="nav-clerk-submissions">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M22 12h-6l-2 3h-4l-2-3H2"/>
+            <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+          </svg>
+          <span>Clerk Submissions</span>
+          <span class="badge" id="clerkPendingBadge" style="display:none; margin-left:auto; background:#f59e0b; color:#fff; border-radius:12px; padding:2px 8px; font-size:0.75rem; font-weight:700;">0</span>
+        </a>
 
         <div class="nav-section">Management</div>
         <a class="nav-item" data-page="restaurants" id="nav-restaurants">
@@ -444,6 +452,7 @@
 
         <!-- ════════ DASHBOARD ════════ -->
         <div class="page active" id="page-dashboard">
+          <div id="clerkPendingBanner" style="display:none; margin-bottom:20px;"></div>
           <div class="stats-grid" id="dashboardStats"></div>
           <div class="chart-row">
             <div class="card">
@@ -492,8 +501,25 @@
         <!-- ════════ NEW INVOICE ════════ -->
         <div class="page" id="page-new-invoice">
           <div class="card">
-            <div class="card-header">
-              <h3>Create New Invoice</h3>
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+              <h3 style="margin:0;">Create New Invoice</h3>
+              <div style="display:flex; gap:8px;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openInvoiceScannerModal()" style="display:inline-flex; align-items:center; gap:6px; font-weight:600;">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                    <circle cx="12" cy="13" r="4"></circle>
+                  </svg>
+                  Scan Paper Docket (OCR)
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openCsvImportModal()" style="display:inline-flex; align-items:center; gap:6px; font-weight:600;">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  Import CSV
+                </button>
+              </div>
             </div>
             <div class="card-body">
               <form id="invoiceForm" onsubmit="return false;">
@@ -1272,6 +1298,68 @@
           </div>
         </div>
 
+        <!-- ════════ CLERK SUBMISSIONS ════════ -->
+        <div class="page" id="page-clerk-submissions">
+          <div class="card" style="margin-bottom:16px;">
+            <div class="card-header" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+              <div>
+                <h3 style="margin:0; display:flex; align-items:center; gap:8px;">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M22 12h-6l-2 3h-4l-2-3H2"/>
+                    <path d="M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/>
+                  </svg>
+                  Clerk Docket Submissions
+                </h3>
+                <p style="color:var(--text-2); font-size:0.85rem; margin:4px 0 0;">Review, adjust, and approve handwritten dockets submitted by clerks and assistants before encrypting into your private vault.</p>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <button class="btn btn-secondary btn-sm" onclick="renderClerkSubmissionsPage()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle; margin-right:4px;">
+                    <path d="M23 4v6h-6"></path><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                  </svg>
+                  Refresh
+                </button>
+                <button class="btn btn-secondary btn-sm" onclick="copyClerkPortalLink()" title="Copy link to send to clerk via WhatsApp or SMS">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle; margin-right:4px;">
+                    <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
+                    <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
+                  </svg>
+                  Share Link with Clerk
+                </button>
+                <a href="clerk.html" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none;">
+                  + Open Clerk Portal
+                </a>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="tabs" style="margin-bottom:16px;">
+                <button class="tab-btn active" id="tabClerkPending" onclick="switchClerkTab('pending', this)">Pending Approval (<span id="clerkTabPendingCount">0</span>)</button>
+                <button class="tab-btn" id="tabClerkApproved" onclick="switchClerkTab('approved', this)">Approved History</button>
+                <button class="tab-btn" id="tabClerkRejected" onclick="switchClerkTab('rejected', this)">Rejected</button>
+              </div>
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Docket Photo</th>
+                      <th>Date</th>
+                      <th>Restaurant / Client</th>
+                      <th>Submitted By</th>
+                      <th>Items</th>
+                      <th>Total (KES)</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="clerkSubmissionsBody">
+                    <tr><td colspan="8" class="empty-state">Loading submissions...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+
       </div><!-- /content -->
     </div><!-- /main -->
   </div><!-- /app -->
@@ -1627,6 +1715,310 @@
     </div>
   </div>
 
+  <!-- Clerk Docket Review & Approval Modal -->
+  <div class="modal-overlay" id="clerkReviewModal">
+    <div class="modal" style="max-width:1100px; width:95%; max-height:92vh; display:flex; flex-direction:column;">
+      <div class="modal-header" style="background:#fff; border-bottom:1px solid var(--border); padding:16px 24px;">
+        <div>
+          <h2 style="margin:0; font-size:1.25rem; display:flex; align-items:center; gap:8px;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="11" cy="11" r="8"></circle>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+            </svg>
+            Review &amp; Approve Clerk Docket
+          </h2>
+          <div style="font-size:0.8rem; color:var(--text-2); margin-top:2px;">
+            Submitted by <strong id="crmClerkName">Clerk</strong> on <span id="crmSubmittedAt">—</span>
+          </div>
+        </div>
+        <button onclick="closeModal('clerkReviewModal')" class="btn-icon" title="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body" style="flex:1; overflow-y:auto; padding:20px 24px;">
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:24px;">
+          
+          <!-- Left Column: Receipt Photo -->
+          <div>
+            <h4 style="font-size:0.95rem; margin:0 0 10px; color:var(--text); display:flex; align-items:center; gap:6px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                <circle cx="12" cy="13" r="4"></circle>
+              </svg>
+              Physical Docket Photo
+            </h4>
+            <div id="crmPhotoContainer" style="background:var(--gray-50); border:1px solid var(--border); border-radius:var(--radius); padding:12px; text-align:center; min-height:260px; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+              <!-- Photo dynamically rendered -->
+            </div>
+            
+            <div style="margin-top:14px; background:var(--gray-50); border:1px solid var(--border); border-radius:var(--radius-sm); padding:12px;">
+              <div style="font-size:0.75rem; text-transform:uppercase; color:var(--text-3); font-weight:700;">Clerk Notes / Remarks</div>
+              <div id="crmClerkNotes" style="font-size:0.88rem; color:var(--text); margin-top:4px; font-style:italic;">—</div>
+            </div>
+          </div>
+
+          <!-- Right Column: Verification & Data Form -->
+          <div>
+            <h4 style="font-size:0.95rem; margin:0 0 10px; color:var(--text); display:flex; align-items:center; gap:6px;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+              Extracted Produce &amp; Pricing
+            </h4>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Restaurant / Client</label>
+                <input type="text" id="crmRestaurantName" class="form-control" placeholder="Restaurant name" required>
+              </div>
+              <div class="form-group">
+                <label>Delivery / Invoice Date</label>
+                <input type="date" id="crmInvoiceDate" class="form-control" required>
+              </div>
+            </div>
+
+            <!-- Line Items Table -->
+            <div class="table-wrap" style="margin:12px 0; max-height:240px; overflow-y:auto;">
+              <table style="width:100%; font-size:0.85rem;">
+                <thead>
+                  <tr>
+                    <th>Item Description</th>
+                    <th>Qty</th>
+                    <th>Unit</th>
+                    <th>Buy (KES)</th>
+                    <th>Sell (KES)</th>
+                    <th style="text-align:right;">Total</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="crmLineItemsBody">
+                  <!-- Dynamically inserted -->
+                </tbody>
+              </table>
+            </div>
+
+            <div style="margin-bottom:12px;">
+              <button type="button" class="btn btn-secondary btn-sm" onclick="addCrmLineItem()" style="font-weight:600;">
+                + Add Line Item
+              </button>
+            </div>
+
+            <div class="form-row">
+              <div class="form-group">
+                <label>Delivery Fee (KES)</label>
+                <input type="number" step="any" min="0" id="crmDeliveryCost" class="form-control" placeholder="0.00" oninput="calcCrmTotals()">
+              </div>
+              <div class="form-group">
+                <label>Other Costs (KES)</label>
+                <input type="number" step="any" min="0" id="crmOtherCost" class="form-control" placeholder="0.00" oninput="calcCrmTotals()">
+              </div>
+            </div>
+
+            <!-- Total and Profit Preview (Only Veronica sees this!) -->
+            <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:var(--radius); padding:14px 18px; margin-top:14px;">
+              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:0.85rem;">
+                <span style="color:var(--text-2);">Total Invoice Amount (Selling):</span>
+                <strong id="crmSubtotal" style="color:var(--primary-dk); font-size:1rem;">KES 0.00</strong>
+              </div>
+              <div style="display:flex; justify-content:space-between; margin-bottom:6px; font-size:0.85rem;">
+                <span style="color:var(--text-2);">Total Cost (Buy + Ops):</span>
+                <strong id="crmCost" style="color:var(--text);">KES 0.00</strong>
+              </div>
+              <hr style="border:none; border-top:1px dashed #86efac; margin:8px 0;">
+              <div style="display:flex; justify-content:space-between; font-size:0.95rem;">
+                <span style="font-weight:700; color:var(--text);">Projected Profit:</span>
+                <strong id="crmProfit" style="color:var(--primary); font-size:1.15rem;">KES 0.00</strong>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+      </div>
+
+      <div class="modal-footer" style="background:#fff; border-top:1px solid var(--border); padding:14px 24px; display:flex; justify-content:space-between; align-items:center;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('clerkReviewModal')">
+          Close
+        </button>
+        <div style="display:flex; gap:10px;">
+          <button type="button" class="btn btn-danger" id="btnCrmReject" onclick="executeClerkRejection()" style="font-weight:600; display:inline-flex; align-items:center; gap:6px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"></circle>
+              <line x1="15" y1="9" x2="9" y2="15"></line>
+              <line x1="9" y1="9" x2="15" y2="15"></line>
+            </svg>
+            Return to Clerk for Correction
+          </button>
+          <button type="button" class="btn btn-primary" id="btnCrmApprove" onclick="executeClerkApproval()" style="font-weight:700; background:#16a34a; border-color:#16a34a; display:inline-flex; align-items:center; gap:6px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+              <polyline points="9 12 11 14 15 10"></polyline>
+            </svg>
+            Approve &amp; Encrypt into Vault
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Veronica Docket Scanner Modal -->
+  <div class="modal-overlay" id="invoiceScannerModal">
+    <div class="modal" style="max-width:860px; max-height:92vh; display:flex; flex-direction:column;">
+      <div class="modal-header" style="background:#fff; border-bottom:1px solid var(--border); padding:16px 24px; display:flex; justify-content:space-between; align-items:center;">
+        <h2 style="margin:0; font-size:1.2rem; display:flex; align-items:center; gap:8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+            <circle cx="12" cy="13" r="4"></circle>
+          </svg>
+          Scan Paper Docket (OCR Consensus)
+        </h2>
+        <button onclick="closeModal('invoiceScannerModal')" class="btn-icon" title="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding:20px; overflow-y:auto; flex:1;">
+        <!-- Dropzone -->
+        <div id="vScanDropzone" class="photo-dropzone" onclick="document.getElementById('veronicaDocketPhotoInput').click()" style="border:2px dashed var(--green-300); background:var(--green-50); border-radius:var(--radius); padding:32px; text-align:center; cursor:pointer;">
+          <input type="file" id="veronicaDocketPhotoInput" accept="image/*" multiple capture="environment" style="display:none;" onchange="handleVeronicaDocketPhoto(this)">
+          <div style="color:var(--primary); margin-bottom:10px;">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+              <circle cx="12" cy="13" r="4"></circle>
+            </svg>
+          </div>
+          <div style="font-weight:700; color:var(--green-900); font-size:1rem;">Capture or Upload Physical Docket</div>
+          <div style="font-size:0.82rem; color:var(--text-2); margin-top:4px;">Supports 1, 2, or more pages. Upload Page 1 &amp; Page 2 together — extracts into one unified invoice.</div>
+        </div>
+
+        <!-- Progress Spinner -->
+        <div id="vScanProgressWrap" style="display:none; text-align:center; padding:30px 10px;">
+          <div class="auth-spinner" style="width:36px; height:36px; margin:0 auto 14px; border-width:3px;"></div>
+          <div id="vScanProgressText" style="font-size:0.92rem; font-weight:600; color:var(--text);">Analyzing docket...</div>
+        </div>
+
+        <!-- Split Screen: Preview & Extracted Items -->
+        <div style="display:grid; grid-template-columns:1fr 1.3fr; gap:18px; margin-top:14px;">
+          <div id="vScanPreviewWrap" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-size:0.75rem; text-transform:uppercase; color:var(--text-3); font-weight:700;">Docket Pages</span>
+              <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('veronicaDocketPhotoInput').click()" style="font-size:0.75rem; padding:3px 8px;">
+                + Add Another Page
+              </button>
+            </div>
+            <div id="vScanPhotoGrid" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; justify-content:flex-start;"></div>
+            <div style="text-align:center; margin-top:8px;">
+              <button type="button" id="btnRunVeronicaOCR" class="btn btn-primary" onclick="runVeronicaOCR()" style="width:100%; font-weight:700; background:#16a34a; border-color:#16a34a; padding:10px 14px; display:flex; align-items:center; justify-content:center; gap:6px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                <span>Auto-Extract from Docket</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="vScanResultsWrap" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span id="vScanItemsCount" style="font-size:0.85rem; font-weight:700; color:var(--text);">0 items extracted</span>
+              <span id="vScanConfidence" style="font-size:0.78rem; background:#ecfdf5; color:#065f46; border:1px solid #a7f3d0; padding:2px 8px; border-radius:12px; font-weight:600;">100% Confidence</span>
+            </div>
+
+            <div class="table-wrap" style="max-height:220px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius);">
+              <table style="width:100%; font-size:0.82rem;">
+                <thead>
+                  <tr>
+                    <th>Item</th>
+                    <th>Qty</th>
+                    <th>Unit</th>
+                    <th>Price</th>
+                    <th style="text-align:right;">Total</th>
+                  </tr>
+                </thead>
+                <tbody id="vScanItemsBody"></tbody>
+              </table>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px; font-size:0.9rem;">
+              <span style="color:var(--text-2); font-weight:600;">Calculated Subtotal:</span>
+              <strong id="vScanSubtotalText" style="color:var(--primary-dk);">KES 0.00</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="background:#fff; border-top:1px solid var(--border); padding:14px 24px; display:flex; justify-content:space-between; align-items:center;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('invoiceScannerModal')">
+          Cancel
+        </button>
+        <div style="display:flex; gap:10px;">
+          <button type="button" class="btn btn-secondary btn-sm" id="btnDownloadScannedCsv" onclick="exportCurrentScannedDocketToCsv()" style="display:none;">
+            Download CSV
+          </button>
+          <button type="button" class="btn btn-primary" id="btnApplyScannedInvoice" onclick="applyScannedDocketToInvoice()" style="display:none; font-weight:700; background:#16a34a; border-color:#16a34a;">
+            Apply to Invoice Table
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CSV Import Modal -->
+  <div class="modal-overlay" id="csvImportModal">
+    <div class="modal" style="max-width:560px;">
+      <div class="modal-header" style="background:#fff; border-bottom:1px solid var(--border); padding:16px 20px; display:flex; justify-content:space-between; align-items:center;">
+        <h2 style="margin:0; font-size:1.15rem; display:flex; align-items:center; gap:8px;">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Import Line Items from CSV
+        </h2>
+        <button onclick="closeModal('csvImportModal')" class="btn-icon" title="Close">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding:20px;">
+        <div style="font-size:0.84rem; color:var(--text-2); margin-bottom:12px;">
+          Upload a <code>.csv</code> file or paste CSV text below. Format: <code>Description, Quantity, Unit, Buy Price, Sell Price, Total</code>.
+        </div>
+
+        <div style="margin-bottom:14px;">
+          <input type="file" id="csvFileInput" accept=".csv,text/csv,text/plain" class="form-control" onchange="handleCsvFileUpload(this)">
+        </div>
+
+        <div class="form-group">
+          <label>Or Paste Raw CSV Data</label>
+          <textarea id="csvImportText" class="form-control" rows="6" placeholder="Sukuma Wiki, 10, kgs, 40, 60, 600&#10;Spinach, 5, kgs, 45, 70, 350" style="font-family:monospace; font-size:0.82rem;"></textarea>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="background:#fff; border-top:1px solid var(--border); padding:14px 20px; display:flex; justify-content:space-between; align-items:center;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('csvImportModal')">Cancel</button>
+        <button type="button" class="btn btn-primary" onclick="applyCsvTextToInvoice()" style="font-weight:700;">
+          Import into Table
+        </button>
+      </div>
+    </div>
+  </div>
+    </div>
+  </div>
+
   <div class="toast-container" id="toastContainer"></div>
 
   <script>
@@ -1643,7 +2035,7 @@
         const n = document.querySelector('[data-page="' + lastPage + '"]');
         if (n) n.classList.add('active');
 
-        const titles = { dashboard: 'Dashboard', 'new-invoice': 'New Invoice', invoices: 'Invoices', restaurants: 'Restaurants', expenses: 'Capital & Expenses', reports: 'Reports', 'invoice-view': 'Invoice', 'recycle-bin': 'Recycle Bin', pricelists: 'Price Lists', 'pricelist-edit': 'Edit Price List', 'pricelist-view': 'Price List', statements: 'Statements' };
+        const titles = { dashboard: 'Dashboard', 'new-invoice': 'New Invoice', invoices: 'Invoices', 'clerk-submissions': 'Clerk Submissions', restaurants: 'Restaurants', expenses: 'Capital & Expenses', reports: 'Reports', 'invoice-view': 'Invoice', 'recycle-bin': 'Recycle Bin', pricelists: 'Price Lists', 'pricelist-edit': 'Edit Price List', 'pricelist-view': 'Price List', statements: 'Statements' };
         document.getElementById('pageTitle').textContent = titles[lastPage] || 'Dashboard';
       }
     })();
@@ -1653,6 +2045,11 @@
   <script src="invoices.js?v=1.2.3"></script>
   <script src="views.js?v=1.2.3"></script>
   <script src="dashboard.js?v=1.2.3"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="ocr-consensus.js?v=1.2.6"></script>
+  <script src="staging.js?v=1.2.6"></script>
+  <script src="clerk-approval.js?v=1.2.6"></script>
+  <script src="invoice-scanner.js?v=1.2.6"></script>
   <script>
   /* ══ Signature Scanner — Inline ══ */
   function openSignatureScanner() {

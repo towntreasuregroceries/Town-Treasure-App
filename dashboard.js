@@ -747,6 +747,9 @@ async function enterApp(user) {
   navigateTo(lastPage);
   
   if (typeof checkInvoiceDraft === 'function') checkInvoiceDraft();
+  if (typeof StagingDB !== 'undefined' && StagingDB.updatePendingCountBadge) {
+    StagingDB.updatePendingCountBadge();
+  }
 }
 
 /* ══ Onboarding Wizard ══ */
