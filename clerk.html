@@ -12,12 +12,12 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css?v=1.2.0">
   
-  <!-- DEFER added to all scripts so they don't freeze the UI on mobile -->
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
-  <script src="supabase-config.js" defer></script>
+  <!-- Scripts: Core data layer loaded first, heavy OCR loaded with defer -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="supabase-config.js"></script>
+  <script src="staging.js?v=1.2.6"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
-  <script src="ocr-consensus.js?v=1.2.5" defer></script>
-  <script src="staging.js?v=1.2.5" defer></script>
+  <script src="ocr-consensus.js?v=1.2.6" defer></script>
   
   <style>
     body {
@@ -138,6 +138,23 @@
       font-size: 0.82rem;
       font-weight: 600;
     }
+    .toast-container {
+      pointer-events: none !important;
+    }
+    .toast {
+      pointer-events: auto !important;
+    }
+    @media (max-width: 860px) {
+      body {
+        zoom: 1 !important;
+      }
+      .toast-container {
+        top: auto !important;
+        bottom: 16px !important;
+        left: 12px !important;
+        right: 12px !important;
+      }
+    }
   </style>
 </head>
 <body>
@@ -236,8 +253,8 @@
               <!-- Visually hidden file input that mobile devices can still access properly -->
               <input type="file" id="clerkPhotoInput" accept="image/*" multiple style="width: 0.1px; height: 0.1px; opacity: 0; overflow: hidden; position: absolute; z-index: -1;" onchange="handlePhotoSelect(this)">
               
-              <!-- Label attached to the input -->
-              <label for="clerkPhotoInput" id="photoDropPrompt" style="display:block; cursor:pointer;">
+              <!-- Label attached to the input covering entire dropzone padding -->
+              <label for="clerkPhotoInput" id="photoDropPrompt" style="display:block; cursor:pointer; padding:24px; margin:-24px;">
                 <div style="color:var(--primary); margin-bottom:8px;">
                   <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
@@ -401,7 +418,7 @@
   </div>
 
   <!-- Toast Notification Container -->
-  <div class="toast-container" id="toastContainer" style="position:fixed; bottom:20px; right:20px; z-index:9999;"></div>
+  <div class="toast-container" id="toastContainer" style="position:fixed; bottom:20px; right:20px; top:auto; left:auto; z-index:9999; pointer-events:none;"></div>
 
   <script>
     let clerkDocketPhotos = [];

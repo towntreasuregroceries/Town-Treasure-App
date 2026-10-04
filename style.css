@@ -901,9 +901,11 @@ tbody tr:hover {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  pointer-events: none;
 }
 
 .toast {
+  pointer-events: auto;
   padding: 14px 20px;
   border-radius: var(--radius-sm);
   color: #fff;
