@@ -11,11 +11,14 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Poppins:wght@500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css?v=1.2.0">
-  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-  <script src="supabase-config.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
-  <script src="ocr-consensus.js?v=1.2.5"></script>
-  <script src="staging.js?v=1.2.5"></script>
+  
+  <!-- DEFER added to all scripts so they don't freeze the UI on mobile -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2" defer></script>
+  <script src="supabase-config.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
+  <script src="ocr-consensus.js?v=1.2.5" defer></script>
+  <script src="staging.js?v=1.2.5" defer></script>
+  
   <style>
     body {
       background: var(--bg);
@@ -91,8 +94,8 @@
       border-radius: var(--radius);
       padding: 24px;
       text-align: center;
-      cursor: pointer;
       transition: all 0.2s;
+      position: relative;
     }
     .photo-dropzone:hover {
       background: var(--green-100);
@@ -228,9 +231,13 @@
           <!-- Physical Photo & OCR Section -->
           <div class="form-group" style="margin-top:16px;">
             <label><strong>Physical Docket Photos (Supports 1 or 2+ Pages)</strong></label>
-            <div class="photo-dropzone" id="clerkPhotoDropzone" onclick="document.getElementById('clerkPhotoInput').click()">
-              <input type="file" id="clerkPhotoInput" accept="image/*" multiple style="display:none;" onclick="event.stopPropagation()" onchange="handlePhotoSelect(this)">
-              <div id="photoDropPrompt">
+            <div class="photo-dropzone" id="clerkPhotoDropzone">
+              
+              <!-- Visually hidden file input that mobile devices can still access properly -->
+              <input type="file" id="clerkPhotoInput" accept="image/*" multiple style="width: 0.1px; height: 0.1px; opacity: 0; overflow: hidden; position: absolute; z-index: -1;" onchange="handlePhotoSelect(this)">
+              
+              <!-- Label attached to the input -->
+              <label for="clerkPhotoInput" id="photoDropPrompt" style="display:block; cursor:pointer;">
                 <div style="color:var(--primary); margin-bottom:8px;">
                   <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
@@ -239,7 +246,7 @@
                 </div>
                 <div style="font-weight:600; color:var(--green-900);">Take Photos or Upload Docket Pictures</div>
                 <div style="font-size:0.8rem; color:var(--text-2); margin-top:4px;">Supports 1, 2, or more pages. Upload Page 1 &amp; Page 2 — extracts both into one unified invoice.</div>
-              </div>
+              </label>
 
               <!-- Multi-Page Preview Container -->
               <div id="photoPreviewContainer" style="display:none;" onclick="event.stopPropagation()">
@@ -790,6 +797,14 @@
       const btn = document.getElementById('btnSubmitDocket');
       btn.disabled = true;
       btn.textContent = 'Submitting to Veronica...';
+
+      // Safety check in case the staging.js script failed to load properly
+      if (typeof StagingDB === 'undefined' || typeof StagingDB.submitDocket !== 'function') {
+        toast('Error: Database connection not ready. Please refresh the page.', 'error');
+        btn.disabled = false;
+        btn.textContent = 'Submit Docket for Veronica\'s Approval';
+        return;
+      }
 
       try {
         const docketData = {
