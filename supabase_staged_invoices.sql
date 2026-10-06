@@ -16,31 +16,67 @@ CREATE TABLE IF NOT EXISTS public.staged_invoices (
   receipt_photo TEXT,
   receipt_photos JSONB DEFAULT '[]'::jsonb,
   notes TEXT,
+  target_user_id TEXT,
+  target_user_email TEXT,
+  target_user_name TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   rejection_reason TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- Safe non-destructive column migrations:
+ALTER TABLE public.staged_invoices ADD COLUMN IF NOT EXISTS target_user_id TEXT;
+ALTER TABLE public.staged_invoices ADD COLUMN IF NOT EXISTS target_user_email TEXT;
+ALTER TABLE public.staged_invoices ADD COLUMN IF NOT EXISTS target_user_name TEXT;
+ALTER TABLE public.staged_invoices ADD COLUMN IF NOT EXISTS receipt_photos JSONB DEFAULT '[]'::jsonb;
+
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.staged_invoices ENABLE ROW LEVEL SECURITY;
 
--- Allow anon clerks to insert & read staged submissions without needing full vault login
-CREATE POLICY "Allow public read of staged_invoices" 
-  ON public.staged_invoices 
-  FOR SELECT 
-  USING (true);
+-- Idempotent RLS policies (Created safely without DROP commands)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'public' 
+      AND tablename = 'staged_invoices' 
+      AND policyname = 'Allow public read of staged_invoices'
+  ) THEN
+    CREATE POLICY "Allow public read of staged_invoices" 
+      ON public.staged_invoices 
+      FOR SELECT 
+      USING (true);
+  END IF;
 
-CREATE POLICY "Allow public insert of staged_invoices" 
-  ON public.staged_invoices 
-  FOR INSERT 
-  WITH CHECK (true);
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'public' 
+      AND tablename = 'staged_invoices' 
+      AND policyname = 'Allow public insert of staged_invoices'
+  ) THEN
+    CREATE POLICY "Allow public insert of staged_invoices" 
+      ON public.staged_invoices 
+      FOR INSERT 
+      WITH CHECK (true);
+  END IF;
 
-CREATE POLICY "Allow update of staged_invoices" 
-  ON public.staged_invoices 
-  FOR UPDATE 
-  USING (true) 
-  WITH CHECK (true);
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'public' 
+      AND tablename = 'staged_invoices' 
+      AND policyname = 'Allow update of staged_invoices'
+  ) THEN
+    CREATE POLICY "Allow update of staged_invoices" 
+      ON public.staged_invoices 
+      FOR UPDATE 
+      USING (true) 
+      WITH CHECK (true);
+  END IF;
+END
+$$;
 
--- Index for speedy pending queries
+-- Indexes for speedy queries and multi-user isolation
 CREATE INDEX IF NOT EXISTS idx_staged_invoices_status ON public.staged_invoices(status);
 CREATE INDEX IF NOT EXISTS idx_staged_invoices_created ON public.staged_invoices(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_staged_invoices_target_uid ON public.staged_invoices(target_user_id);
+CREATE INDEX IF NOT EXISTS idx_staged_invoices_target_email ON public.staged_invoices(target_user_email);

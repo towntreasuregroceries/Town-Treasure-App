@@ -321,5 +321,107 @@ Return ONLY a JSON object matching this exact structure:
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  },
+
+  /** Configure PDF.js worker */
+  initPdfWorker() {
+    if (typeof window !== 'undefined' && window.pdfjsLib) {
+      if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      }
+    }
+  },
+
+  /**
+   * Convert a PDF File, Blob, or ArrayBuffer into an array of high-resolution image Data URLs (one per page).
+   * Also extracts digital text if the PDF contains selectable text.
+   * @param {File|Blob|ArrayBuffer} pdfInput 
+   * @param {function} onProgress
+   * @returns {Promise<{ images: string[], numPages: number, extractedText: string }>}
+   */
+  async convertPdfToPages(pdfInput, onProgress = () => {}) {
+    this.initPdfWorker();
+    if (typeof window === 'undefined' || !window.pdfjsLib) {
+      await this.loadPdfJsLibrary();
+    }
+
+    onProgress('Loading PDF document...');
+    let arrayBuffer;
+    if (pdfInput instanceof ArrayBuffer) {
+      arrayBuffer = pdfInput;
+    } else if (pdfInput && typeof pdfInput.arrayBuffer === 'function') {
+      arrayBuffer = await pdfInput.arrayBuffer();
+    } else if (typeof pdfInput === 'string' && pdfInput.startsWith('data:application/pdf;base64,')) {
+      const b64 = pdfInput.replace('data:application/pdf;base64,', '');
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      arrayBuffer = bytes.buffer;
+    } else {
+      throw new Error('Unsupported PDF input format');
+    }
+
+    const loadingTask = window.pdfjsLib.getDocument({ data: arrayBuffer });
+    const pdfDoc = await loadingTask.promise;
+    const numPages = pdfDoc.numPages;
+    const pageImages = [];
+    let extractedText = '';
+
+    for (let pageNum = 1; pageNum <= numPages; pageNum++) {
+      onProgress(`Rendering PDF page ${pageNum} of ${numPages}...`);
+      const page = await pdfDoc.getPage(pageNum);
+
+      // Render at 2.0x scale for crisp OCR recognition of small produce figures
+      const viewport = page.getViewport({ scale: 2.0 });
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+      const ctx = canvas.getContext('2d');
+
+      // Solid white background for transparent PDF layers
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.88);
+      pageImages.push(dataUrl);
+
+      // Extract selectable digital text if present
+      try {
+        const textContent = await page.getTextContent();
+        const textItems = (textContent.items || []).map(it => it.str).filter(Boolean);
+        if (textItems.length) {
+          extractedText += `\n--- PAGE ${pageNum} ---\n` + textItems.join(' ');
+        }
+      } catch (tErr) {
+        console.warn(`[PDF] Page ${pageNum} text extraction note:`, tErr);
+      }
+    }
+
+    onProgress(`Converted ${numPages} PDF page${numPages > 1 ? 's' : ''} to high-resolution images`);
+    return {
+      images: pageImages,
+      numPages: numPages,
+      extractedText: extractedText.trim()
+    };
+  },
+
+  /** Dynamically load PDF.js library if not already in document head */
+  async loadPdfJsLibrary() {
+    if (typeof window !== 'undefined' && window.pdfjsLib) return;
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+      script.onload = () => {
+        if (window.pdfjsLib) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          resolve();
+        } else {
+          reject(new Error('PDF.js failed to initialize'));
+        }
+      };
+      script.onerror = () => reject(new Error('Failed to load PDF.js from CDN. Please check your internet connection.'));
+      document.head.appendChild(script);
+    });
   }
 };

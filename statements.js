@@ -4,7 +4,7 @@ function renderStatementsPage() {
   const restSelect = document.getElementById('stmtRestaurant');
   if (restSelect) {
     const rests = DB.restaurants;
-    restSelect.innerHTML = '<option value="">Select restaurant…</option><option value="__all__">📄 All Restaurants</option>' +
+    restSelect.innerHTML = '<option value="">Select restaurant…</option><option value="__all__">All Restaurants (Consolidated)</option>' +
       rests.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
   }
   const monthInput = document.getElementById('stmtMonth');

@@ -459,16 +459,85 @@ function executeClerkRejection() {
     .catch(err => toast('Error rejecting: ' + err.message, 'error'));
 }
 
-/** Copy Clerk Portal direct URL to clipboard for WhatsApp/SMS sharing */
-function copyClerkPortalLink() {
-  const url = window.location.origin + window.location.pathname.replace(/[^\/]*$/, 'clerk.html');
+/** Helper to build a personalized, targeted Clerk Portal URL for the active account */
+async function getClerkPortalShareUrl() {
+  let user = null;
+  if (typeof getCurrentUser === 'function') {
+    try { user = await getCurrentUser(); } catch(e) {}
+  }
+  const uid = user ? user.id : (localStorage.getItem('ttg_user_id') || '');
+  const email = user ? (user.email || '') : (localStorage.getItem('ttg_user_email') || '');
+  const name = user?.user_metadata?.full_name || (email ? email.split('@')[0] : 'Veronica');
+  
+  const baseUrl = window.location.origin + window.location.pathname.replace(/[^\/]*$/, 'clerk.html');
+  const params = new URLSearchParams();
+  if (uid) params.set('to', uid);
+  if (name) params.set('name', name);
+  if (email) params.set('email', email);
+  
+  const query = params.toString();
+  return query ? `${baseUrl}?${query}` : baseUrl;
+}
+
+/** Copy personalized Clerk Portal direct URL to clipboard */
+async function copyClerkPortalLink() {
+  const url = await getClerkPortalShareUrl();
+  const ident = typeof StagingDB !== 'undefined' ? StagingDB.getCurrentUserIdentifier() : {};
+  const targetLabel = ident.email || 'Veronica';
+  
   if (navigator.clipboard && navigator.clipboard.writeText) {
     navigator.clipboard.writeText(url).then(() => {
-      toast('Clerk Portal link copied to clipboard! Share it with your clerk via WhatsApp.', 'success');
+      toast(`Clerk Portal link copied! Linked directly to your account (${targetLabel}).`, 'success');
     }).catch(() => {
-      prompt('Copy this link and send to your clerk/secretary:', url);
+      prompt(`Copy this Clerk Portal link (routed to ${targetLabel}):`, url);
     });
   } else {
-    prompt('Copy this link and send to your clerk/secretary:', url);
+    prompt(`Copy this Clerk Portal link (routed to ${targetLabel}):`, url);
+  }
+}
+
+/** Share personalized Clerk Portal URL directly via WhatsApp */
+async function shareClerkPortalWhatsApp() {
+  const url = await getClerkPortalShareUrl();
+  const ident = typeof StagingDB !== 'undefined' ? StagingDB.getCurrentUserIdentifier() : {};
+  const name = ident.email ? ident.email.split('@')[0] : 'Veronica';
+  const text = `Hi! Here is your Town Treasure Groceries Clerk Portal link to submit produce dockets directly for ${name}'s review and approval:\n\n${url}`;
+  const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+  window.open(waUrl, '_blank');
+}
+
+/** Check for incoming shared docket code in URL parameters */
+async function checkUrlImportDocket() {
+  if (typeof window === 'undefined') return;
+  const params = new URLSearchParams(window.location.search);
+  const code = params.get('import_docket') || params.get('docket_code');
+  if (!code) return;
+
+  // Clear parameter from URL so browser refresh doesn't re-import
+  try {
+    const cleanUrl = window.location.pathname + window.location.hash;
+    window.history.replaceState({}, document.title, cleanUrl);
+  } catch(e) {}
+
+  try {
+    if (typeof StagingDB !== 'undefined' && typeof StagingDB.importDocketFromCode === 'function') {
+      const imported = await StagingDB.importDocketFromCode(code);
+      toast(`Imported docket from ${imported.clerk_name} (${imported.restaurant_name})!`, 'success');
+      if (typeof navigateTo === 'function') navigateTo('clerk-submissions');
+      if (typeof renderClerkSubmissionsPage === 'function') renderClerkSubmissionsPage();
+      if (typeof openClerkReviewModal === 'function') openClerkReviewModal(imported.id);
+    }
+  } catch(err) {
+    console.error('Error importing docket from URL:', err);
+    toast('Error importing shared docket: ' + err.message, 'error');
+  }
+}
+
+// Check on startup
+if (typeof document !== 'undefined') {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => setTimeout(checkUrlImportDocket, 600));
+  } else {
+    setTimeout(checkUrlImportDocket, 600);
   }
 }

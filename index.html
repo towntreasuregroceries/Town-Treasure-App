@@ -25,6 +25,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="supabase-config.js"></script>
 </head>
 
@@ -137,14 +138,18 @@
         <h2 class="auth-title" style="font-size:1.15rem;">Your data is completely private</h2>
         <div class="security-features">
           <div class="security-item">
-            <div class="security-check">✓</div>
+            <div class="security-check" style="display:flex;align-items:center;justify-content:center;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </div>
             <div>
               <strong>Encrypted & Personal</strong>
               <p>All your invoices, finances, and client data are encrypted and tied to your account alone.</p>
             </div>
           </div>
           <div class="security-item">
-            <div class="security-check">✓</div>
+            <div class="security-check" style="display:flex;align-items:center;justify-content:center;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </div>
             <div>
               <strong>Nobody else can see it</strong>
               <p>Not even the developer who built this app. Your data is locked behind your password — only you hold the
@@ -152,7 +157,9 @@
             </div>
           </div>
           <div class="security-item">
-            <div class="security-check">✓</div>
+            <div class="security-check" style="display:flex;align-items:center;justify-content:center;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </div>
             <div>
               <strong>Screen Lock Protection</strong>
               <p>After setup, you'll unlock the app using your phone's screen lock (fingerprint, face, or PIN). No need
@@ -161,7 +168,7 @@
           </div>
         </div>
         <div class="wizard-nav">
-          <button class="btn btn-secondary" onclick="wizardNext(2)">← Back</button>
+          <button class="btn btn-secondary" onclick="wizardNext(2)">Back</button>
           <button class="btn btn-primary" onclick="wizardNext(4)">I understand, continue →</button>
         </div>
       </div>
@@ -1234,8 +1241,19 @@
               </svg>
               WhatsApp
             </button>
-            <button class="btn btn-secondary" onclick="markAsPaid(currentViewInvoiceId)">✓ Mark as Paid</button>
-            <button class="btn btn-primary" onclick="editInvoice(currentViewInvoiceId)">✎ Edit</button>
+            <button class="btn btn-secondary" onclick="markAsPaid(currentViewInvoiceId)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:middle; margin-right:4px;">
+                <polyline points="20 6 9 17 4 12"></polyline>
+              </svg>
+              Mark as Paid
+            </button>
+            <button class="btn btn-primary" onclick="editInvoice(currentViewInvoiceId)">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle; margin-right:4px;">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+              </svg>
+              Edit
+            </button>
           </div>
           <div id="invoiceViewContainer"></div>
         </div>
@@ -1324,7 +1342,13 @@
                     <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
                     <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
                   </svg>
-                  Share Link with Clerk
+                  Copy Clerk Link
+                </button>
+                <button class="btn btn-sm" onclick="shareClerkPortalWhatsApp()" title="Share direct link to clerk via WhatsApp" style="background:#25D366; color:#fff; border-color:#25D366; display:inline-flex; align-items:center;">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" style="vertical-align:middle; margin-right:4px;">
+                    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+                  </svg>
+                  WhatsApp Clerk
                 </button>
                 <a href="clerk.html" target="_blank" class="btn btn-primary btn-sm" style="text-decoration:none;">
                   + Open Clerk Portal
@@ -1889,17 +1913,53 @@
       </div>
 
       <div class="modal-body" style="padding:20px; overflow-y:auto; flex:1;">
-        <!-- Dropzone -->
-        <div id="vScanDropzone" class="photo-dropzone" onclick="document.getElementById('veronicaDocketPhotoInput').click()" style="border:2px dashed var(--green-300); background:var(--green-50); border-radius:var(--radius); padding:32px; text-align:center; cursor:pointer;">
-          <input type="file" id="veronicaDocketPhotoInput" accept="image/*" multiple capture="environment" style="display:none;" onchange="handleVeronicaDocketPhoto(this)">
-          <div style="color:var(--primary); margin-bottom:10px;">
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+        <!-- Hidden File Inputs for Camera, Gallery, and PDF -->
+        <input type="file" id="veronicaCameraInput" accept="image/*" capture="environment" style="display:none;" onchange="handleVeronicaDocketPhoto(this)">
+        <input type="file" id="veronicaGalleryInput" accept="image/*" multiple style="display:none;" onchange="handleVeronicaDocketPhoto(this)">
+        <input type="file" id="veronicaPdfInput" accept="application/pdf,.pdf,image/*" multiple style="display:none;" onchange="handleVeronicaDocketPhoto(this)">
+        <!-- Backwards-compat alias -->
+        <input type="file" id="veronicaDocketPhotoInput" accept="image/*,application/pdf,.pdf" multiple style="display:none;" onchange="handleVeronicaDocketPhoto(this)">
+
+        <!-- Dropzone with Multi-Source Selection -->
+        <div id="vScanDropzone" style="border:2px dashed var(--green-300); background:var(--green-50); border-radius:var(--radius); padding:26px 18px; text-align:center;">
+          <div style="color:var(--primary); margin-bottom:8px;">
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
               <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
               <circle cx="12" cy="13" r="4"></circle>
             </svg>
           </div>
-          <div style="font-weight:700; color:var(--green-900); font-size:1rem;">Capture or Upload Physical Docket</div>
-          <div style="font-size:0.82rem; color:var(--text-2); margin-top:4px;">Supports 1, 2, or more pages. Upload Page 1 &amp; Page 2 together — extracts into one unified invoice.</div>
+          <div style="font-weight:700; color:var(--green-900); font-size:1.05rem;">Scan or Import Wholesale Docket</div>
+          <p style="font-size:0.82rem; color:var(--text-2); margin:4px auto 16px; max-width:460px;">
+            Snap a physical receipt with your camera, pick photos from your phone gallery, or import a digital PDF document. All pages extract into one unified invoice.
+          </p>
+
+          <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center; max-width:540px; margin:0 auto;">
+            <button type="button" class="btn btn-primary" onclick="document.getElementById('veronicaCameraInput').click()" style="background:#16a34a; border-color:#16a34a; font-weight:600; padding:10px 16px; display:inline-flex; align-items:center; gap:6px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                <circle cx="12" cy="13" r="4"></circle>
+              </svg>
+              <span>Take Photo (Camera)</span>
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('veronicaGalleryInput').click()" style="font-weight:600; padding:10px 16px; display:inline-flex; align-items:center; gap:6px; background:#fff;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+              <span>Choose from Gallery</span>
+            </button>
+            <button type="button" class="btn" onclick="document.getElementById('veronicaPdfInput').click()" style="background:#eff6ff; color:#1d4ed8; border:1px solid #93c5fd; font-weight:600; padding:10px 16px; display:inline-flex; align-items:center; gap:6px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+                <polyline points="10 9 9 9 8 9"></polyline>
+              </svg>
+              <span>Upload PDF / Document</span>
+            </button>
+          </div>
         </div>
 
         <!-- Progress Spinner -->
@@ -1913,9 +1973,20 @@
           <div id="vScanPreviewWrap" style="display:none;">
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
               <span style="font-size:0.75rem; text-transform:uppercase; color:var(--text-3); font-weight:700;">Docket Pages</span>
-              <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('veronicaDocketPhotoInput').click()" style="font-size:0.75rem; padding:3px 8px;">
-                + Add Another Page
-              </button>
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('veronicaCameraInput').click()" title="Add another photo using camera" style="font-size:0.72rem; padding:3px 7px; display:inline-flex; align-items:center; gap:4px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                  + Camera
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('veronicaGalleryInput').click()" title="Add photo from gallery" style="font-size:0.72rem; padding:3px 7px; display:inline-flex; align-items:center; gap:4px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                  + Gallery
+                </button>
+                <button type="button" class="btn btn-sm" onclick="document.getElementById('veronicaPdfInput').click()" title="Add pages from PDF" style="font-size:0.72rem; padding:3px 7px; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; display:inline-flex; align-items:center; gap:4px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                  + PDF
+                </button>
+              </div>
             </div>
             <div id="vScanPhotoGrid" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; justify-content:flex-start;"></div>
             <div style="text-align:center; margin-top:8px;">
@@ -2396,7 +2467,7 @@
     (async function() {
       if (!('serviceWorker' in navigator)) return;
       try {
-        var EXPECTED_VERSION = 'ttg-v1.2.10';
+        var EXPECTED_VERSION = 'ttg-v1.2.12';
         var currentVersion = localStorage.getItem('ttg_sw_version');
         
         if (currentVersion !== EXPECTED_VERSION) {

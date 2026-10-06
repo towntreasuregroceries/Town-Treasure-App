@@ -9,12 +9,6 @@ const StagingDB = {
   /** Check if Supabase client is initialized and staged_invoices table is accessible */
   async checkSupabase() {
     if (this._supabaseAvailable !== null) return this._supabaseAvailable;
-    // Only attempt Supabase remote queries if explicitly enabled by user to prevent 404 network warnings
-    const userPref = localStorage.getItem('ttg_sync_staged_supabase');
-    if (userPref !== 'true') {
-      this._supabaseAvailable = false;
-      return false;
-    }
     if (typeof supabaseClient === 'undefined' || !supabaseClient) {
       this._supabaseAvailable = false;
       return false;
@@ -199,56 +193,113 @@ const StagingDB = {
     return await this.submitDocket(obj);
   },
 
-  /** Fetch all submissions (combines Supabase and local queue with deduplication) */
-  async getAllSubmissions() {
+  /** Get active user identifier for isolation filtering */
+  getCurrentUserIdentifier() {
+    let uid = null;
+    let email = null;
+    if (typeof currentUser !== 'undefined' && currentUser) {
+      uid = currentUser.id;
+      email = (currentUser.email || '').toLowerCase().trim();
+    }
+    if (!uid && typeof getUserId === 'function') {
+      uid = getUserId();
+    }
+    if (!email) {
+      email = (localStorage.getItem('ttg_user_email') || '').toLowerCase().trim();
+    }
+    if (!uid) {
+      uid = localStorage.getItem('ttg_user_id');
+    }
+    return { uid, email };
+  },
+
+  /** Check if a submission belongs to the current user */
+  isSubmissionForUser(item, userIdent) {
+    if (!userIdent || (!userIdent.uid && !userIdent.email)) {
+      return true; // No active user filter (e.g. clerk portal view)
+    }
+
+    // Explicit target user id or email match
+    if (item.target_user_id || item.target_user_email) {
+      if (userIdent.uid && item.target_user_id === userIdent.uid) return true;
+      if (userIdent.email && item.target_user_email && item.target_user_email.toLowerCase() === userIdent.email) return true;
+      // Targeted to another specific account
+      return false;
+    }
+
+    // Target specified inside notes: [Target: Veronica (email)]
+    if (item.notes && item.notes.includes('[Target:')) {
+      if (userIdent.email && item.notes.toLowerCase().includes(userIdent.email)) return true;
+      if (userIdent.uid && item.notes.includes(userIdent.uid)) return true;
+      // Target specified for someone else
+      return false;
+    }
+
+    // Default legacy or demo docket: allow review
+    return true;
+  },
+
+  /** Fetch all submissions (combines Supabase and local queue with deduplication and user isolation) */
+  async getAllSubmissions(filterForCurrentUser = true) {
     const local = this.getLocalQueue();
     const hasSb = await this.checkSupabase();
-    if (!hasSb) return local;
+    let combined = local;
 
-    try {
-      const { data, error } = await supabaseClient
-        .from('staged_invoices')
-        .select('*')
-        .order('created_at', { ascending: false });
+    if (hasSb) {
+      try {
+        const { data, error } = await supabaseClient
+          .from('staged_invoices')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-      if (error) throw error;
+        if (error) throw error;
 
-      // Merge Supabase data with any local items
-      const map = new Map();
-      (data || []).forEach(item => {
-        map.set(item.id, {
-          id: item.id,
-          clerk_name: item.clerk_name,
-          restaurant_name: item.restaurant_name,
-          invoice_date: item.invoice_date,
-          items_json: item.items_json || [],
-          delivery_cost: parseFloat(item.delivery_cost) || 0,
-          other_cost: parseFloat(item.other_cost) || 0,
-          total_sell: parseFloat(item.total_sell) || 0,
-          total_buy: parseFloat(item.total_buy) || 0,
-          receipt_photo: item.receipt_photo || null,
-          notes: item.notes || '',
-          status: item.status || 'pending',
-          rejection_reason: item.rejection_reason || '',
-          created_at: item.created_at || new Date().toISOString()
+        // Merge Supabase data with local items
+        const map = new Map();
+        (data || []).forEach(item => {
+          map.set(item.id, {
+            id: item.id,
+            clerk_name: item.clerk_name,
+            restaurant_name: item.restaurant_name,
+            invoice_date: item.invoice_date,
+            items_json: item.items_json || [],
+            delivery_cost: parseFloat(item.delivery_cost) || 0,
+            other_cost: parseFloat(item.other_cost) || 0,
+            total_sell: parseFloat(item.total_sell) || 0,
+            total_buy: parseFloat(item.total_buy) || 0,
+            receipt_photo: item.receipt_photo || null,
+            receipt_photos: Array.isArray(item.receipt_photos) ? item.receipt_photos : (item.receipt_photo ? [item.receipt_photo] : []),
+            notes: item.notes || '',
+            status: item.status || 'pending',
+            rejection_reason: item.rejection_reason || '',
+            target_user_id: item.target_user_id || null,
+            target_user_email: item.target_user_email || null,
+            target_user_name: item.target_user_name || null,
+            created_at: item.created_at || new Date().toISOString()
+          });
         });
-      });
 
-      // Include local entries if not in Supabase
-      local.forEach(item => {
-        if (!map.has(item.id)) map.set(item.id, item);
-      });
+        // Include local entries if not in Supabase
+        local.forEach(item => {
+          if (!map.has(item.id)) map.set(item.id, item);
+        });
 
-      return Array.from(map.values());
-    } catch (e) {
-      console.warn('[Staging] Error fetching from Supabase, using local queue:', e);
-      return local;
+        combined = Array.from(map.values());
+      } catch (e) {
+        console.warn('[Staging] Error fetching from Supabase, using local queue:', e);
+        combined = local;
+      }
     }
+
+    if (!filterForCurrentUser) return combined;
+
+    const userIdent = this.getCurrentUserIdentifier();
+    return combined.filter(item => this.isSubmissionForUser(item, userIdent));
   },
 
   /** Fetch only pending submissions */
   async getPendingSubmissions() {
-    const all = await this.getAllSubmissions();
+    const all = await this.getAllSubmissions(true);
     return all.filter(s => s.status === 'pending');
   },
 
@@ -258,6 +309,18 @@ const StagingDB = {
       if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
       return 'stg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     };
+
+    const targetId = docket.target_user_id || localStorage.getItem('ttg_target_owner_id') || null;
+    const targetEmail = docket.target_user_email || localStorage.getItem('ttg_target_owner_email') || null;
+    const targetName = docket.target_user_name || localStorage.getItem('ttg_target_owner_name') || 'Veronica';
+
+    let formattedNotes = (docket.notes || '').trim();
+    if (targetName || targetEmail) {
+      const targetTag = `[Target: ${targetName}${targetEmail ? ' (' + targetEmail + ')' : ''}]`;
+      if (!formattedNotes.includes('[Target:')) {
+        formattedNotes = formattedNotes ? `${targetTag} ${formattedNotes}` : targetTag;
+      }
+    }
 
     const record = {
       id: docket.id || genUUID(),
@@ -271,9 +334,12 @@ const StagingDB = {
       total_buy: parseFloat(docket.total_buy) || 0,
       receipt_photo: docket.receipt_photo || (docket.receipt_photos && docket.receipt_photos[0]) || null,
       receipt_photos: Array.isArray(docket.receipt_photos) ? docket.receipt_photos : (docket.receipt_photo ? [docket.receipt_photo] : []),
-      notes: (docket.notes || '').trim(),
+      notes: formattedNotes,
       status: 'pending',
       rejection_reason: '',
+      target_user_id: targetId,
+      target_user_email: targetEmail,
+      target_user_name: targetName,
       created_at: new Date().toISOString()
     };
 
@@ -287,7 +353,19 @@ const StagingDB = {
     if (hasSb) {
       try {
         const { error } = await supabaseClient.from('staged_invoices').insert([record]);
-        if (error) console.warn('[Staging] Supabase insert warning:', error);
+        if (error) {
+          // If error is due to target columns not yet added to SQL table, retry with core schema
+          if (error.message && (error.message.includes('column') || error.code === '42703')) {
+            console.warn('[Staging] Table missing target columns, retrying core insert:', error.message);
+            const coreRecord = { ...record };
+            delete coreRecord.target_user_id;
+            delete coreRecord.target_user_email;
+            delete coreRecord.target_user_name;
+            await supabaseClient.from('staged_invoices').insert([coreRecord]);
+          } else {
+            console.warn('[Staging] Supabase insert warning:', error);
+          }
+        }
       } catch (sbErr) {
         console.warn('[Staging] Supabase insert error:', sbErr);
       }

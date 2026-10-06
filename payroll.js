@@ -259,13 +259,13 @@ function renderPayrollTab() {
 
     let statusBadge, actionBtn;
     if (paid) {
-      statusBadge = `<span class="badge badge-success">✅ Paid</span><br><small style="color:var(--text-2)">${fmtDate(payment.datePaid)}</small>`;
+      statusBadge = `<span class="badge badge-success">Paid</span><br><small style="color:var(--text-2)">${fmtDate(payment.datePaid)}</small>`;
       actionBtn = `<button class="btn btn-sm btn-secondary" onclick="undoSalaryPayment('${s.id}')">Undo</button>`;
     } else if (isOverdue) {
-      statusBadge = `<span class="badge badge-danger">❌ Overdue</span>`;
+      statusBadge = `<span class="badge badge-danger">Overdue</span>`;
       actionBtn = `<button class="btn btn-sm btn-primary" onclick="markSalaryPaid('${s.id}')">Pay Now</button>`;
     } else {
-      statusBadge = `<span class="badge badge-warning">⏳ Due</span>`;
+      statusBadge = `<span class="badge badge-warning">Due</span>`;
       actionBtn = `<button class="btn btn-sm btn-primary" onclick="markSalaryPaid('${s.id}')">Pay</button>`;
     }
 
@@ -323,13 +323,13 @@ function renderRecurringTab() {
 
     let statusBadge, actionBtn;
     if (paid) {
-      statusBadge = `<span class="badge badge-success">✅ Paid</span>`;
+      statusBadge = `<span class="badge badge-success">Paid</span>`;
       actionBtn = '';
     } else if (isOverdue) {
-      statusBadge = `<span class="badge badge-danger">❌ Overdue</span>`;
+      statusBadge = `<span class="badge badge-danger">Overdue</span>`;
       actionBtn = `<button class="btn btn-sm btn-primary" onclick="payRecurring('${r.id}')">Pay Now</button>`;
     } else {
-      statusBadge = `<span class="badge badge-warning">⏳ Due ${dueDay}th</span>`;
+      statusBadge = `<span class="badge badge-warning">Due ${dueDay}th</span>`;
       actionBtn = `<button class="btn btn-sm btn-primary" onclick="payRecurring('${r.id}')">Pay</button>`;
     }
 
@@ -377,10 +377,10 @@ function renderPersonalTab() {
 
 function getPersonalCategoryLabel(cat) {
   const labels = {
-    'personal': 'Personal', 'airtime': '📱 Airtime', 'food_personal': '🍽️ Food & Meals',
-    'medical': '🏥 Medical', 'family': '👨‍👩‍👧 Family', 'clothing': '👔 Clothing',
-    'entertainment': '🎬 Entertainment', 'savings': '🏦 Savings',
-    'personal_transport': '🚗 Transport', 'other_personal': '📦 Other'
+    'personal': 'Personal', 'airtime': 'Airtime', 'food_personal': 'Food & Meals',
+    'medical': 'Medical', 'family': 'Family', 'clothing': 'Clothing',
+    'entertainment': 'Entertainment', 'savings': 'Savings',
+    'personal_transport': 'Transport', 'other_personal': 'Other'
   };
   return labels[cat] || cat;
 }

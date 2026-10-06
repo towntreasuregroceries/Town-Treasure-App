@@ -747,7 +747,7 @@ function sharePriceListWhatsApp() {
   if (!pl) return;
 
   const items = (pl.items || []).filter(i => i.name);
-  let text = `📋 *TOWN TREASURE GROCERIES*\n*${pl.name}*\n\n`;
+  let text = `*TOWN TREASURE GROCERIES*\n*${pl.name}*\n\n`;
 
   // Group by category
   const grouped = {};
@@ -756,17 +756,15 @@ function sharePriceListWhatsApp() {
     grouped[i.category].push(i);
   });
 
-  const catEmoji = { vegetables: '🥕', fruits: '🍎', cereals: '🌾', dairy: '🥛', meat: '🍖', fish: '🐟', legumes: '🫘', spices: '🧂', packaged: '🥫', other: '📦' };
-
   Object.entries(grouped).forEach(([cat, catItems]) => {
-    text += `${catEmoji[cat] || '📦'} *${cat.toUpperCase()}*\n`;
+    text += `*${cat.toUpperCase()}*\n`;
     catItems.forEach(i => {
-      text += `  ${i.name} — KES ${fmtMoney(i.price)} / ${i.unit}${i.notes ? ' (' + i.notes + ')' : ''}\n`;
+      text += `  - ${i.name} — KES ${fmtMoney(i.price)} / ${i.unit}${i.notes ? ' (' + i.notes + ')' : ''}\n`;
     });
     text += '\n';
   });
 
-  text += `📞 Orders: 0708567696\n📧 towntreasuregroceries@gmail.com\n⚠️ Prices subject to market changes`;
+  text += `Orders: 0708567696\nEmail: towntreasuregroceries@gmail.com\nPrices subject to market changes`;
 
   // Download PDF first
   downloadPriceListPDF();

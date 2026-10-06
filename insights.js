@@ -11,7 +11,7 @@ function generateInsights() {
   const thisMonthInvs = activeInvoices.filter(i => i.date && i.date.startsWith(thisMonth));
   const lastMonthInvs = activeInvoices.filter(i => i.date && i.date.startsWith(lastMonth));
 
-  // 🔴 URGENT: Overdue invoices
+  // URGENT: Overdue invoices
   const overdue = activeInvoices.filter(i => {
     if (i.status === 'paid') return false;
     if (i.dueDate && new Date(i.dueDate) < now) return true;
@@ -24,7 +24,7 @@ function generateInsights() {
     insights.urgent.push(`${overdue.length} invoice${overdue.length > 1 ? 's' : ''} overdue — total <strong>KES ${fmtMoney(total)}</strong> outstanding`);
   }
 
-  // 🔴 URGENT: Unpaid salaries
+  // URGENT: Unpaid salaries
   const activeStaff = DB.staff.filter(s => s.status === 'active');
   const unpaidStaff = activeStaff.filter(s => {
     const isPaid = DB.salaryPayments.some(p => p.staffId === s.id && p.month === thisMonth);
@@ -38,7 +38,7 @@ function generateInsights() {
     insights.urgent.push(`Unpaid salaries: <strong>${names}</strong> — KES ${fmtMoney(total)}`);
   }
 
-  // 🔴 URGENT: Recurring expenses due/overdue
+  // URGENT: Recurring expenses due/overdue
   const recurringDue = DB.recurringExpenses.filter(r => {
     const dueDay = parseInt(r.dueDay) || 1;
     const isPaid = DB.expenses.some(e => e.category === r.category && e.desc === r.desc && e.date && e.date.startsWith(thisMonth));
@@ -50,7 +50,7 @@ function generateInsights() {
     });
   }
 
-  // 🟡 ATTENTION: Restaurants with old unpaid invoices
+  // ATTENTION: Restaurants with old unpaid invoices
   const restDebts = {};
   activeInvoices.filter(i => i.status !== 'paid').forEach(inv => {
     const days = Math.floor((now - new Date(inv.date)) / (1000 * 60 * 60 * 24));
@@ -64,7 +64,7 @@ function generateInsights() {
     insights.attention.push(`<strong>${escapeHtml(name)}</strong> owes KES ${fmtMoney(data.total)} (oldest is ${data.days} days old)`);
   });
 
-  // 🟡 ATTENTION: Borrowed Loans (Boss's Account)
+  // ATTENTION: Borrowed Loans (Boss's Account)
   const borrowings = DB.borrowings;
   if (borrowings && borrowings.length > 0) {
     let totalBorrowed = 0;
@@ -82,7 +82,7 @@ function generateInsights() {
     }
   }
 
-  // 🟡 ATTENTION: Expense category spikes vs last month
+  // ATTENTION: Expense category spikes vs last month
   const thisMonthExps = DB.expenses.filter(e => e.type === 'expense' && e.date && e.date.startsWith(thisMonth));
   const lastMonthExps = DB.expenses.filter(e => e.type === 'expense' && e.date && e.date.startsWith(lastMonth));
   const thisByCategory = {};
@@ -100,7 +100,7 @@ function generateInsights() {
     }
   });
 
-  // 🟢 GOOD NEWS: Revenue comparison
+  // GOOD NEWS: Revenue comparison
   const thisRevenue = thisMonthInvs.reduce((s, i) => s + i.totalSell, 0);
   const lastRevenue = lastMonthInvs.reduce((s, i) => s + i.totalSell, 0);
   if (thisRevenue > 0 && lastRevenue > 0) {
@@ -114,7 +114,7 @@ function generateInsights() {
     insights.good.push(`This month's revenue: <strong>KES ${fmtMoney(thisRevenue)}</strong> from ${thisMonthInvs.length} invoices`);
   }
 
-  // 🟢 GOOD NEWS: Top customer this month
+  // GOOD NEWS: Top customer this month
   if (thisMonthInvs.length > 0) {
     const byRest = {};
     thisMonthInvs.forEach(i => { byRest[i.restaurantName] = (byRest[i.restaurantName] || 0) + i.totalSell; });
@@ -124,19 +124,19 @@ function generateInsights() {
     }
   }
 
-  // 🟢 GOOD NEWS: Profit margin
+  // GOOD NEWS: Profit margin
   const thisProfit = thisMonthInvs.reduce((s, i) => s + i.profit, 0);
   if (thisRevenue > 0) {
     const margin = (thisProfit / thisRevenue) * 100;
     insights.good.push(`Gross profit margin: <strong>${margin.toFixed(1)}%</strong> this month`);
   }
 
-  // 🟢 GOOD NEWS: All salaries paid
+  // GOOD NEWS: All salaries paid
   if (activeStaff.length > 0 && unpaidStaff.length === 0 && now.getDate() >= 5) {
     insights.good.push(`All ${activeStaff.length} staff salaries paid this month`);
   }
 
-  // 🟢 Milestone
+  // Milestone
   const totalInvoices = activeInvoices.length;
   const milestones = [10, 25, 50, 100, 250, 500, 1000];
   milestones.forEach(m => {

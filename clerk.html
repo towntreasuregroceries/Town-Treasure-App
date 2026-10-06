@@ -16,6 +16,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
   <script src="staging.js?v=1.2.6"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
   <script src="ocr-consensus.js?v=1.2.6" defer></script>
   
@@ -178,16 +179,28 @@
 
   <div class="clerk-container">
 
-    <!-- Notice Banner -->
-    <div style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:var(--radius); padding:12px 18px; margin-bottom:20px; display:flex; align-items:center; gap:12px;">
-      <div style="color:#059669; display:flex; align-items:center;">
-        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
-          <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
-        </svg>
+    <!-- Smart Routing Banner -->
+    <div id="clerkRoutingBanner" style="background:#ecfdf5; border:1px solid #a7f3d0; border-radius:var(--radius); padding:14px 18px; margin-bottom:20px; display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap;">
+      <div style="display:flex; align-items:center; gap:12px;">
+        <div style="background:#10b981; color:#fff; width:38px; height:38px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+            <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+          </svg>
+        </div>
+        <div>
+          <div style="font-size:0.95rem; font-weight:700; color:#065f46;">
+            Submitting directly to: <span id="clerkTargetOwnerName">Veronica</span> <span id="clerkTargetOwnerEmail" style="font-weight:400; font-size:0.82rem; color:#047857;"></span>
+          </div>
+          <div style="font-size:0.8rem; color:#047857; margin-top:2px;">
+            Maker-Checker Protection: Dockets route directly to this account for review and ledger encryption.
+          </div>
+        </div>
       </div>
-      <div style="font-size:0.85rem; color:#065f46;">
-        <strong>Maker-Checker Workflow:</strong> Dockets entered or scanned here are submitted to the staging queue for <strong>Veronica's review and approval</strong> before being committed to the official encrypted ledger.
+      <div>
+        <span class="badge" style="background:#d1fae5; color:#065f46; font-weight:700; border:1px solid #6ee7b7; padding:4px 10px; border-radius:12px; font-size:0.75rem;">
+          Verified Route
+        </span>
       </div>
     </div>
 
@@ -247,23 +260,54 @@
 
           <!-- Physical Photo & OCR Section -->
           <div class="form-group" style="margin-top:16px;">
-            <label><strong>Physical Docket Photos (Supports 1 or 2+ Pages)</strong></label>
+            <label><strong>Physical Docket Photos or PDF Document (Supports Single & Multi-Page)</strong></label>
             <div class="photo-dropzone" id="clerkPhotoDropzone">
               
-              <!-- Visually hidden file input that mobile devices can still access properly -->
-              <input type="file" id="clerkPhotoInput" accept="image/*" multiple style="width: 0.1px; height: 0.1px; opacity: 0; overflow: hidden; position: absolute; z-index: -1;" onchange="handlePhotoSelect(this)">
+              <!-- 3 Dedicated File Inputs for Camera, Gallery, and PDF -->
+              <input type="file" id="clerkCameraInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePhotoSelect(this)">
+              <input type="file" id="clerkGalleryInput" accept="image/*" multiple style="display:none;" onchange="handlePhotoSelect(this)">
+              <input type="file" id="clerkPdfInput" accept="application/pdf,.pdf,image/*" multiple style="display:none;" onchange="handlePhotoSelect(this)">
               
-              <!-- Label attached to the input covering entire dropzone padding -->
-              <label for="clerkPhotoInput" id="photoDropPrompt" style="display:block; cursor:pointer; padding:24px; margin:-24px;">
+              <!-- Prompt with 3 Action Buttons -->
+              <div id="photoDropPrompt" style="padding:20px 10px;">
                 <div style="color:var(--primary); margin-bottom:8px;">
-                  <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
                     <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
                     <circle cx="12" cy="13" r="4"></circle>
                   </svg>
                 </div>
-                <div style="font-weight:600; color:var(--green-900);">Take Photos or Upload Docket Pictures</div>
-                <div style="font-size:0.8rem; color:var(--text-2); margin-top:4px;">Supports 1, 2, or more pages. Upload Page 1 &amp; Page 2 — extracts both into one unified invoice.</div>
-              </label>
+                <div style="font-weight:700; color:var(--green-900); font-size:1.05rem;">Capture Camera Shot, Pick from Gallery, or Upload PDF</div>
+                <div style="font-size:0.82rem; color:var(--text-2); margin-top:4px; max-width:540px; margin-left:auto; margin-right:auto;">
+                  Upload handwritten receipts, printed delivery notes, or PDF invoices (supports multiple pages).
+                </div>
+                
+                <div style="display:flex; justify-content:center; gap:10px; flex-wrap:wrap; margin-top:16px;">
+                  <button type="button" class="btn btn-primary" onclick="document.getElementById('clerkCameraInput').click()" style="display:inline-flex; align-items:center; gap:8px; padding:10px 18px; font-weight:600; border-radius:10px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                      <circle cx="12" cy="13" r="4"></circle>
+                    </svg>
+                    <span>Take Photo (Camera)</span>
+                  </button>
+                  <button type="button" class="btn btn-secondary" onclick="document.getElementById('clerkGalleryInput').click()" style="display:inline-flex; align-items:center; gap:8px; padding:10px 18px; font-weight:600; border-radius:10px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                      <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                      <polyline points="21 15 16 10 5 21"></polyline>
+                    </svg>
+                    <span>Choose from Gallery</span>
+                  </button>
+                  <button type="button" class="btn btn-secondary" onclick="document.getElementById('clerkPdfInput').click()" style="display:inline-flex; align-items:center; gap:8px; padding:10px 18px; font-weight:600; border-radius:10px;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                      <polyline points="14 2 14 8 20 8"></polyline>
+                      <line x1="16" y1="13" x2="8" y2="13"></line>
+                      <line x1="16" y1="17" x2="8" y2="17"></line>
+                    </svg>
+                    <span>Upload PDF / Document</span>
+                  </button>
+                </div>
+              </div>
 
               <!-- Multi-Page Preview Container -->
               <div id="photoPreviewContainer" style="display:none;" onclick="event.stopPropagation()">
@@ -275,11 +319,20 @@
                     </svg>
                     <span>Auto-Extract Line Items from Photos</span>
                   </button>
-                  <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('clerkPhotoInput').click()">
-                    + Add Another Page
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('clerkCameraInput').click()" title="Snap another page with camera" style="display:inline-flex; align-items:center; gap:5px;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                    <span>+ Camera</span>
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('clerkGalleryInput').click()" title="Pick image from gallery" style="display:inline-flex; align-items:center; gap:5px;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                    <span>+ Gallery</span>
+                  </button>
+                  <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('clerkPdfInput').click()" title="Add pages from PDF" style="display:inline-flex; align-items:center; gap:5px;">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                    <span>+ PDF</span>
                   </button>
                   <button type="button" class="btn btn-secondary btn-sm" onclick="clearAllClerkPhotos(event)" style="color:var(--danger, #dc2626);">
-                    Clear Photos
+                    Clear All
                   </button>
                 </div>
               </div>
@@ -426,6 +479,24 @@
 
     function initClerkPortal() {
       try {
+        // Read URL routing parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const toParam = urlParams.get('to') || urlParams.get('owner') || urlParams.get('target');
+        const nameParam = urlParams.get('name') || urlParams.get('owner_name');
+        const emailParam = urlParams.get('email') || urlParams.get('owner_email');
+
+        if (toParam) localStorage.setItem('ttg_target_owner_id', toParam);
+        if (nameParam) localStorage.setItem('ttg_target_owner_name', nameParam);
+        if (emailParam) localStorage.setItem('ttg_target_owner_email', emailParam);
+
+        const targetName = localStorage.getItem('ttg_target_owner_name') || 'Veronica';
+        const targetEmail = localStorage.getItem('ttg_target_owner_email') || '';
+
+        const nameEl = document.getElementById('clerkTargetOwnerName');
+        if (nameEl) nameEl.textContent = targetName;
+        const emailEl = document.getElementById('clerkTargetOwnerEmail');
+        if (emailEl) emailEl.textContent = targetEmail ? `(${targetEmail})` : '';
+
         const savedName = localStorage.getItem('ttg_clerk_name');
         if (savedName) {
           const nameInput = document.getElementById('clerkName');
@@ -506,6 +577,9 @@
             <option value="crates" ${unit==='crates'?'selected':''}>Crates</option>
             <option value="bags" ${unit==='bags'?'selected':''}>Bags</option>
             <option value="pieces" ${unit==='pieces'?'selected':''}>Pieces</option>
+            <option value="bunches" ${unit==='bunches'?'selected':''}>Bunches</option>
+            <option value="heads" ${unit==='heads'?'selected':''}>Heads</option>
+            <option value="pnts" ${unit==='pnts'?'selected':''}>Punnets</option>
             <option value="bundles" ${unit==='bundles'?'selected':''}>Bundles</option>
             <option value="litres" ${unit==='litres'?'selected':''}>Litres</option>
             <option value="trays" ${unit==='trays'?'selected':''}>Trays</option>
@@ -555,68 +629,83 @@
       document.getElementById('clerkGrandTotalText').textContent = 'KES ' + grand.toLocaleString('en-KE', { minimumFractionDigits: 2 });
     }
 
-    function handlePhotoFiles(fileList) {
+    async function handlePhotoFiles(fileList) {
       if (!fileList || !fileList.length) return;
       const files = Array.from(fileList);
 
-      let processed = 0;
-      const checkDone = () => {
-        processed++;
-        if (processed >= files.length) {
-          const fileInput = document.getElementById('clerkPhotoInput');
-          if (fileInput) fileInput.value = '';
-          renderClerkPhotosList();
-        }
-      };
+      const progressBox = document.getElementById('clerkOcrProgress');
+      const statusText = document.getElementById('clerkOcrStatusText');
 
-      files.forEach(file => {
-        if (file.type && !file.type.startsWith('image/')) {
-          toast('Please select an image file (e.g. JPG, PNG, WebP)', 'warning');
-          checkDone();
-          return;
-        }
-
-        const reader = new FileReader();
-        reader.onload = (e) => {
-          const rawUrl = e.target.result;
-          const img = new Image();
-          img.onload = () => {
-            try {
-              const maxDim = 1400;
-              let w = img.width, h = img.height;
-              if (w > maxDim || h > maxDim) {
-                if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
-                else { w = Math.round(w * maxDim / h); h = maxDim; }
-              }
-              const canvas = document.createElement('canvas');
-              canvas.width = w;
-              canvas.height = h;
-              const ctx = canvas.getContext('2d');
-              ctx.drawImage(img, 0, 0, w, h);
-              const compressed = canvas.toDataURL('image/jpeg', 0.85);
-
-              clerkDocketPhotos.push(compressed);
-              attachedPhotoBase64 = clerkDocketPhotos[0] || null;
-            } catch (canvasErr) {
-              console.warn('[Photo] Canvas resize fallback:', canvasErr);
-              clerkDocketPhotos.push(rawUrl);
-              attachedPhotoBase64 = clerkDocketPhotos[0] || null;
-            }
-            checkDone();
-          };
-          img.onerror = () => {
-            clerkDocketPhotos.push(rawUrl);
+      for (const file of files) {
+        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        if (isPdf) {
+          if (progressBox) progressBox.style.display = 'block';
+          if (statusText) statusText.textContent = `Rendering PDF pages for ${file.name}...`;
+          try {
+            const pdfResult = await OCRConsensus.convertPdfToPages(file, msg => {
+              if (statusText) statusText.textContent = msg;
+            });
+            pdfResult.images.forEach(imgDataUrl => {
+              clerkDocketPhotos.push(imgDataUrl);
+            });
             attachedPhotoBase64 = clerkDocketPhotos[0] || null;
-            checkDone();
-          };
-          img.src = rawUrl;
-        };
-        reader.onerror = () => {
-          console.error('[Photo] Error reading file');
-          checkDone();
-        };
-        reader.readAsDataURL(file);
+            toast(`Imported ${pdfResult.numPages} page(s) from PDF document!`, 'success');
+          } catch(err) {
+            console.error('[Clerk] PDF conversion error:', err);
+            toast('Failed to load PDF: ' + err.message, 'error');
+          } finally {
+            if (progressBox) progressBox.style.display = 'none';
+          }
+        } else if (file.type && file.type.startsWith('image/')) {
+          await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+              const rawUrl = e.target.result;
+              const img = new Image();
+              img.onload = () => {
+                try {
+                  const maxDim = 1400;
+                  let w = img.width, h = img.height;
+                  if (w > maxDim || h > maxDim) {
+                    if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+                    else { w = Math.round(w * maxDim / h); h = maxDim; }
+                  }
+                  const canvas = document.createElement('canvas');
+                  canvas.width = w;
+                  canvas.height = h;
+                  const ctx = canvas.getContext('2d');
+                  ctx.drawImage(img, 0, 0, w, h);
+                  const compressed = canvas.toDataURL('image/jpeg', 0.85);
+
+                  clerkDocketPhotos.push(compressed);
+                  attachedPhotoBase64 = clerkDocketPhotos[0] || null;
+                } catch (canvasErr) {
+                  clerkDocketPhotos.push(rawUrl);
+                  attachedPhotoBase64 = clerkDocketPhotos[0] || null;
+                }
+                resolve();
+              };
+              img.onerror = () => {
+                clerkDocketPhotos.push(rawUrl);
+                attachedPhotoBase64 = clerkDocketPhotos[0] || null;
+                resolve();
+              };
+              img.src = rawUrl;
+            };
+            reader.onerror = () => resolve();
+            reader.readAsDataURL(file);
+          });
+        } else {
+          toast(`Unsupported file format: ${file.name}. Please select an image or PDF document.`, 'warning');
+        }
+      }
+
+      ['clerkCameraInput', 'clerkGalleryInput', 'clerkPdfInput'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
       });
+
+      renderClerkPhotosList();
     }
 
     function handlePhotoSelect(input) {
@@ -649,17 +738,24 @@
             <div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.7); color:#fff; font-size:0.72rem; font-weight:700; text-align:center; padding:3px 0;">
               Page ${idx + 1}
             </div>
-            <button type="button" onclick="removeClerkPhoto(${idx}, event)" title="Remove page" style="position:absolute; top:4px; right:4px; background:var(--danger, #dc2626); color:#fff; border:none; border-radius:50%; width:22px; height:22px; font-size:11px; cursor:pointer; display:flex; align-items:center; justify-content:center; line-height:1; font-weight:bold;">
-              ✕
+            <button type="button" onclick="removeClerkPhoto(${idx}, event)" title="Remove page" style="position:absolute; top:4px; right:4px; background:var(--danger, #dc2626); color:#fff; border:none; border-radius:50%; width:22px; height:22px; cursor:pointer; display:flex; align-items:center; justify-content:center;">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
             </button>
           </div>
         `).join('') + `
-          <div onclick="document.getElementById('clerkPhotoInput').click()" style="width:115px; height:140px; border:2px dashed var(--green-400); border-radius:8px; display:inline-flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; background:var(--green-50); margin:4px;">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color:var(--primary);">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-            <span style="font-size:0.75rem; font-weight:600; color:var(--green-900); margin-top:4px;">+ Add Page</span>
+          <div style="display:inline-flex; flex-direction:column; gap:6px; margin:4px; vertical-align:top;">
+            <button type="button" onclick="document.getElementById('clerkCameraInput').click()" style="width:115px; height:42px; border:1px dashed var(--green-400); border-radius:6px; display:flex; align-items:center; justify-content:center; gap:5px; cursor:pointer; background:var(--green-50); font-size:0.75rem; font-weight:600; color:var(--green-900);">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+              <span>+ Camera</span>
+            </button>
+            <button type="button" onclick="document.getElementById('clerkGalleryInput').click()" style="width:115px; height:42px; border:1px dashed var(--green-400); border-radius:6px; display:flex; align-items:center; justify-content:center; gap:5px; cursor:pointer; background:var(--green-50); font-size:0.75rem; font-weight:600; color:var(--green-900);">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+              <span>+ Gallery</span>
+            </button>
+            <button type="button" onclick="document.getElementById('clerkPdfInput').click()" style="width:115px; height:42px; border:1px dashed var(--green-400); border-radius:6px; display:flex; align-items:center; justify-content:center; gap:5px; cursor:pointer; background:var(--green-50); font-size:0.75rem; font-weight:600; color:var(--green-900);">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+              <span>+ PDF</span>
+            </button>
           </div>
         `;
       }
@@ -683,7 +779,10 @@
     function clearAllClerkPhotos(e) {
       if (e) e.stopPropagation();
       clerkDocketPhotos = [];
-      document.getElementById('clerkPhotoInput').value = '';
+      ['clerkCameraInput', 'clerkGalleryInput', 'clerkPdfInput'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      });
       renderClerkPhotosList();
     }
 
@@ -823,6 +922,10 @@
         return;
       }
 
+      const targetId = localStorage.getItem('ttg_target_owner_id') || null;
+      const targetName = localStorage.getItem('ttg_target_owner_name') || 'Veronica';
+      const targetEmail = localStorage.getItem('ttg_target_owner_email') || null;
+
       try {
         const docketData = {
           clerk_name: clerkName,
@@ -835,12 +938,20 @@
           total_buy: 0,
           receipt_photo: clerkDocketPhotos[0] || attachedPhotoBase64 || null,
           receipt_photos: clerkDocketPhotos.length ? clerkDocketPhotos : (attachedPhotoBase64 ? [attachedPhotoBase64] : []),
-          notes: notes
+          notes: notes,
+          target_user_id: targetId,
+          target_user_email: targetEmail,
+          target_user_name: targetName
         };
 
-        await StagingDB.submitDocket(docketData);
+        const savedRecord = await StagingDB.submitDocket(docketData);
 
-        toast('Docket successfully submitted for Veronica\'s review', 'success');
+        // Build 1-tap WhatsApp deep link
+        const docketCode = StagingDB.exportDocketAsCode(savedRecord);
+        const reviewUrl = window.location.origin + window.location.pathname.replace(/[^\/]*$/, 'index.html') + '?import_docket=' + encodeURIComponent(docketCode);
+
+        toast(`Docket successfully submitted to ${targetName}'s review queue!`, 'success');
+        showClerkSuccessAlert(savedRecord, reviewUrl, targetName);
 
         removeAttachedPhoto();
         document.getElementById('clerkNotes').value = '';
@@ -860,6 +971,46 @@
         btn.disabled = false;
         btn.textContent = 'Submit Docket for Veronica\'s Approval';
       }
+    }
+
+    function showClerkSuccessAlert(record, reviewUrl, targetName) {
+      const banner = document.getElementById('clerkRoutingBanner');
+      if (!banner) return;
+      const totalFmt = (record.total_sell || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 });
+      const waText = `Hi ${targetName}, I have submitted a new docket for *${record.restaurant_name}* (KES ${totalFmt}) via the Clerk Portal.\n\nTap here to review and approve it into your ledger:\n${reviewUrl}`;
+      const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(waText)}`;
+
+      const alertEl = document.createElement('div');
+      alertEl.style.cssText = 'background:#f0fdf4; border:2px solid #16a34a; border-radius:var(--radius); padding:16px 20px; margin-bottom:20px; box-shadow:0 4px 14px rgba(22,163,74,0.15);';
+      alertEl.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+          <div style="display:flex; align-items:center; gap:12px;">
+            <div style="background:#16a34a; color:#fff; width:36px; height:36px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </div>
+            <div>
+              <div style="font-weight:700; color:#14532d; font-size:1rem;">Docket Submitted to ${escapeHtml(targetName)}!</div>
+              <div style="font-size:0.83rem; color:#166534; margin-top:2px;">
+                Queued for review &bull; ${escapeHtml(record.restaurant_name)} &bull; KES ${totalFmt}
+              </div>
+            </div>
+          </div>
+          <button type="button" onclick="this.closest('div').parentElement.remove()" style="background:none; border:none; color:#166534; cursor:pointer; display:flex; align-items:center;">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+        <div style="margin-top:14px; padding-top:12px; border-top:1px solid #bbf7d0; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+          <span style="font-size:0.82rem; color:#14532d; font-weight:600;">Notify ${escapeHtml(targetName)} on WhatsApp:</span>
+          <a href="${waUrl}" target="_blank" class="btn btn-sm" style="background:#25D366; color:#fff; font-weight:700; border:none; display:inline-flex; align-items:center; gap:6px; text-decoration:none; padding:7px 14px; border-radius:8px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981z"/>
+            </svg>
+            Send 1-Tap Review Link via WhatsApp
+          </a>
+        </div>
+      `;
+      banner.insertAdjacentElement('afterend', alertEl);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
     async function loadClerkHistory() {
