@@ -29,6 +29,7 @@ ALTER TABLE public.staged_invoices ADD COLUMN IF NOT EXISTS target_user_id TEXT;
 ALTER TABLE public.staged_invoices ADD COLUMN IF NOT EXISTS target_user_email TEXT;
 ALTER TABLE public.staged_invoices ADD COLUMN IF NOT EXISTS target_user_name TEXT;
 ALTER TABLE public.staged_invoices ADD COLUMN IF NOT EXISTS receipt_photos JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.staged_invoices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.staged_invoices ENABLE ROW LEVEL SECURITY;
@@ -71,6 +72,18 @@ BEGIN
       FOR UPDATE 
       USING (true) 
       WITH CHECK (true);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies 
+    WHERE schemaname = 'public' 
+      AND tablename = 'staged_invoices' 
+      AND policyname = 'Allow delete of staged_invoices'
+  ) THEN
+    CREATE POLICY "Allow delete of staged_invoices" 
+      ON public.staged_invoices 
+      FOR DELETE 
+      USING (true);
   END IF;
 END
 $$;

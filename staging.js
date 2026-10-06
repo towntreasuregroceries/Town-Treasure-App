@@ -122,22 +122,24 @@ const StagingDB = {
     ];
   },
 
-  /** Get locally cached staging items (auto-seeds realistic dockets if queue empty) */
+  /** Get locally cached staging items (never auto-seeds demo dockets) */
   getLocalQueue() {
     try {
       const stored = localStorage.getItem('ttg_staged_invoices');
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed)) {
+          // Actively purge any legacy hardcoded demo dockets
+          const clean = parsed.filter(x => x && x.id && !x.id.startsWith('stg_demo_'));
+          if (clean.length !== parsed.length) {
+            this.setLocalQueue(clean);
+          }
+          return clean;
         }
       }
-      // Initialize with authentic demo dockets so the review portal is never a dead empty state
-      const demo = this.createDefaultDemoDockets();
-      this.setLocalQueue(demo);
-      return demo;
+      return [];
     } catch (e) {
-      return this.createDefaultDemoDockets();
+      return [];
     }
   },
 
@@ -188,8 +190,16 @@ const StagingDB = {
     if (!obj || !obj.restaurant_name || !Array.isArray(obj.items_json)) {
       throw new Error('Invalid docket: missing restaurant name or line items.');
     }
-    delete obj.id;
-    obj.status = 'pending';
+    
+    // Check if docket already exists in the queue by id to avoid duplicate copies
+    if (obj.id) {
+      const all = await this.getAllSubmissions(false);
+      const existing = all.find(x => x.id === obj.id);
+      if (existing) {
+        return existing;
+      }
+    }
+    
     return await this.submitDocket(obj);
   },
 
@@ -235,7 +245,7 @@ const StagingDB = {
       return false;
     }
 
-    // Default legacy or demo docket: allow review
+    // Default legacy docket: allow review
     return true;
   },
 
@@ -257,6 +267,7 @@ const StagingDB = {
         // Merge Supabase data with local items
         const map = new Map();
         (data || []).forEach(item => {
+          if (item.id && item.id.startsWith('stg_demo_')) return;
           map.set(item.id, {
             id: item.id,
             clerk_name: item.clerk_name,
@@ -279,16 +290,19 @@ const StagingDB = {
           });
         });
 
-        // Include local entries if not in Supabase
+        // Include local entries if not in Supabase (skip demo dockets)
         local.forEach(item => {
+          if (item.id && item.id.startsWith('stg_demo_')) return;
           if (!map.has(item.id)) map.set(item.id, item);
         });
 
         combined = Array.from(map.values());
       } catch (e) {
         console.warn('[Staging] Error fetching from Supabase, using local queue:', e);
-        combined = local;
+        combined = local.filter(x => !x.id || !x.id.startsWith('stg_demo_'));
       }
+    } else {
+      combined = local.filter(x => !x.id || !x.id.startsWith('stg_demo_'));
     }
 
     if (!filterForCurrentUser) return combined;
@@ -303,7 +317,7 @@ const StagingDB = {
     return all.filter(s => s.status === 'pending');
   },
 
-  /** Submit a new docket (called by Clerk portal) */
+  /** Submit or update a docket (called by Clerk portal) */
   async submitDocket(docket) {
     const genUUID = () => {
       if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
@@ -340,34 +354,38 @@ const StagingDB = {
       target_user_id: targetId,
       target_user_email: targetEmail,
       target_user_name: targetName,
-      created_at: new Date().toISOString()
+      created_at: docket.created_at || new Date().toISOString()
     };
 
-    // 1. Save to local queue immediately
+    // 1. Save or update in local queue
     const local = this.getLocalQueue();
-    local.unshift(record);
+    const existingIdx = local.findIndex(x => x.id === record.id);
+    if (existingIdx >= 0) {
+      local[existingIdx] = record;
+    } else {
+      local.unshift(record);
+    }
     this.setLocalQueue(local);
 
-    // 2. Insert into Supabase if accessible
+    // 2. Upsert into Supabase if accessible
     const hasSb = await this.checkSupabase();
     if (hasSb) {
       try {
-        const { error } = await supabaseClient.from('staged_invoices').insert([record]);
+        const { error } = await supabaseClient.from('staged_invoices').upsert([record], { onConflict: 'id' });
         if (error) {
-          // If error is due to target columns not yet added to SQL table, retry with core schema
           if (error.message && (error.message.includes('column') || error.code === '42703')) {
-            console.warn('[Staging] Table missing target columns, retrying core insert:', error.message);
+            console.warn('[Staging] Table missing target columns, retrying core upsert:', error.message);
             const coreRecord = { ...record };
             delete coreRecord.target_user_id;
             delete coreRecord.target_user_email;
             delete coreRecord.target_user_name;
-            await supabaseClient.from('staged_invoices').insert([coreRecord]);
+            await supabaseClient.from('staged_invoices').upsert([coreRecord], { onConflict: 'id' });
           } else {
-            console.warn('[Staging] Supabase insert warning:', error);
+            console.warn('[Staging] Supabase upsert warning:', error);
           }
         }
       } catch (sbErr) {
-        console.warn('[Staging] Supabase insert error:', sbErr);
+        console.warn('[Staging] Supabase upsert error:', sbErr);
       }
     }
 
@@ -385,7 +403,7 @@ const StagingDB = {
    * with Veronica's master password key!
    */
   async approveSubmission(id, adjustedData = {}) {
-    const all = await this.getAllSubmissions();
+    const all = await this.getAllSubmissions(false);
     const item = all.find(x => x.id === id);
     if (!item) throw new Error('Submission not found in staging queue.');
 
@@ -474,22 +492,62 @@ const StagingDB = {
     const lIdx = local.findIndex(x => x.id === id);
     if (lIdx >= 0) {
       local[lIdx].status = 'approved';
+      local[lIdx].rejection_reason = '';
+      local[lIdx].restaurant_name = restName;
+      local[lIdx].invoice_date = invDate;
+      local[lIdx].delivery_cost = deliveryCost;
+      local[lIdx].other_cost = otherCost;
+      local[lIdx].total_sell = totalSell;
+      local[lIdx].total_buy = totalBuy;
+      local[lIdx].items_json = items;
       local[lIdx].approved_at = new Date().toISOString();
       local[lIdx].generated_invoice_number = invNumber;
-      this.setLocalQueue(local);
+    } else {
+      const copy = {
+        ...item,
+        status: 'approved',
+        rejection_reason: '',
+        restaurant_name: restName,
+        invoice_date: invDate,
+        delivery_cost: deliveryCost,
+        other_cost: otherCost,
+        total_sell: totalSell,
+        total_buy: totalBuy,
+        items_json: items,
+        approved_at: new Date().toISOString(),
+        generated_invoice_number: invNumber
+      };
+      local.unshift(copy);
     }
+    this.setLocalQueue(local);
 
     // Update staging status in Supabase if accessible
     const hasSb = await this.checkSupabase();
     if (hasSb) {
       try {
-        await supabaseClient
+        const updatePayload = {
+          status: 'approved',
+          rejection_reason: '',
+          restaurant_name: restName,
+          invoice_date: invDate,
+          delivery_cost: deliveryCost,
+          other_cost: otherCost,
+          total_sell: totalSell,
+          total_buy: totalBuy,
+          items_json: items
+        };
+        const { error } = await supabaseClient
           .from('staged_invoices')
-          .update({
-            status: 'approved',
-            updated_at: new Date().toISOString()
-          })
+          .update(updatePayload)
           .eq('id', id);
+
+        if (error) {
+          console.warn('[Staging] Full status update warning, trying minimal:', error.message);
+          await supabaseClient
+            .from('staged_invoices')
+            .update({ status: 'approved', rejection_reason: '' })
+            .eq('id', id);
+        }
       } catch (sbErr) {
         console.warn('[Staging] Error updating status in Supabase:', sbErr);
       }
@@ -508,26 +566,54 @@ const StagingDB = {
     if (lIdx >= 0) {
       local[lIdx].status = 'rejected';
       local[lIdx].rejection_reason = reason;
-      this.setLocalQueue(local);
+    } else {
+      const all = await this.getAllSubmissions(false);
+      const item = all.find(x => x.id === id);
+      if (item) {
+        local.unshift({ ...item, status: 'rejected', rejection_reason: reason });
+      }
     }
+    this.setLocalQueue(local);
 
     const hasSb = await this.checkSupabase();
     if (hasSb) {
       try {
-        await supabaseClient
+        const { error } = await supabaseClient
           .from('staged_invoices')
           .update({
             status: 'rejected',
-            rejection_reason: reason,
-            updated_at: new Date().toISOString()
+            rejection_reason: reason
           })
           .eq('id', id);
+        if (error) console.warn('[Staging] Supabase reject error:', error);
       } catch (sbErr) {
         console.warn('[Staging] Error rejecting in Supabase:', sbErr);
       }
     }
 
     this.updatePendingCountBadge();
+  },
+
+  /** Permanently delete a docket from review queue (both Supabase and local cache) */
+  async deleteSubmission(id) {
+    const local = this.getLocalQueue().filter(x => x.id !== id);
+    this.setLocalQueue(local);
+
+    const hasSb = await this.checkSupabase();
+    if (hasSb) {
+      try {
+        const { error } = await supabaseClient
+          .from('staged_invoices')
+          .delete()
+          .eq('id', id);
+        if (error) console.warn('[Staging] Supabase delete warning:', error);
+      } catch (sbErr) {
+        console.warn('[Staging] Error deleting from Supabase:', sbErr);
+      }
+    }
+
+    this.updatePendingCountBadge();
+    return true;
   },
 
   /** Update sidebar badge and dashboard pending alert */

@@ -219,6 +219,24 @@
         </h3>
       </div>
       <div class="card-body" style="padding:20px;">
+        <!-- Returned Correction Alert Banner -->
+        <div id="clerkReturnedAlerts" style="display:none;"></div>
+
+        <!-- Active Editing Banner -->
+        <div id="clerkEditingBanner" style="display:none; background:#fffbeb; border:1.5px solid #f59e0b; border-radius:var(--radius); padding:14px 18px; margin-bottom:20px; box-shadow:0 2px 8px rgba(245,158,11,0.12);">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap;">
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div style="background:#f59e0b; color:#fff; width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+              </div>
+              <div>
+                <strong style="color:#92400e; font-size:0.95rem; display:block;" id="clerkEditingTitle">Editing Returned Docket</strong>
+                <div style="font-size:0.83rem; color:#b45309;" id="clerkEditingReason">Correction feedback: ...</div>
+              </div>
+            </div>
+            <button type="button" class="btn btn-sm btn-secondary" onclick="cancelEditingDocket()">Cancel</button>
+          </div>
+        </div>
 
         <form id="clerkDocketForm" onsubmit="return false;">
 
@@ -458,10 +476,11 @@
                 <th>Grand Total</th>
                 <th>Status</th>
                 <th>Notes</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="clerkHistoryBody">
-              <tr><td colspan="6" class="empty-state">Loading history...</td></tr>
+              <tr><td colspan="7" class="empty-state">Loading history...</td></tr>
             </tbody>
           </table>
         </div>
@@ -476,9 +495,24 @@
   <script>
     let clerkDocketPhotos = [];
     let attachedPhotoBase64 = null;
+    let activeEditingDocketId = null;
 
     function initClerkPortal() {
       try {
+        // Clean up any legacy dummy demo dockets from local cache
+        try {
+          const stored = localStorage.getItem('ttg_staged_invoices');
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed)) {
+              const clean = parsed.filter(x => x && x.id && !x.id.startsWith('stg_demo_'));
+              if (clean.length !== parsed.length) {
+                localStorage.setItem('ttg_staged_invoices', JSON.stringify(clean));
+              }
+            }
+          }
+        } catch(e) {}
+
         // Read URL routing parameters
         const urlParams = new URLSearchParams(window.location.search);
         const toParam = urlParams.get('to') || urlParams.get('owner') || urlParams.get('target');
@@ -933,7 +967,9 @@
       const targetEmail = localStorage.getItem('ttg_target_owner_email') || null;
 
       try {
+        const isResubmit = Boolean(activeEditingDocketId);
         const docketData = {
+          id: activeEditingDocketId || undefined,
           clerk_name: clerkName,
           restaurant_name: restName,
           invoice_date: invDate,
@@ -952,11 +988,14 @@
 
         const savedRecord = await StagingDB.submitDocket(docketData);
 
+        activeEditingDocketId = null;
+        cancelEditingDocket(false);
+
         // Build 1-tap WhatsApp deep link
         const docketCode = StagingDB.exportDocketAsCode(savedRecord);
         const reviewUrl = window.location.origin + window.location.pathname.replace(/[^\/]*$/, 'index.html') + '?import_docket=' + encodeURIComponent(docketCode);
 
-        toast(`Docket successfully submitted to ${targetName}'s review queue!`, 'success');
+        toast(isResubmit ? `Corrected docket resubmitted to ${targetName}!` : `Docket successfully submitted to ${targetName}'s review queue!`, 'success');
         showClerkSuccessAlert(savedRecord, reviewUrl, targetName);
 
         removeAttachedPhoto();
@@ -1019,6 +1058,125 @@
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
 
+    /** Load a returned docket back into the form for correction and resubmission */
+    async function editReturnedDocket(id) {
+      try {
+        let all = [];
+        if (typeof StagingDB !== 'undefined' && typeof StagingDB.getAllSubmissions === 'function') {
+          all = await StagingDB.getAllSubmissions(false);
+        } else {
+          const stored = localStorage.getItem('ttg_staged_invoices');
+          all = stored ? JSON.parse(stored) : [];
+        }
+        const item = all.find(x => x.id === id);
+        if (!item) return toast('Docket record not found.', 'error');
+
+        activeEditingDocketId = item.id;
+
+        // Restaurant
+        const sel = document.getElementById('clerkRestaurantSelect');
+        const custom = document.getElementById('clerkRestaurantCustom');
+        const opts = Array.from(sel.options);
+        const match = opts.find(o => o.value.toLowerCase() === (item.restaurant_name || '').toLowerCase());
+        if (match) {
+          sel.value = match.value;
+          custom.style.display = 'none';
+        } else {
+          sel.value = '__other__';
+          custom.style.display = 'block';
+          custom.value = item.restaurant_name || '';
+        }
+
+        // Date
+        if (item.invoice_date) {
+          document.getElementById('clerkDocketDate').value = item.invoice_date;
+        }
+
+        // Costs & Notes
+        document.getElementById('clerkDeliveryCost').value = item.delivery_cost || '';
+        document.getElementById('clerkOtherCost').value = item.other_cost || '';
+        document.getElementById('clerkNotes').value = item.notes || '';
+
+        // Items
+        const tbody = document.getElementById('clerkLineItemsBody');
+        tbody.innerHTML = '';
+        const items = item.items_json || [];
+        if (items.length) {
+          items.forEach(it => {
+            addClerkLineItem(it.desc || '', it.qty || 1, it.unit || 'kgs', it.price || it.sellPrice || 0);
+          });
+        } else {
+          addClerkLineItem('', 1, 'kgs', 0);
+        }
+        calcClerkTotals();
+
+        // Photos
+        const photos = Array.isArray(item.receipt_photos) && item.receipt_photos.length
+          ? item.receipt_photos
+          : (item.receipt_photo ? [item.receipt_photo] : []);
+        if (photos.length) {
+          clerkDocketPhotos = [...photos];
+          renderClerkThumbnails();
+        }
+
+        // Banner & Button Text
+        const banner = document.getElementById('clerkEditingBanner');
+        if (banner) {
+          document.getElementById('clerkEditingTitle').textContent = `Editing Returned Docket for ${item.restaurant_name}`;
+          document.getElementById('clerkEditingReason').textContent = `Reviewer feedback: "${item.rejection_reason || 'Correction requested'}"`;
+          banner.style.display = 'block';
+        }
+        const btn = document.getElementById('btnSubmitDocket');
+        if (btn) btn.textContent = 'Resubmit Corrected Docket for Approval';
+
+        window.scrollTo({ top: 120, behavior: 'smooth' });
+        toast(`Loaded ${item.restaurant_name} for correction. Make changes and tap Resubmit.`, 'info');
+      } catch (err) {
+        console.error('Error loading docket for edit:', err);
+        toast('Error loading docket: ' + err.message, 'error');
+      }
+    }
+
+    /** Cancel edit mode and return form to normal */
+    function cancelEditingDocket(resetForm = true) {
+      activeEditingDocketId = null;
+      const banner = document.getElementById('clerkEditingBanner');
+      if (banner) banner.style.display = 'none';
+      const targetName = localStorage.getItem('ttg_target_owner_name') || 'Veronica';
+      const btn = document.getElementById('btnSubmitDocket');
+      if (btn) btn.textContent = `Submit Docket for ${targetName}'s Approval`;
+
+      if (resetForm) {
+        document.getElementById('clerkNotes').value = '';
+        document.getElementById('clerkDeliveryCost').value = '';
+        document.getElementById('clerkOtherCost').value = '';
+        document.getElementById('clerkLineItemsBody').innerHTML = '';
+        addClerkLineItem('', 1, 'kgs', 0);
+        calcClerkTotals();
+        removeAttachedPhoto();
+      }
+    }
+
+    /** Confirm and delete submission from clerk history */
+    async function deleteClerkSubmission(id, restName) {
+      if (!confirm(`Are you sure you want to delete this submission for "${restName || 'this docket'}"?`)) return;
+
+      try {
+        if (typeof StagingDB !== 'undefined' && typeof StagingDB.deleteSubmission === 'function') {
+          await StagingDB.deleteSubmission(id);
+        } else {
+          const stored = localStorage.getItem('ttg_staged_invoices');
+          const all = stored ? JSON.parse(stored) : [];
+          localStorage.setItem('ttg_staged_invoices', JSON.stringify(all.filter(x => x.id !== id)));
+        }
+        toast('Submission deleted.', 'info');
+        loadClerkHistory();
+      } catch (err) {
+        console.error('Delete failed:', err);
+        toast('Error deleting submission: ' + err.message, 'error');
+      }
+    }
+
     async function loadClerkHistory() {
       const tbody = document.getElementById('clerkHistoryBody');
       if (!tbody) return;
@@ -1026,27 +1184,89 @@
       try {
         let all = [];
         if (typeof StagingDB !== 'undefined' && typeof StagingDB.getAllSubmissions === 'function') {
-          all = await StagingDB.getAllSubmissions();
+          all = await StagingDB.getAllSubmissions(false);
         } else {
           const stored = localStorage.getItem('ttg_staged_invoices');
           all = stored ? JSON.parse(stored) : [];
         }
 
-        const list = (all || []).slice(0, 10);
+        // Never show legacy demo dockets
+        all = (all || []).filter(item => item && item.id && !item.id.startsWith('stg_demo_'));
+
+        // Highlight any returned items requiring clerk correction
+        const returnedItems = all.filter(item => item.status === 'rejected');
+        const alertBox = document.getElementById('clerkReturnedAlerts');
+        if (alertBox) {
+          if (returnedItems.length > 0) {
+            alertBox.style.display = 'block';
+            alertBox.innerHTML = `
+              <div style="background:#fef2f2; border:1.5px solid #ef4444; border-radius:var(--radius); padding:14px 18px; margin-bottom:20px; box-shadow:0 4px 12px rgba(239,68,68,0.1);">
+                <div style="display:flex; align-items:center; gap:12px;">
+                  <div style="background:#ef4444; color:#fff; width:32px; height:32px; border-radius:50%; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                  </div>
+                  <div style="flex:1;">
+                    <div style="font-weight:700; color:#991b1b; font-size:0.95rem;">
+                      ${returnedItems.length} Docket${returnedItems.length > 1 ? 's' : ''} Returned for Correction!
+                    </div>
+                    <div style="font-size:0.83rem; color:#b91c1c; margin-top:2px;">
+                      Feedback received from reviewer. Tap <strong>Edit &amp; Resubmit</strong> below to adjust and send back.
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `;
+          } else {
+            alertBox.style.display = 'none';
+          }
+        }
+
+        const list = all.slice(0, 15);
 
         if (!list.length) {
-          tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="text-align:center; padding:24px; color:var(--text-3);">No submissions recorded yet.</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="7" class="empty-state" style="text-align:center; padding:24px; color:var(--text-3);">No submissions recorded yet.</td></tr>`;
           return;
         }
 
         tbody.innerHTML = list.map(item => {
           let badge = '';
+          let actionCell = '';
+
           if (item.status === 'pending') {
-            badge = `<span class="badge" style="background:#fef3c7; color:#b45309; font-weight:600; padding:4px 8px; border-radius:6px;">Waiting for Review</span>`;
+            badge = `<span class="badge" style="background:#fef3c7; color:#b45309; font-weight:600; padding:4px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> Waiting for Review</span>`;
+            actionCell = `
+              <button class="btn btn-sm" onclick="deleteClerkSubmission('${item.id}', '${escapeHtml(item.restaurant_name)}')" title="Delete this submission" style="background:#fff; border:1px solid #fecaca; color:#dc2626; padding:4px 8px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              </button>
+            `;
           } else if (item.status === 'approved') {
-            badge = `<span class="badge" style="background:#ecfdf5; color:#047857; font-weight:600; padding:4px 8px; border-radius:6px;">Approved &amp; Synced</span>`;
+            badge = `<span class="badge" style="background:#ecfdf5; color:#047857; font-weight:600; padding:4px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg> Approved &amp; Synced</span>`;
+            actionCell = `
+              <button class="btn btn-sm" onclick="deleteClerkSubmission('${item.id}', '${escapeHtml(item.restaurant_name)}')" title="Remove from list" style="background:#fff; border:1px solid #fecaca; color:#dc2626; padding:4px 8px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center;">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+              </button>
+            `;
           } else {
-            badge = `<span class="badge" style="background:#fef2f2; color:#b91c1c; font-weight:600; padding:4px 8px; border-radius:6px;" title="${escapeHtml(item.rejection_reason || '')}">Returned: ${escapeHtml(item.rejection_reason || 'Check details')}</span>`;
+            badge = `
+              <div>
+                <span class="badge" style="background:#fef2f2; color:#b91c1c; font-weight:700; padding:4px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
+                  Returned for Correction
+                </span>
+                ${item.rejection_reason ? `<div style="font-size:0.75rem; color:#dc2626; font-weight:600; margin-top:3px;">"${escapeHtml(item.rejection_reason)}"</div>` : ''}
+              </div>
+            `;
+            actionCell = `
+              <div style="display:flex; align-items:center; gap:6px;">
+                <button class="btn btn-sm btn-primary" onclick="editReturnedDocket('${item.id}')" style="font-size:0.78rem; padding:4px 10px; display:inline-flex; align-items:center; gap:4px; font-weight:600;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
+                  Edit &amp; Resubmit
+                </button>
+                <button class="btn btn-sm" onclick="deleteClerkSubmission('${item.id}', '${escapeHtml(item.restaurant_name)}')" title="Delete" style="background:#fff; border:1px solid #fecaca; color:#dc2626; padding:4px 8px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center;">
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+                </button>
+              </div>
+            `;
           }
 
           const amt = (item.total_sell || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 });
@@ -1058,32 +1278,14 @@
               <td><strong>KES ${amt}</strong></td>
               <td>${badge}</td>
               <td style="font-size:0.8rem; color:var(--text-2);">${escapeHtml(item.notes || '—')}</td>
+              <td>${actionCell}</td>
             </tr>
           `;
         }).join('');
 
       } catch (e) {
-        console.warn('[Clerk] History load warning, reading local storage:', e);
-        try {
-          const stored = localStorage.getItem('ttg_staged_invoices');
-          const all = stored ? JSON.parse(stored) : [];
-          if (!all.length) {
-            tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="text-align:center; padding:24px; color:var(--text-3);">No submissions recorded yet.</td></tr>`;
-          } else {
-            tbody.innerHTML = all.slice(0, 10).map(item => `
-              <tr>
-                <td><strong>${escapeHtml(item.invoice_date || '')}</strong></td>
-                <td><strong>${escapeHtml(item.restaurant_name || '')}</strong></td>
-                <td>${(item.items_json || []).length} items</td>
-                <td><strong>KES ${(item.total_sell || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 })}</strong></td>
-                <td><span class="badge" style="background:#fef3c7; color:#b45309; font-weight:600; padding:4px 8px; border-radius:6px;">Waiting for Review</span></td>
-                <td style="font-size:0.8rem; color:var(--text-2);">${escapeHtml(item.notes || '—')}</td>
-              </tr>
-            `).join('');
-          }
-        } catch (err2) {
-          tbody.innerHTML = `<tr><td colspan="6" class="empty-state" style="text-align:center; padding:24px;">No submissions recorded yet.</td></tr>`;
-        }
+        console.warn('[Clerk] History load warning:', e);
+        tbody.innerHTML = `<tr><td colspan="7" class="empty-state" style="text-align:center; padding:24px; color:var(--text-3);">No submissions recorded yet.</td></tr>`;
       }
     }
 

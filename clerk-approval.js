@@ -55,14 +55,6 @@ async function renderClerkSubmissionsPage() {
                 </svg>
                 Open Clerk Intake Portal
               </a>
-              <button class="btn btn-sm btn-secondary" onclick="seedSampleClerkDockets()" style="display:inline-flex; align-items:center; gap:6px;">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                  <polyline points="7 10 12 15 17 10"></polyline>
-                  <line x1="12" y1="15" x2="12" y2="3"></line>
-                </svg>
-                Load Demo Dockets
-              </button>
               <button class="btn btn-sm btn-secondary" onclick="openImportDocketModal()" style="display:inline-flex; align-items:center; gap:6px;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -98,7 +90,7 @@ async function renderClerkSubmissionsPage() {
           </span>`;
       } else {
         statusBadge = `
-          <span class="badge" style="background:#fef2f2; color:#b91c1c; font-weight:600; padding:4px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;">
+          <span class="badge" style="background:#fef2f2; color:#b91c1c; font-weight:600; padding:4px 8px; border-radius:6px; display:inline-flex; align-items:center; gap:4px;" title="${escapeHtml(item.rejection_reason || '')}">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>
             Returned
           </span>`;
@@ -116,24 +108,29 @@ async function renderClerkSubmissionsPage() {
            </div>`
         : `<span style="display:inline-flex; align-items:center; justify-content:center; width:48px; height:48px; background:var(--gray-100); border-radius:6px; color:var(--text-3);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg></span>`;
 
-      let actionBtns = '';
-      if (item.status === 'pending') {
-        actionBtns = `
-          <button class="btn btn-sm btn-primary" onclick="openClerkReviewModal('${item.id}')" style="font-weight:600; display:inline-flex; align-items:center; gap:5px;">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-              <circle cx="12" cy="12" r="3"></circle>
+      const actionBtns = `
+        <div style="display:flex; align-items:center; gap:6px;">
+          ${item.status === 'pending' ? `
+            <button class="btn btn-sm btn-primary" onclick="openClerkReviewModal('${item.id}')" style="font-weight:600; display:inline-flex; align-items:center; gap:5px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+              Review &amp; Approve
+            </button>
+          ` : `
+            <button class="btn btn-sm btn-secondary" onclick="openClerkReviewModal('${item.id}')" style="display:inline-flex; align-items:center; gap:4px;">
+              View Details
+            </button>
+          `}
+          <button class="btn btn-sm" onclick="confirmDeleteSubmission('${item.id}', '${escapeHtml(item.restaurant_name)}')" title="Delete this docket" style="background:#fff; border:1px solid #fecaca; color:#dc2626; padding:5px 8px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
             </svg>
-            Review &amp; Approve
           </button>
-        `;
-      } else {
-        actionBtns = `
-          <button class="btn btn-sm btn-secondary" onclick="openClerkReviewModal('${item.id}')">
-            View Details
-          </button>
-        `;
-      }
+        </div>
+      `;
 
       return `
         <tr>
@@ -443,20 +440,52 @@ async function executeClerkApproval() {
   }
 }
 
-/** Reject / Return to Clerk */
-function executeClerkRejection() {
+/** Reject / Return to Clerk for Correction */
+async function executeClerkRejection() {
   if (!activeReviewSubmissionId) return;
 
-  const reason = prompt('Reason for returning this docket to the clerk (optional):', 'Please verify quantities on the receipt');
+  const reason = prompt('Reason for returning this docket to the clerk for correction:', 'Please verify quantities and prices on the receipt');
   if (reason === null) return; // User cancelled prompt
 
-  StagingDB.rejectSubmission(activeReviewSubmissionId, reason)
-    .then(() => {
-      closeModal('clerkReviewModal');
-      toast('Docket marked as rejected and returned to clerk queue.', 'warning');
-      renderClerkSubmissionsPage();
-    })
-    .catch(err => toast('Error rejecting: ' + err.message, 'error'));
+  try {
+    await StagingDB.rejectSubmission(activeReviewSubmissionId, reason);
+    closeModal('clerkReviewModal');
+    toast('Docket marked as returned for correction to clerk.', 'warning');
+    renderClerkSubmissionsPage();
+  } catch (err) {
+    toast('Error returning docket: ' + err.message, 'error');
+  }
+}
+
+/** Delete docket directly from the Review Modal */
+async function executeClerkDeleteFromModal() {
+  if (!activeReviewSubmissionId) return;
+
+  const ok = confirm('Are you sure you want to delete this docket? It will be removed permanently from your queue.');
+  if (!ok) return;
+
+  try {
+    await StagingDB.deleteSubmission(activeReviewSubmissionId);
+    closeModal('clerkReviewModal');
+    toast('Docket deleted successfully.', 'success');
+    renderClerkSubmissionsPage();
+  } catch (err) {
+    toast('Error deleting docket: ' + err.message, 'error');
+  }
+}
+
+/** Confirm and delete docket from the Submissions table */
+async function confirmDeleteSubmission(id, restName) {
+  const ok = confirm(`Are you sure you want to delete the docket for "${restName || 'this client'}"? This cannot be undone.`);
+  if (!ok) return;
+
+  try {
+    await StagingDB.deleteSubmission(id);
+    toast('Docket deleted successfully.', 'success');
+    renderClerkSubmissionsPage();
+  } catch (err) {
+    toast('Error deleting docket: ' + err.message, 'error');
+  }
 }
 
 /** Helper to build a personalized, targeted Clerk Portal URL for the active account */

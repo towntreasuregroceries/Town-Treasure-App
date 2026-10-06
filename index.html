@@ -1869,9 +1869,18 @@
       </div>
 
       <div class="modal-footer" style="background:#fff; border-top:1px solid var(--border); padding:14px 24px; display:flex; justify-content:space-between; align-items:center;">
-        <button type="button" class="btn btn-secondary" onclick="closeModal('clerkReviewModal')">
-          Close
-        </button>
+        <div style="display:flex; gap:10px; align-items:center;">
+          <button type="button" class="btn btn-secondary" onclick="closeModal('clerkReviewModal')">
+            Close
+          </button>
+          <button type="button" class="btn" id="btnCrmDelete" onclick="executeClerkDeleteFromModal()" style="font-weight:600; background:#fff; border:1px solid #fecaca; color:#dc2626; display:inline-flex; align-items:center; gap:6px;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
+            Delete Docket
+          </button>
+        </div>
         <div style="display:flex; gap:10px;">
           <button type="button" class="btn btn-danger" id="btnCrmReject" onclick="executeClerkRejection()" style="font-weight:600; display:inline-flex; align-items:center; gap:6px;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2467,7 +2476,7 @@
     (async function() {
       if (!('serviceWorker' in navigator)) return;
       try {
-        var EXPECTED_VERSION = 'ttg-v1.2.13';
+        var EXPECTED_VERSION = 'ttg-v1.2.14';
         var currentVersion = localStorage.getItem('ttg_sw_version');
         
         if (currentVersion !== EXPECTED_VERSION) {
