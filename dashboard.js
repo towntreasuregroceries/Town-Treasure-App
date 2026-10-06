@@ -736,7 +736,6 @@ async function enterApp(user) {
   document.getElementById('authScreen').style.display = 'none';
   document.getElementById('appShell').style.display = 'flex';
 
-  DB.clearLocalData();
   if (typeof DB !== 'undefined' && DB.loadFromSupabase) {
     await DB.loadFromSupabase();
   }

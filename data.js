@@ -168,6 +168,62 @@ const DB = {
     }
 
     try {
+      const jwkKey = JSON.parse(e2eKeyStr);
+
+      // SAFETY MERGE: Before overwriting remote vault, check if remote has records
+      // that are missing locally (e.g. if local state was started empty or partial).
+      try {
+        const { data: remoteRow } = await supabaseClient
+          .from('encrypted_vault')
+          .select('data')
+          .eq('user_id', uid)
+          .maybeSingle();
+
+        if (remoteRow && remoteRow.data) {
+          const remoteVault = await Crypto.decrypt(remoteRow.data, jwkKey);
+          if (remoteVault) {
+            // Merge remote invoices that might be missing locally
+            if (Array.isArray(remoteVault.invoices) && remoteVault.invoices.length > 0) {
+              const localInvMap = new Map();
+              state.invoices.forEach(i => localInvMap.set(i.number || i.id, i));
+              let addedAny = false;
+              remoteVault.invoices.forEach(remInv => {
+                const key = remInv.number || remInv.id;
+                if (!localInvMap.has(key)) {
+                  localInvMap.set(key, remInv);
+                  addedAny = true;
+                }
+              });
+              if (addedAny) {
+                state.invoices = Array.from(localInvMap.values());
+                state.invoices.sort((a,b) => (b.date || '').localeCompare(a.date || ''));
+                localStorage.setItem('ttg_invoices', JSON.stringify(state.invoices));
+              }
+            }
+
+            // Merge remote restaurants that might be missing locally
+            if (Array.isArray(remoteVault.restaurants) && remoteVault.restaurants.length > 0) {
+              const localRestMap = new Map();
+              state.restaurants.forEach(r => localRestMap.set(r.name || r.id, r));
+              let addedAny = false;
+              remoteVault.restaurants.forEach(remRest => {
+                const key = remRest.name || remRest.id;
+                if (!localRestMap.has(key)) {
+                  localRestMap.set(key, remRest);
+                  addedAny = true;
+                }
+              });
+              if (addedAny) {
+                state.restaurants = Array.from(localRestMap.values());
+                localStorage.setItem('ttg_restaurants', JSON.stringify(state.restaurants));
+              }
+            }
+          }
+        }
+      } catch (mergeErr) {
+        console.warn('[Vault] Safety merge check skipped:', mergeErr);
+      }
+
       this._syncVersion++;
       // 1. Gather all local state with version tracking
       const appState = {
@@ -188,16 +244,15 @@ const DB = {
       };
 
       // 2. Encrypt it completely
-      const jwkKey = JSON.parse(e2eKeyStr);
       const encryptedPayload = await Crypto.encrypt(appState, jwkKey);
 
-      // 3. Save to the secure vault (overwrites existing row for this user)
+      // 3. Save to the secure vault
       const { error } = await supabaseClient
         .from('encrypted_vault')
         .upsert({ user_id: uid, data: encryptedPayload }, { onConflict: 'user_id' });
 
       if (error) throw error;
-      console.log('Successfully synced encrypted vault (v' + this._syncVersion + ')');
+      console.log('Successfully synced encrypted vault (v' + this._syncVersion + ', ' + state.invoices.length + ' invoices)');
     } catch (e) {
       console.error(`Error syncing vault to Supabase:`, e);
       const now = Date.now();
