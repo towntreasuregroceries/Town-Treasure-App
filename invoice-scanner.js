@@ -58,11 +58,16 @@ async function handleVeronicaDocketPhoto(inputOrFiles) {
           if (progressText) progressText.textContent = status;
         });
 
-        if (pdfResult.pages && pdfResult.pages.length) {
-          pdfResult.pages.forEach(p => veronicaDocketPhotos.push(p.dataUrl));
-          toast(`Extracted ${pdfResult.pages.length} page(s) from PDF!`, 'success');
+        const pageImages = pdfResult.images || (pdfResult.pages ? pdfResult.pages.map(p => p.dataUrl || p) : []);
+
+        if (pageImages && pageImages.length) {
+          pageImages.forEach(img => {
+            const dataUrl = typeof img === 'string' ? img : (img.dataUrl || img);
+            veronicaDocketPhotos.push(dataUrl);
+          });
+          toast(`Loaded ${pageImages.length} page${pageImages.length > 1 ? 's' : ''} from PDF!`, 'success');
         } else {
-          toast('No renderable pages found in PDF.', 'warning');
+          toast('No pages could be extracted from PDF.', 'warning');
         }
       } catch (err) {
         console.error('PDF parsing error:', err);

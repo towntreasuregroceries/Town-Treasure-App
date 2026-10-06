@@ -637,19 +637,25 @@
       const statusText = document.getElementById('clerkOcrStatusText');
 
       for (const file of files) {
-        const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+        const isPdf = (file.type === 'application/pdf') || (file.name && file.name.toLowerCase().endsWith('.pdf'));
         if (isPdf) {
           if (progressBox) progressBox.style.display = 'block';
-          if (statusText) statusText.textContent = `Rendering PDF pages for ${file.name}...`;
+          if (statusText) statusText.textContent = `Rendering PDF pages for ${file.name || 'document'}...`;
           try {
             const pdfResult = await OCRConsensus.convertPdfToPages(file, msg => {
               if (statusText) statusText.textContent = msg;
             });
-            pdfResult.images.forEach(imgDataUrl => {
-              clerkDocketPhotos.push(imgDataUrl);
-            });
-            attachedPhotoBase64 = clerkDocketPhotos[0] || null;
-            toast(`Imported ${pdfResult.numPages} page(s) from PDF document!`, 'success');
+            const pageImages = pdfResult.images || (pdfResult.pages ? pdfResult.pages.map(p => p.dataUrl || p) : []);
+            if (pageImages && pageImages.length) {
+              pageImages.forEach(img => {
+                const dataUrl = typeof img === 'string' ? img : (img.dataUrl || img);
+                clerkDocketPhotos.push(dataUrl);
+              });
+              attachedPhotoBase64 = clerkDocketPhotos[0] || null;
+              toast(`Loaded ${pageImages.length} page${pageImages.length > 1 ? 's' : ''} from PDF document!`, 'success');
+            } else {
+              toast('No pages could be extracted from PDF.', 'warning');
+            }
           } catch(err) {
             console.error('[Clerk] PDF conversion error:', err);
             toast('Failed to load PDF: ' + err.message, 'error');

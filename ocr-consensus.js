@@ -94,6 +94,7 @@ const OCRConsensus = {
       receiptPhotos: imgList,
       pageCount: pageCount
     };
+    this.lastPdfExtractedText = null;
   },
 
   /** Engine 1: Cloud Vision Multimodal API */
@@ -138,6 +139,12 @@ Return ONLY a JSON object matching this exact structure:
 }`;
 
     const parts = [{ text: systemPrompt }];
+
+    if (this.lastPdfExtractedText) {
+      parts.push({
+        text: `DIGITAL TEXT EMBEDDED IN DOCUMENT:\n${this.lastPdfExtractedText}\n\nCombine this digital text with visual confirmation of the invoice docket pages.`
+      });
+    }
 
     imgList.forEach((dataUrl, idx) => {
       const mime = dataUrl.match(/^data:(image\/[a-zA-Z]+);base64,/)?.[1] || 'image/jpeg';
@@ -327,7 +334,14 @@ Return ONLY a JSON object matching this exact structure:
   initPdfWorker() {
     if (typeof window !== 'undefined' && window.pdfjsLib) {
       if (!window.pdfjsLib.GlobalWorkerOptions.workerSrc) {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        try {
+          // Use inline blob worker wrapper to prevent Cross-Origin Worker SecurityError in mobile/PWA browsers
+          const workerUrl = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+          const blob = new Blob([`importScripts("${workerUrl}");`], { type: 'application/javascript' });
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
+        } catch (e) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
       }
     }
   },
@@ -399,8 +413,17 @@ Return ONLY a JSON object matching this exact structure:
     }
 
     onProgress(`Converted ${numPages} PDF page${numPages > 1 ? 's' : ''} to high-resolution images`);
+
+    const pages = pageImages.map((dataUrl, idx) => ({
+      pageNum: idx + 1,
+      dataUrl: dataUrl
+    }));
+
+    this.lastPdfExtractedText = extractedText.trim() || null;
+
     return {
       images: pageImages,
+      pages: pages,
       numPages: numPages,
       extractedText: extractedText.trim()
     };
