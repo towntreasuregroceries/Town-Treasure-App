@@ -882,3 +882,311 @@ function buildPriceListPreview(pl) {
   return el;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   Town Treasure Groceries — Price List Optical Scanner & Vision Ingestion
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+let priceListScanPhotos = [];
+let lastExtractedPriceListData = null;
+let priceListScanTargetMode = 'new'; // 'new' or 'append'
+
+function openPriceListScannerModal(mode = 'new') {
+  priceListScanTargetMode = mode;
+  lastExtractedPriceListData = null;
+  priceListScanPhotos = [];
+
+  const titleEl = document.getElementById('priceListScannerModalTitle');
+  if (titleEl) {
+    titleEl.textContent = mode === 'new' 
+      ? 'Scan & Create New Price List (Optical Engine)' 
+      : 'Scan & Append to Price List (Optical Engine)';
+  }
+
+  const dropzone = document.getElementById('plScanDropzone');
+  if (dropzone) dropzone.style.display = 'block';
+
+  const previewWrap = document.getElementById('plScanPreviewWrap');
+  if (previewWrap) previewWrap.style.display = 'none';
+
+  const resultsWrap = document.getElementById('plScanResultsWrap');
+  if (resultsWrap) resultsWrap.style.display = 'none';
+
+  const progressWrap = document.getElementById('plScanProgressWrap');
+  if (progressWrap) progressWrap.style.display = 'none';
+
+  const btnApply = document.getElementById('btnApplyScannedPriceList');
+  if (btnApply) btnApply.style.display = 'none';
+
+  renderPriceListPhotosList();
+  openModal('priceListScannerModal');
+}
+
+async function handlePriceListPhoto(inputOrFiles) {
+  let files = [];
+  if (inputOrFiles instanceof HTMLInputElement) {
+    if (!inputOrFiles.files || !inputOrFiles.files.length) return;
+    files = Array.from(inputOrFiles.files);
+    inputOrFiles.value = '';
+  } else if (Array.isArray(inputOrFiles) || inputOrFiles instanceof FileList) {
+    files = Array.from(inputOrFiles);
+  } else if (inputOrFiles instanceof File) {
+    files = [inputOrFiles];
+  } else {
+    return;
+  }
+
+  const progressWrap = document.getElementById('plScanProgressWrap');
+  const progressText = document.getElementById('plScanProgressText');
+
+  for (const file of files) {
+    const isPdf = file.type === 'application/pdf' || (file.name && file.name.toLowerCase().endsWith('.pdf'));
+
+    if (isPdf) {
+      if (progressWrap) {
+        progressWrap.style.display = 'block';
+        if (progressText) progressText.textContent = `Converting PDF pages (${file.name})...`;
+      }
+      try {
+        const pdfResult = await OCRConsensus.convertPdfToPages(file, (status) => {
+          if (progressText) progressText.textContent = status;
+        });
+
+        const pageImages = pdfResult.images || (pdfResult.pages ? pdfResult.pages.map(p => p.dataUrl || p) : []);
+        if (pageImages && pageImages.length) {
+          pageImages.forEach(img => {
+            const dataUrl = typeof img === 'string' ? img : (img.dataUrl || img);
+            priceListScanPhotos.push(dataUrl);
+          });
+          toast(`Loaded ${pageImages.length} page${pageImages.length > 1 ? 's' : ''} from PDF!`, 'success');
+        } else {
+          toast('No pages could be extracted from PDF.', 'warning');
+        }
+      } catch (err) {
+        console.error('PDF parsing error:', err);
+        toast('PDF extraction error: ' + err.message, 'error');
+      } finally {
+        if (progressWrap) progressWrap.style.display = 'none';
+      }
+    } else {
+      // Image file
+      await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const maxDim = 1600;
+            let w = img.width, h = img.height;
+            if (w > maxDim || h > maxDim) {
+              if (w > h) { h = Math.round(h * maxDim / w); w = maxDim; }
+              else { w = Math.round(w * maxDim / h); h = maxDim; }
+            }
+            const canvas = document.createElement('canvas');
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(img, 0, 0, w, h);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+
+            priceListScanPhotos.push(dataUrl);
+            resolve();
+          };
+          img.onerror = resolve;
+          img.src = e.target.result;
+        };
+        reader.onerror = resolve;
+        reader.readAsDataURL(file);
+      });
+    }
+  }
+
+  renderPriceListPhotosList();
+}
+
+function renderPriceListPhotosList() {
+  const dropzone = document.getElementById('plScanDropzone');
+  const previewWrap = document.getElementById('plScanPreviewWrap');
+  const photoGrid = document.getElementById('plScanPhotoGrid');
+
+  if (!priceListScanPhotos.length) {
+    if (dropzone) dropzone.style.display = 'block';
+    if (previewWrap) previewWrap.style.display = 'none';
+    return;
+  }
+
+  if (dropzone) dropzone.style.display = 'none';
+  if (previewWrap) previewWrap.style.display = 'block';
+
+  if (photoGrid) {
+    photoGrid.innerHTML = priceListScanPhotos.map((dataUrl, idx) => `
+      <div style="position:relative; display:inline-block; margin:6px; border:1px solid var(--border); border-radius:8px; overflow:hidden; background:#fff; box-shadow:0 2px 6px rgba(0,0,0,0.08);">
+        <img src="${dataUrl}" style="width:110px; height:130px; object-fit:cover; display:block;" alt="Price List Page ${idx + 1}">
+        <div style="position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,0.65); color:#fff; font-size:0.7rem; font-weight:700; text-align:center; padding:2px 0;">
+          Page ${idx + 1}
+        </div>
+        <button type="button" onclick="removePriceListPhoto(${idx})" title="Remove page" style="position:absolute; top:3px; right:3px; background:var(--danger, #dc2626); color:#fff; border:none; border-radius:50%; width:20px; height:20px; cursor:pointer; display:flex; align-items:center; justify-content:center;">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+    `).join('');
+  }
+
+  const btnRun = document.getElementById('btnRunPriceListOCR');
+  if (btnRun) {
+    btnRun.innerHTML = `
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:middle; margin-right:5px;">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+      </svg>
+      Extract Produce Pricing from ${priceListScanPhotos.length} Page${priceListScanPhotos.length > 1 ? 's' : ''}
+    `;
+  }
+}
+
+function removePriceListPhoto(idx) {
+  priceListScanPhotos.splice(idx, 1);
+  renderPriceListPhotosList();
+}
+
+async function runPriceListOCR() {
+  if (!priceListScanPhotos.length) return toast('Please attach at least one price list photo or PDF page', 'warning');
+
+  const progressWrap = document.getElementById('plScanProgressWrap');
+  const progressText = document.getElementById('plScanProgressText');
+  if (progressWrap) progressWrap.style.display = 'block';
+  if (progressText) progressText.textContent = `Analyzing ${priceListScanPhotos.length} page(s) with Optical Engine...`;
+
+  const btnRun = document.getElementById('btnRunPriceListOCR');
+  if (btnRun) btnRun.disabled = true;
+
+  try {
+    const result = await OCRConsensus.processPriceList(priceListScanPhotos, (status) => {
+      if (progressText) progressText.textContent = status;
+    });
+
+    lastExtractedPriceListData = result;
+    if (progressWrap) progressWrap.style.display = 'none';
+
+    renderScannedPriceListResults(result);
+    const produceCount = (result.items || []).filter(i => !i.isHeader).length;
+    toast(`Successfully extracted ${produceCount} items across ${priceListScanPhotos.length} page(s)!`, 'success');
+  } catch (err) {
+    console.error('Price List Optical Scan failed:', err);
+    if (progressWrap) progressWrap.style.display = 'none';
+    toast('Optical extraction error: ' + err.message, 'error');
+  } finally {
+    if (btnRun) btnRun.disabled = false;
+  }
+}
+
+function renderScannedPriceListResults(result) {
+  const resultsWrap = document.getElementById('plScanResultsWrap');
+  const tbody = document.getElementById('plScanItemsBody');
+  const countEl = document.getElementById('plScanItemsCount');
+  const docTitleEl = document.getElementById('plScanDocTitle');
+  const btnApply = document.getElementById('btnApplyScannedPriceList');
+
+  if (!result || !result.items || !result.items.length) {
+    if (resultsWrap) resultsWrap.style.display = 'none';
+    if (btnApply) btnApply.style.display = 'none';
+    return;
+  }
+
+  const items = result.items;
+  const produceItems = items.filter(i => !i.isHeader);
+
+  if (countEl) {
+    countEl.textContent = `${produceItems.length} produce item${produceItems.length !== 1 ? 's' : ''} extracted`;
+  }
+  if (docTitleEl) {
+    docTitleEl.textContent = result.name || 'Price List';
+  }
+
+  if (tbody) {
+    tbody.innerHTML = items.map(it => {
+      if (it.isHeader) {
+        return `
+          <tr style="background:#e8f5e9; font-weight:700;">
+            <td colspan="4" style="color:#2e7d32; text-transform:uppercase; font-size:0.78rem; padding:6px 10px; letter-spacing:0.5px;">
+              📁 SECTION: ${escapeHtml(it.name)}
+            </td>
+          </tr>
+        `;
+      }
+      return `
+        <tr>
+          <td style="font-weight:600; color:var(--text);">${escapeHtml(it.name)} ${it.notes ? `<small style="color:#6b7280; font-weight:normal;">(${escapeHtml(it.notes)})</small>` : ''}</td>
+          <td style="color:var(--text-2); text-transform:capitalize;">${escapeHtml(it.category || 'vegetables')}</td>
+          <td style="color:var(--text-2);">${escapeHtml(it.unit || 'kgs')}</td>
+          <td style="text-align:right; font-weight:700; color:#15803d;">KES ${(parseFloat(it.price) || 0).toLocaleString()}</td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  if (resultsWrap) resultsWrap.style.display = 'block';
+  if (btnApply) {
+    btnApply.style.display = 'inline-flex';
+    btnApply.textContent = priceListScanTargetMode === 'new' ? 'Create New Price List' : 'Apply to Active Table';
+  }
+}
+
+function applyScannedPriceList() {
+  if (!lastExtractedPriceListData || !lastExtractedPriceListData.items || !lastExtractedPriceListData.items.length) {
+    return toast('No extracted items to apply', 'warning');
+  }
+
+  const items = lastExtractedPriceListData.items;
+
+  if (priceListScanTargetMode === 'new') {
+    const pl = {
+      id: genId(),
+      name: lastExtractedPriceListData.name || ('Price List — ' + new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })),
+      subtitle: lastExtractedPriceListData.subtitle || 'Food Supplies (Veg and Fruits)',
+      status: 'draft',
+      items: items,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    const list = DB.priceLists;
+    list.push(pl);
+    DB.priceLists = list;
+    closeModal('priceListScannerModal');
+    editPriceList(pl.id);
+    toast(`Created new price list with ${items.filter(i => !i.isHeader).length} items from optical scan!`, 'success');
+  } else {
+    const pl = DB.priceLists.find(x => x.id === currentPriceListId);
+    if (!pl) return toast('Current price list not found', 'error');
+
+    const body = document.getElementById('plItemsBody');
+    if (!body) return;
+
+    const existingItems = collectPriceListData();
+    const hasMeaningfulItems = existingItems.some(i => i.name && i.name.trim().length > 0);
+
+    if (!hasMeaningfulItems) {
+      body.innerHTML = '';
+      pl.items = items;
+      renderPriceListItems(pl);
+    } else {
+      items.forEach((item) => {
+        const row = document.createElement('tr');
+        const id = item.id || genId();
+        row.setAttribute('data-item-id', id);
+        if (item.isHeader) {
+          row.setAttribute('data-type', 'header');
+          row.style.background = 'linear-gradient(135deg, #61b146, #4a9e36)';
+          row.style.cursor = 'move';
+          row.innerHTML = buildCategoryHeaderRow({ ...item, id }).replace(/^<tr[^>]*>/, '').replace(/<\/tr>$/, '');
+        } else {
+          row.innerHTML = buildPriceListRow({ ...item, id }, body.rows.length).replace(/^<tr[^>]*>/, '').replace(/<\/tr>$/, '');
+        }
+        body.appendChild(row);
+      });
+      attachPriceListListeners();
+      triggerPriceListAutoSave();
+    }
+    closeModal('priceListScannerModal');
+    toast(`Appended ${items.filter(i => !i.isHeader).length} items from optical scan!`, 'success');
+  }
+}
+
+

@@ -10,3 +10,5 @@ assets/*.crdownload
 assets/*.rar
 assets/PC Equalizer Free*
 .vscode/
+scratch/
+recovered_*.json

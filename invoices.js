@@ -57,7 +57,7 @@ function generateSecureInvoiceNumber(dateStr) {
 }
 
 /* ══ Save Invoice ══ */
-function saveInvoice() {
+function saveInvoice(bypassDuplicateCheck = false) {
   const restId = document.getElementById('invRestaurant').value;
   if (!restId) return toast('Select a restaurant', 'error');
   const items = [];
@@ -77,6 +77,44 @@ function saveInvoice() {
   const rest = DB.restaurants.find(r => r.id === restId);
   const invDateVal = document.getElementById('invDate').value || new Date().toISOString().slice(0,10);
   let invId = document.getElementById('editInvoiceId').value;
+
+  // ══ Town Treasure Smart Audit — Ledger Collision Guard ══
+  if (!invId && !bypassDuplicateCheck && typeof TTGAudit !== 'undefined' && typeof DB !== 'undefined' && Array.isArray(DB.invoices)) {
+    const cand = {
+      restaurant_name: rest ? rest.name : '',
+      invoice_date: invDateVal,
+      total_sell: totalSell,
+      items_json: items
+    };
+
+    let matched = null;
+    let highestScore = 0;
+    for (const ex of DB.invoices) {
+      const s = TTGAudit.calculateHeuristicScore(cand, ex);
+      if (s.score > highestScore) {
+        highestScore = s.score;
+        matched = ex;
+      }
+    }
+
+    if (matched && highestScore >= 0.70) {
+      const mAmt = Number(matched.totalSell || 0).toLocaleString();
+      const mNum = matched.number || 'Invoice';
+      if (typeof customConfirm === 'function') {
+        customConfirm(
+          `Town Treasure Smart Audit detected an existing invoice (#${mNum}) for ${rest ? rest.name : 'this client'} on ${invDateVal} for KES ${mAmt}.\n\nDo you want to proceed and save this as an additional separate delivery?`,
+          'Town Treasure Smart Audit: Duplicate Warning',
+          'Save as Separate Delivery',
+          false,
+          function() {
+            saveInvoice(true);
+          }
+        );
+        return;
+      }
+    }
+  }
+
   let invNumber, createdAt = new Date().toISOString();
   if (invId) {
     const existing = DB.invoices.find(i => i.id === invId);

@@ -276,15 +276,98 @@ async function openClerkReviewModal(id) {
   // Button visibility based on status
   const approveBtn = document.getElementById('btnCrmApprove');
   const rejectBtn = document.getElementById('btnCrmReject');
+  const suppWrap = document.getElementById('crmSupplementaryConfirmWrap');
+  const chkConfirm = document.getElementById('crmConfirmSupplementaryCheckbox');
+  const banner = document.getElementById('crmIntegrityAlertBanner');
+
+  if (suppWrap) suppWrap.style.display = 'none';
+  if (chkConfirm) chkConfirm.checked = false;
+
   if (item.status === 'pending') {
-    approveBtn.style.display = 'inline-flex';
-    rejectBtn.style.display = 'inline-flex';
+    if (approveBtn) {
+      approveBtn.style.display = 'inline-flex';
+      approveBtn.disabled = false;
+      approveBtn.title = '';
+    }
+    if (rejectBtn) rejectBtn.style.display = 'inline-flex';
   } else {
-    approveBtn.style.display = 'none';
-    rejectBtn.style.display = 'none';
+    if (approveBtn) approveBtn.style.display = 'none';
+    if (rejectBtn) rejectBtn.style.display = 'none';
+  }
+
+  // ══ Town Treasure Ledger Integrity Guard Check ══
+  if (banner && typeof TTGAudit !== 'undefined' && typeof DB !== 'undefined' && Array.isArray(DB.invoices)) {
+    banner.style.display = 'none';
+    banner.innerHTML = '';
+
+    TTGAudit.auditSubmission(item, DB.invoices).then(audit => {
+      if (!audit) return;
+      if (audit.isDuplicate || audit.determination === 'EXACT_DUPLICATE') {
+        const matched = audit.matchedRecord || {};
+        const matchedNum = matched.number || 'Existing Invoice';
+        const matchedAmt = (matched.totalSell || matched.total_sell || 0).toLocaleString();
+        const matchedDate = matched.date || matched.invoice_date || '';
+
+        banner.style.display = 'block';
+        banner.innerHTML = `
+          <div style="background:#fff7ed; border:1px solid #fdba74; border-left:5px solid #ea580c; border-radius:8px; padding:12px 18px; box-shadow:0 2px 6px rgba(234,88,12,0.1);">
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
+              <div style="display:flex; align-items:flex-start; gap:10px;">
+                <div style="color:#ea580c; flex-shrink:0; margin-top:2px;">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                </div>
+                <div>
+                  <div style="font-weight:700; color:#9a3412; font-size:0.95rem;">Town Treasure Ledger Integrity Alert: Duplicate Order Risk</div>
+                  <div style="font-size:0.85rem; color:#7c2d12; margin-top:3px; line-height:1.4;">${escapeHtml(audit.explanation)}</div>
+                  <div style="font-size:0.8rem; color:#9a3412; margin-top:6px; font-weight:600;">
+                    Matched Vault Invoice: <span style="background:#fed7aa; padding:2px 6px; border-radius:4px;">${escapeHtml(matchedNum)}</span> &bull; Date: ${escapeHtml(matchedDate)} &bull; Amount: KES ${matchedAmt}
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex; gap:8px;">
+                ${matched.id ? `
+                  <button type="button" class="btn btn-sm btn-secondary" onclick="viewInvoice('${matched.id}')" style="font-size:0.78rem; padding:4px 10px; font-weight:600;">
+                    Inspect Invoice ${matchedNum}
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        `;
+
+        if (item.status === 'pending') {
+          if (suppWrap) suppWrap.style.display = 'block';
+          if (approveBtn) {
+            approveBtn.disabled = true;
+            approveBtn.title = 'Please check the confirmation box if this is an intentional 2nd dispatch';
+          }
+        }
+      } else {
+        banner.style.display = 'block';
+        banner.innerHTML = `
+          <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-left:5px solid #16a34a; border-radius:8px; padding:10px 16px; display:flex; align-items:center; gap:8px;">
+            <div style="color:#16a34a;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </div>
+            <div style="font-size:0.84rem; color:#14532d; font-weight:600;">
+              Town Treasure Smart Audit: No duplicate entries found in your ledger for this client and date window.
+            </div>
+          </div>
+        `;
+      }
+    }).catch(err => {
+      console.warn('[Smart Audit] Review audit note:', err);
+    });
   }
 
   openModal('clerkReviewModal');
+}
+
+function handleCrmSupplementaryToggle(chk) {
+  const approveBtn = document.getElementById('btnCrmApprove');
+  if (approveBtn) {
+    approveBtn.disabled = !chk.checked;
+  }
 }
 
 /** Add a line item row to the review modal */

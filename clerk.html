@@ -16,6 +16,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
   <script src="staging.js?v=1.2.6"></script>
+  <script src="duplicate-detector.js?v=1.0.0"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
   <script src="ocr-consensus.js?v=1.2.6" defer></script>
@@ -248,7 +249,7 @@
             </div>
             <div class="form-group">
               <label><strong>Restaurant / Client</strong></label>
-              <select id="clerkRestaurantSelect" class="form-control" onchange="handleRestaurantSelect(this)">
+              <select id="clerkRestaurantSelect" class="form-control" onchange="handleRestaurantSelect(this); triggerClerkLiveDuplicateCheck();">
                 <option value="">Select restaurant client…</option>
                 <option value="The Golden Crest Hotel">The Golden Crest Hotel</option>
                 <option value="Sankara Suites">Sankara Suites</option>
@@ -268,11 +269,27 @@
                 <option value="Boma Nairobi">Boma Nairobi</option>
                 <option value="__other__">+ Other / Enter Custom Name</option>
               </select>
-              <input type="text" id="clerkRestaurantCustom" class="form-control" placeholder="Type restaurant name..." style="display:none; margin-top:8px;">
+              <input type="text" id="clerkRestaurantCustom" class="form-control" placeholder="Type restaurant name..." style="display:none; margin-top:8px;" oninput="triggerClerkLiveDuplicateCheck()">
             </div>
             <div class="form-group">
               <label><strong>Delivery / Docket Date</strong></label>
-              <input type="date" id="clerkDocketDate" class="form-control" required>
+              <input type="date" id="clerkDocketDate" class="form-control" required onchange="triggerClerkLiveDuplicateCheck()">
+            </div>
+          </div>
+
+          <!-- Town Treasure Smart Audit Live Alert Banner -->
+          <div id="clerkDuplicateWarningBanner" style="display:none; background:#fffbeb; border:1px solid #f59e0b; border-left:4px solid #d97706; border-radius:8px; padding:12px 16px; margin:14px 0 6px; box-shadow:0 2px 6px rgba(217,119,6,0.1);">
+            <div style="display:flex; align-items:flex-start; gap:10px;">
+              <div style="color:#d97706; flex-shrink:0; margin-top:2px;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              </div>
+              <div style="flex:1;">
+                <div style="font-weight:700; color:#92400e; font-size:0.92rem;" id="clerkDupBannerTitle">Town Treasure Smart Audit Alert</div>
+                <div style="font-size:0.83rem; color:#78350f; margin-top:2px; line-height:1.4;" id="clerkDupBannerText"></div>
+              </div>
+              <button type="button" onclick="document.getElementById('clerkDuplicateWarningBanner').style.display='none'" style="background:none; border:none; color:#b45309; cursor:pointer; padding:2px;">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
             </div>
           </div>
 
@@ -661,6 +678,7 @@
       document.getElementById('clerkSubtotalText').textContent = 'KES ' + subtotal.toLocaleString('en-KE', { minimumFractionDigits: 2 });
       document.getElementById('clerkOpsText').textContent = 'KES ' + (del + other).toLocaleString('en-KE', { minimumFractionDigits: 2 });
       document.getElementById('clerkGrandTotalText').textContent = 'KES ' + grand.toLocaleString('en-KE', { minimumFractionDigits: 2 });
+      if (typeof triggerClerkLiveDuplicateCheck === 'function') triggerClerkLiveDuplicateCheck();
     }
 
     async function handlePhotoFiles(fileList) {
@@ -902,8 +920,11 @@
       }
     }
 
+    let pendingClerkDuplicateDocket = null;
+    let pendingClerkDuplicateAudit = null;
+
     /** Submit the docket into the staging vault */
-    async function submitClerkDocket() {
+    async function submitClerkDocket(bypassDuplicateCheck = false) {
       const clerkName = document.getElementById('clerkName').value.trim();
       if (!clerkName) {
         toast('Please enter your name', 'error');
@@ -986,6 +1007,26 @@
           target_user_name: targetName
         };
 
+        // ══ Town Treasure Smart Audit — Duplicate Mitigation Gate ══
+        if (typeof TTGAudit !== 'undefined' && !bypassDuplicateCheck && !isResubmit) {
+          btn.textContent = 'Verifying with Smart Audit...';
+          try {
+            const existingPool = await StagingDB.getAllSubmissions(false);
+            const auditResult = await TTGAudit.auditSubmission(docketData, existingPool, {
+              excludeId: activeEditingDocketId || undefined
+            });
+
+            if (auditResult && (auditResult.isDuplicate || auditResult.recommendedAction === 'BLOCK_SUBMISSION')) {
+              btn.disabled = false;
+              btn.textContent = 'Submit Docket for Veronica\'s Approval';
+              showClerkDuplicateModal(docketData, auditResult);
+              return;
+            }
+          } catch (auditErr) {
+            console.warn('[Smart Audit] Audit note:', auditErr);
+          }
+        }
+
         const savedRecord = await StagingDB.submitDocket(docketData);
 
         activeEditingDocketId = null;
@@ -1016,6 +1057,119 @@
         btn.disabled = false;
         btn.textContent = 'Submit Docket for Veronica\'s Approval';
       }
+    }
+
+    function showClerkDuplicateModal(docketData, auditResult) {
+      pendingClerkDuplicateDocket = docketData;
+      pendingClerkDuplicateAudit = auditResult;
+
+      const modal = document.getElementById('clerkDuplicateModal');
+      if (!modal) return;
+
+      document.getElementById('clerkDupModalExplanation').textContent = auditResult.explanation || 'Town Treasure Smart Audit matched this delivery with an existing docket.';
+      document.getElementById('clerkDupModalClient').textContent = docketData.restaurant_name;
+      document.getElementById('clerkDupModalDate').textContent = docketData.invoice_date;
+      document.getElementById('clerkDupModalTotal').textContent = 'KES ' + Number(docketData.total_sell || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 });
+
+      const matched = auditResult.matchedRecord || {};
+      const submitterName = matched.clerk_name || 'Clerk';
+      const recordNum = matched.number || matched.generated_invoice_number || (matched.id ? matched.id.slice(0, 10) : 'Docket');
+      document.getElementById('clerkDupModalSubmitter').textContent = `${submitterName} (${recordNum})`;
+
+      const matchDiv = document.getElementById('clerkDupModalItemMatch');
+      if (matchDiv) {
+        const matchingCount = auditResult.heuristicScore?.itemCmp?.matchingCount || 0;
+        const totalItems = (docketData.items_json || []).length;
+        matchDiv.textContent = matchingCount > 0
+          ? `${matchingCount} of ${totalItems} produce items match previous entry.`
+          : 'Produce delivery details match previous record.';
+      }
+
+      modal.style.display = 'flex';
+    }
+
+    function closeClerkDuplicateModal() {
+      const modal = document.getElementById('clerkDuplicateModal');
+      if (modal) modal.style.display = 'none';
+      pendingClerkDuplicateDocket = null;
+      pendingClerkDuplicateAudit = null;
+    }
+
+    function discardClerkDuplicate() {
+      closeClerkDuplicateModal();
+      toast('Duplicate docket discarded. Form reset.', 'info');
+      clearClerkForm();
+    }
+
+    function proceedAsSupplementaryClerkDocket() {
+      if (!pendingClerkDuplicateDocket) return;
+      closeClerkDuplicateModal();
+
+      const notesInput = document.getElementById('clerkNotes');
+      const tag = '[Supplementary Dispatch #2]';
+      if (notesInput && !notesInput.value.includes(tag)) {
+        notesInput.value = (tag + ' ' + notesInput.value).trim();
+      }
+
+      toast('Submitting verified supplementary delivery...', 'info');
+      submitClerkDocket(true); // Bypass check
+    }
+
+    function clearClerkForm() {
+      removeAttachedPhoto();
+      document.getElementById('clerkNotes').value = '';
+      document.getElementById('clerkDeliveryCost').value = '';
+      document.getElementById('clerkOtherCost').value = '';
+      document.getElementById('clerkLineItemsBody').innerHTML = '';
+      addClerkLineItem('', 1, 'kgs', 0);
+      calcClerkTotals();
+      const banner = document.getElementById('clerkDuplicateWarningBanner');
+      if (banner) banner.style.display = 'none';
+      const btnDl = document.getElementById('btnClerkDownloadCsv');
+      if (btnDl) btnDl.style.display = 'none';
+    }
+
+    let clerkLiveAuditTimer = null;
+    function triggerClerkLiveDuplicateCheck() {
+      clearTimeout(clerkLiveAuditTimer);
+      clerkLiveAuditTimer = setTimeout(async () => {
+        if (typeof TTGAudit === 'undefined' || typeof StagingDB === 'undefined') return;
+        const selRest = document.getElementById('clerkRestaurantSelect')?.value;
+        const customRest = document.getElementById('clerkRestaurantCustom')?.value;
+        const restName = selRest === '__other__' ? customRest : selRest;
+        const invDate = document.getElementById('clerkDocketDate')?.value;
+        if (!restName || !invDate) return;
+
+        const items = [];
+        document.querySelectorAll('#clerkLineItemsBody tr').forEach(row => {
+          const desc = row.querySelector('.item-desc')?.value.trim();
+          const qty = parseFloat(row.querySelector('.item-qty')?.value) || 0;
+          const unit = row.querySelector('.item-unit')?.value || 'kgs';
+          const price = parseFloat(row.querySelector('.item-price')?.value) || 0;
+          if (desc) items.push({ desc, qty, unit, price, sellPrice: price, total: qty * price });
+        });
+
+        const total = items.reduce((s, i) => s + i.total, 0);
+        const cand = {
+          restaurant_name: restName,
+          invoice_date: invDate,
+          items_json: items,
+          total_sell: total
+        };
+
+        const pool = StagingDB.getLocalQueue();
+        const audit = await TTGAudit.auditSubmission(cand, pool, { useDeepAudit: false });
+        const banner = document.getElementById('clerkDuplicateWarningBanner');
+        const bannerText = document.getElementById('clerkDupBannerText');
+        if (!banner || !bannerText) return;
+
+        if (audit.isDuplicate) {
+          bannerText.textContent = audit.explanation || `A docket for ${restName} on ${invDate} was already submitted.`;
+          banner.style.display = 'block';
+        } else {
+          banner.style.display = 'none';
+        }
+      }, 500);
     }
 
     function showClerkSuccessAlert(record, reviewUrl, targetName) {
@@ -1316,5 +1470,57 @@
       setTimeout(() => el.remove(), 4000);
     }
   </script>
+
+  <!-- ══ Town Treasure Smart Audit — Duplicate Modal ══ -->
+  <div id="clerkDuplicateModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:99999; align-items:center; justify-content:center; padding:16px;">
+    <div style="background:#fff; border-radius:12px; max-width:540px; width:100%; box-shadow:0 12px 36px rgba(0,0,0,0.25); overflow:hidden; border-top:5px solid #d97706;">
+      <div style="padding:18px 24px; border-bottom:1px solid #f3f4f6; display:flex; align-items:center; justify-content:space-between;">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <div style="width:36px; height:36px; border-radius:50%; background:#fef3c7; color:#d97706; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </div>
+          <div>
+            <h3 style="margin:0; font-size:1.05rem; font-weight:700; color:#111827;">Town Treasure Smart Audit</h3>
+            <span style="font-size:0.75rem; color:#b45309; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">Duplicate Delivery Alert</span>
+          </div>
+        </div>
+        <button type="button" onclick="closeClerkDuplicateModal()" style="background:none; border:none; color:#9ca3af; font-size:24px; cursor:pointer; line-height:1;">&times;</button>
+      </div>
+
+      <div style="padding:20px 24px;">
+        <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 16px; margin-bottom:16px;">
+          <div style="font-size:0.88rem; color:#92400e; font-weight:600; line-height:1.4;" id="clerkDupModalExplanation">
+            Town Treasure Smart Audit matched this delivery with an existing docket in the system.
+          </div>
+        </div>
+
+        <div style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:14px; margin-bottom:16px;">
+          <div style="font-size:0.75rem; text-transform:uppercase; font-weight:700; color:#6b7280; margin-bottom:8px;">Matching Order Reference</div>
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:0.83rem;">
+            <div><span style="color:#6b7280;">Client:</span> <strong id="clerkDupModalClient">—</strong></div>
+            <div><span style="color:#6b7280;">Date:</span> <strong id="clerkDupModalDate">—</strong></div>
+            <div><span style="color:#6b7280;">Total:</span> <strong id="clerkDupModalTotal">—</strong></div>
+            <div><span style="color:#6b7280;">Recorded By:</span> <strong id="clerkDupModalSubmitter">—</strong></div>
+          </div>
+          <div id="clerkDupModalItemMatch" style="margin-top:10px; padding-top:8px; border-top:1px dashed #d1d5db; font-size:0.8rem; color:#374151;"></div>
+        </div>
+
+        <p style="font-size:0.83rem; color:#4b5563; margin:0 0 16px; line-height:1.4;">
+          If this physical docket was already entered, please discard it to prevent double-billing Veronica's ledger. If this is a genuine <strong>second delivery (e.g. afternoon top-up)</strong>, you can flag it as an intentional supplementary dispatch.
+        </p>
+
+        <div style="display:flex; flex-direction:column; gap:8px;">
+          <button type="button" class="btn btn-primary" onclick="discardClerkDuplicate()" style="background:#15803d; border-color:#15803d; justify-content:center; padding:11px 16px; font-weight:700;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            Discard This Duplicate (Recommended)
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="proceedAsSupplementaryClerkDocket()" style="justify-content:center; padding:11px 16px; font-weight:600; color:#b45309; border-color:#f59e0b; background:#fffbeb;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
+            This is an Intentional 2nd Dispatch (Supplementary Order)
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

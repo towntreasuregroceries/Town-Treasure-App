@@ -1041,14 +1041,23 @@
 
         <!-- ════════ PRICE LISTS ════════ -->
         <div class="page" id="page-pricelists">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">
-            <p style="color:var(--text-2);font-size:.9rem">Create and manage price lists to share with restaurants</p>
-            <button class="btn btn-primary" onclick="createNewPriceList()">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-              New Price List
-            </button>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px;">
+            <p style="color:var(--text-2);font-size:.9rem;margin:0;">Create and manage price lists to share with restaurants</p>
+            <div style="display:flex;gap:10px;align-items:center;">
+              <button type="button" class="btn btn-secondary" onclick="openPriceListScannerModal('new')" style="display:inline-flex;align-items:center;gap:6px;font-weight:600;">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                  <circle cx="12" cy="13" r="4"></circle>
+                </svg>
+                Scan Price List (Camera/PDF)
+              </button>
+              <button class="btn btn-primary" onclick="createNewPriceList()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+                New Price List
+              </button>
+            </div>
           </div>
           <div class="card">
             <div class="card-body">
@@ -1128,6 +1137,13 @@
                     <line x1="12" y1="3" x2="12" y2="15" />
                   </svg>
                   Smart Import from Invoices
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="openPriceListScannerModal('append')" style="display:inline-flex;align-items:center;gap:6px;font-weight:600;">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                    <circle cx="12" cy="13" r="4"></circle>
+                  </svg>
+                  Scan & Append (Camera/PDF)
                 </button>
               </div>
             </div>
@@ -1764,6 +1780,9 @@
       </div>
 
       <div class="modal-body" style="flex:1; overflow-y:auto; padding:20px 24px;">
+        <!-- Town Treasure Ledger Integrity Alert Banner -->
+        <div id="crmIntegrityAlertBanner" style="display:none; margin-bottom:18px;"></div>
+
         <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap:24px;">
           
           <!-- Left Column: Receipt Photo -->
@@ -1881,7 +1900,13 @@
             Delete Docket
           </button>
         </div>
-        <div style="display:flex; gap:10px;">
+        <div style="display:flex; gap:10px; align-items:center;">
+          <div id="crmSupplementaryConfirmWrap" style="display:none;">
+            <label style="display:inline-flex; align-items:center; gap:6px; font-size:0.83rem; color:#92400e; font-weight:600; cursor:pointer; background:#fffbeb; padding:6px 12px; border:1px solid #fde68a; border-radius:6px; margin:0;">
+              <input type="checkbox" id="crmConfirmSupplementaryCheckbox" onchange="handleCrmSupplementaryToggle(this)">
+              <span>Confirm 2nd Dispatch</span>
+            </label>
+          </div>
           <button type="button" class="btn btn-danger" id="btnCrmReject" onclick="executeClerkRejection()" style="font-weight:600; display:inline-flex; align-items:center; gap:6px;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <circle cx="12" cy="12" r="10"></circle>
@@ -2053,6 +2078,145 @@
     </div>
   </div>
 
+  <!-- ════════ PRICE LIST OPTICAL SCANNER MODAL ════════ -->
+  <div class="modal-overlay" id="priceListScannerModal">
+    <div class="modal" style="max-width:860px; max-height:92vh; display:flex; flex-direction:column;">
+      <div class="modal-header" style="background:#fff; border-bottom:1px solid var(--border); padding:16px 24px; display:flex; justify-content:space-between; align-items:center;">
+        <h2 style="margin:0; font-size:1.2rem; display:flex; align-items:center; gap:8px;">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+            <circle cx="12" cy="13" r="4"></circle>
+          </svg>
+          <span id="priceListScannerModalTitle">Scan Produce Price List (Optical Engine)</span>
+        </h2>
+        <button onclick="closeModal('priceListScannerModal')" class="btn-icon" title="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding:20px; overflow-y:auto; flex:1;">
+        <!-- Hidden File Inputs for Camera, Gallery, and PDF -->
+        <input type="file" id="plCameraInput" accept="image/*" capture="environment" style="display:none;" onchange="handlePriceListPhoto(this)">
+        <input type="file" id="plGalleryInput" accept="image/*" multiple style="display:none;" onchange="handlePriceListPhoto(this)">
+        <input type="file" id="plPdfInput" accept="application/pdf,.pdf,image/*" multiple style="display:none;" onchange="handlePriceListPhoto(this)">
+
+        <!-- Dropzone with Multi-Source Selection -->
+        <div id="plScanDropzone" style="border:2px dashed var(--green-300); background:var(--green-50); border-radius:var(--radius); padding:26px 18px; text-align:center;">
+          <div style="color:var(--primary); margin-bottom:8px;">
+            <svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+            </svg>
+          </div>
+          <div style="font-weight:700; color:var(--green-900); font-size:1.05rem;">Scan or Ingest Produce Price List</div>
+          <p style="font-size:0.82rem; color:var(--text-2); margin:4px auto 16px; max-width:480px;">
+            Snap a printed price sheet, choose photos from your phone, or upload a digital supplier PDF. Town Treasure's Optical Engine automatically extracts sections (Vegetables, Fruits, Cereals, Spices), produce items, units, and rates.
+          </p>
+
+          <div style="display:flex; flex-wrap:wrap; gap:10px; justify-content:center; max-width:540px; margin:0 auto;">
+            <button type="button" class="btn btn-primary" onclick="document.getElementById('plCameraInput').click()" style="background:#16a34a; border-color:#16a34a; font-weight:600; padding:10px 16px; display:inline-flex; align-items:center; gap:6px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+                <circle cx="12" cy="13" r="4"></circle>
+              </svg>
+              <span>Take Photo (Camera)</span>
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('plGalleryInput').click()" style="font-weight:600; padding:10px 16px; display:inline-flex; align-items:center; gap:6px; background:#fff;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                <polyline points="21 15 16 10 5 21"></polyline>
+              </svg>
+              <span>Choose from Gallery</span>
+            </button>
+            <button type="button" class="btn" onclick="document.getElementById('plPdfInput').click()" style="background:#eff6ff; color:#1d4ed8; border:1px solid #93c5fd; font-weight:600; padding:10px 16px; display:inline-flex; align-items:center; gap:6px;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="16" y1="13" x2="8" y2="13"></line>
+                <line x1="16" y1="17" x2="8" y2="17"></line>
+              </svg>
+              <span>Upload PDF / Document</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Progress Spinner -->
+        <div id="plScanProgressWrap" style="display:none; text-align:center; padding:30px 10px;">
+          <div class="auth-spinner" style="width:36px; height:36px; margin:0 auto 14px; border-width:3px;"></div>
+          <div id="plScanProgressText" style="font-size:0.92rem; font-weight:600; color:var(--text);">Analyzing price list with Optical Engine...</div>
+        </div>
+
+        <!-- Split Screen: Preview & Extracted Items -->
+        <div style="display:grid; grid-template-columns:1fr 1.3fr; gap:18px; margin-top:14px;">
+          <div id="plScanPreviewWrap" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span style="font-size:0.75rem; text-transform:uppercase; color:var(--text-3); font-weight:700;">Price List Pages</span>
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('plCameraInput').click()" title="Add another photo" style="font-size:0.72rem; padding:3px 7px; display:inline-flex; align-items:center; gap:4px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>
+                  + Camera
+                </button>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('plGalleryInput').click()" title="Add photo from gallery" style="font-size:0.72rem; padding:3px 7px; display:inline-flex; align-items:center; gap:4px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>
+                  + Gallery
+                </button>
+                <button type="button" class="btn btn-sm" onclick="document.getElementById('plPdfInput').click()" title="Add pages from PDF" style="font-size:0.72rem; padding:3px 7px; background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; display:inline-flex; align-items:center; gap:4px;">
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+                  + PDF
+                </button>
+              </div>
+            </div>
+            <div id="plScanPhotoGrid" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; justify-content:flex-start;"></div>
+            <div style="text-align:center; margin-top:8px;">
+              <button type="button" id="btnRunPriceListOCR" class="btn btn-primary" onclick="runPriceListOCR()" style="width:100%; font-weight:700; background:#16a34a; border-color:#16a34a; padding:10px 14px; display:flex; align-items:center; justify-content:center; gap:6px;">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon>
+                </svg>
+                <span>Extract Produce Pricing</span>
+              </button>
+            </div>
+          </div>
+
+          <div id="plScanResultsWrap" style="display:none;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+              <span id="plScanItemsCount" style="font-size:0.85rem; font-weight:700; color:var(--text);">0 produce items extracted</span>
+              <span id="plScanDocTitle" style="font-size:0.78rem; background:#ecfdf5; color:#065f46; border:1px solid #a7f3d0; padding:2px 8px; border-radius:12px; font-weight:600;">Price List</span>
+            </div>
+
+            <div class="table-wrap" style="max-height:260px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius);">
+              <table style="width:100%; font-size:0.82rem;">
+                <thead>
+                  <tr>
+                    <th>Item Description</th>
+                    <th>Category</th>
+                    <th>Unit</th>
+                    <th style="text-align:right;">Price (KES)</th>
+                  </tr>
+                </thead>
+                <tbody id="plScanItemsBody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modal-footer" style="background:#fff; border-top:1px solid var(--border); padding:14px 24px; display:flex; justify-content:space-between; align-items:center;">
+        <button type="button" class="btn btn-secondary" onclick="closeModal('priceListScannerModal')">
+          Cancel
+        </button>
+        <button type="button" class="btn btn-primary" id="btnApplyScannedPriceList" onclick="applyScannedPriceList()" style="display:none; font-weight:700; background:#16a34a; border-color:#16a34a;">
+          Apply to Price List
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- CSV Import Modal -->
   <div class="modal-overlay" id="csvImportModal">
     <div class="modal" style="max-width:560px;">
@@ -2128,6 +2292,7 @@
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="ocr-consensus.js?v=1.2.6"></script>
   <script src="staging.js?v=1.2.6"></script>
+  <script src="duplicate-detector.js?v=1.0.0"></script>
   <script src="clerk-approval.js?v=1.2.6"></script>
   <script src="invoice-scanner.js?v=1.2.6"></script>
   <script>

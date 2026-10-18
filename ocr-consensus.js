@@ -78,6 +78,7 @@ const OCRConsensus = {
     // 4. Generate Tabular CSV representation
     const csvData = this.itemsToCSV(consensus.items);
 
+    this.lastPdfExtractedText = null;
     return {
       restaurantName: consensus.restaurantName || '',
       invoiceNumber: consensus.invoiceNumber || '',
@@ -94,7 +95,193 @@ const OCRConsensus = {
       receiptPhotos: imgList,
       pageCount: pageCount
     };
-    this.lastPdfExtractedText = null;
+  },
+
+  /**
+   * Run Town Treasure Optical Engine on produce price list photos or PDF pages.
+   * Extracts category headers, produce items, units, selling prices, and notes.
+   * @param {string|string[]} images - Data URL or array of Data URLs
+   * @param {function} onProgress - Progress callback
+   */
+  async processPriceList(images, onProgress = () => {}) {
+    const imgList = Array.isArray(images) ? images : [images];
+    const pageCount = imgList.length;
+
+    onProgress(`Analyzing ${pageCount} price list page${pageCount > 1 ? 's' : ''} with Optical Engine...`);
+
+    let extractionResult = null;
+    let lastError = null;
+
+    for (const model of this.MODELS) {
+      try {
+        onProgress(`Reading produce pricing & categories (${model})...`);
+        extractionResult = await this._runPriceListVision(imgList, model);
+        if (extractionResult && extractionResult.items && extractionResult.items.length) {
+          break;
+        }
+      } catch (err) {
+        console.warn(`[Price List Optical Engine] Model ${model} retry:`, err.message);
+        lastError = err;
+        await new Promise(r => setTimeout(r, 400));
+      }
+    }
+
+    if (!extractionResult || !extractionResult.items || !extractionResult.items.length) {
+      throw new Error(`Price list optical scan failed: ${lastError ? lastError.message : 'No items could be extracted.'}`);
+    }
+
+    // Clean, normalize and map produce categories & units
+    const validCategories = ['vegetables', 'fruits', 'cereals', 'dairy', 'meat', 'fish', 'legumes', 'spices', 'packaged', 'other'];
+    const validUnits = ['kgs', 'litres', 'pieces', 'crates', 'bags', 'trays', 'bundles', 'dozen', 'packets', 'bunch', 'pnts', 'heads'];
+
+    let currentCategory = 'vegetables';
+    const processedItems = [];
+
+    (extractionResult.items || []).forEach(it => {
+      if (it.isHeader) {
+        const headerName = (it.name || '').trim().toUpperCase();
+        if (headerName) {
+          processedItems.push({
+            id: typeof genId === 'function' ? genId() : 'h_' + Date.now() + Math.random().toString(36).slice(2, 6),
+            isHeader: true,
+            name: headerName
+          });
+          // Update active category inferred from header
+          const lowerH = headerName.toLowerCase();
+          if (lowerH.includes('fruit')) currentCategory = 'fruits';
+          else if (lowerH.includes('veg')) currentCategory = 'vegetables';
+          else if (lowerH.includes('herb') || lowerH.includes('spice') || lowerH.includes('culinary')) currentCategory = 'spices';
+          else if (lowerH.includes('dairy') || lowerH.includes('milk') || lowerH.includes('egg')) currentCategory = 'dairy';
+          else if (lowerH.includes('meat') || lowerH.includes('beef') || lowerH.includes('chicken') || lowerH.includes('pork')) currentCategory = 'meat';
+          else if (lowerH.includes('fish') || lowerH.includes('seafood')) currentCategory = 'fish';
+          else if (lowerH.includes('cereal') || lowerH.includes('grain') || lowerH.includes('rice') || lowerH.includes('flour')) currentCategory = 'cereals';
+          else if (lowerH.includes('legume') || lowerH.includes('bean') || lowerH.includes('pea')) currentCategory = 'legumes';
+        }
+      } else {
+        const name = (it.name || it.desc || '').trim();
+        if (name) {
+          let cat = (it.category || '').toLowerCase().trim();
+          if (!validCategories.includes(cat)) cat = currentCategory;
+
+          let unit = (it.unit || 'kgs').toLowerCase().trim();
+          if (unit.startsWith('kg')) unit = 'kgs';
+          else if (unit.startsWith('bunch') || unit === 'bchs') unit = 'bundles';
+          else if (unit === 'pcs' || unit === 'piece') unit = 'pieces';
+          else if (unit === 'crate') unit = 'crates';
+          else if (unit === 'bag') unit = 'bags';
+          else if (unit === 'punnet' || unit === 'punnets') unit = 'pnts';
+          else if (unit === 'head') unit = 'heads';
+          else if (unit === 'tray') unit = 'trays';
+          else if (!validUnits.includes(unit)) unit = 'kgs';
+
+          const price = parseFloat(it.price || it.sellPrice || it.rate) || 0;
+          const notes = (it.notes || it.grade || it.variety || '').trim();
+
+          processedItems.push({
+            id: typeof genId === 'function' ? genId() : 'it_' + Date.now() + Math.random().toString(36).slice(2, 6),
+            isHeader: false,
+            name,
+            category: cat,
+            unit,
+            price,
+            notes
+          });
+        }
+      }
+    });
+
+    return {
+      name: extractionResult.name || ('Price List — ' + new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })),
+      subtitle: extractionResult.subtitle || 'Food Supplies (Veg and Fruits)',
+      effectiveDate: extractionResult.effectiveDate || new Date().toISOString().slice(0, 10),
+      items: processedItems,
+      pageCount: pageCount,
+      sourcePhotos: imgList
+    };
+  },
+
+  /** Incognito optical vision parser for price lists */
+  async _runPriceListVision(imgList, modelName) {
+    const isMultiPage = imgList.length > 1;
+
+    const systemPrompt = `You are a precision wholesale produce catalog specialist for Town Treasure Groceries in Kenya.
+Analyze this produce price list or price sheet (single or multi-page) and extract all category headers and produce items into structured JSON.
+${isMultiPage ? 'IMPORTANT: This document has ' + imgList.length + ' pages. Extract items from ALL pages into a continuous structured sequence.' : ''}
+
+CRITICAL RULES:
+1. Detect section/category headers (e.g. "VEGETABLES", "FRUITS", "HERBS & SPICES", "DAIRY & EGGS", "CEREALS", "ROOT CROPS").
+   Represent each section header as an object with "isHeader": true and "name": "SECTION TITLE".
+2. Under each section, extract individual produce items:
+   - "name": Produce item name (e.g. "Roma Tomatoes", "Red Onions", "Baby Spinach")
+   - "category": One of "vegetables", "fruits", "spices", "cereals", "dairy", "meat", "fish", "legumes", "packaged", "other"
+   - "unit": Kenyan produce unit ("kgs", "crates", "bags", "pieces", "bunches", "heads", "pnts", "litres", "trays", "dozen", "bundles")
+   - "price": Selling price in KES as a number (e.g. 155.0, 3200.0)
+   - "notes": Grade, variety, or packaging specification if mentioned (e.g. "Grade A", "Medium", "Imported")
+3. Extract Document Title / Header ("name"), Subtitle ("subtitle"), and Effective Date ("effectiveDate" as YYYY-MM-DD if visible).
+
+Return ONLY JSON matching:
+{
+  "name": "Produce Price List",
+  "subtitle": "Fresh Vegetables & Fruits",
+  "effectiveDate": "YYYY-MM-DD",
+  "items": [
+    {
+      "isHeader": true,
+      "name": "VEGETABLES"
+    },
+    {
+      "isHeader": false,
+      "name": "Roma Tomatoes",
+      "category": "vegetables",
+      "unit": "crates",
+      "price": 3200.0,
+      "notes": "Grade A"
+    }
+  ]
+}`;
+
+    const parts = [{ text: systemPrompt }];
+
+    imgList.forEach((dataUrl, idx) => {
+      const mime = dataUrl.match(/^data:(image\/[a-zA-Z]+);base64,/)?.[1] || 'image/jpeg';
+      const cleanB64 = dataUrl.replace(/^data:image\/[a-zA-Z]+;base64,/, '');
+      if (isMultiPage) {
+        parts.push({ text: `Page ${idx + 1} of price list:` });
+      }
+      parts.push({
+        inlineData: {
+          mimeType: mime,
+          data: cleanB64
+        }
+      });
+    });
+
+    const payload = {
+      contents: [{ parts }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        temperature: 0.1
+      }
+    };
+
+    const apiKey = this.getApiKey();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`API error (${response.status}): ${errText}`);
+    }
+
+    const data = await response.json();
+    const candidate = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!candidate) throw new Error('Empty response from optical engine');
+
+    return JSON.parse(candidate);
   },
 
   /** Engine 1: Cloud Vision Multimodal API */
