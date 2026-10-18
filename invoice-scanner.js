@@ -240,7 +240,19 @@ function applyExtractedItemsToInvoice() {
 
   // Auto-select restaurant if recognized
   if (data.restaurantName && typeof DB !== 'undefined') {
-    const matched = (DB.restaurants || []).find(r => r.name.toLowerCase().includes(data.restaurantName.toLowerCase()));
+    const rawCand = data.restaurantName.trim();
+    const normCand = (typeof TTGAudit !== 'undefined' && TTGAudit.normalizeHotel)
+      ? TTGAudit.normalizeHotel(rawCand)
+      : rawCand.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    const matched = (DB.restaurants || []).find(r => {
+      const rNorm = (typeof TTGAudit !== 'undefined' && TTGAudit.normalizeHotel)
+        ? TTGAudit.normalizeHotel(r.name)
+        : r.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+      return (rNorm && normCand && (rNorm === normCand || normCand.includes(rNorm) || rNorm.includes(candNorm)))
+        || r.name.toLowerCase().includes(rawCand.toLowerCase())
+        || rawCand.toLowerCase().includes(r.name.toLowerCase());
+    });
     if (matched) {
       document.getElementById('invRestaurant').value = matched.id;
     }

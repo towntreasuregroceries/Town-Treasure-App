@@ -80,77 +80,103 @@ function saveInvoice(bypassDuplicateCheck = false) {
 
   // ══ Town Treasure Smart Audit — Ledger Collision Guard ══
   if (!invId && !bypassDuplicateCheck && typeof TTGAudit !== 'undefined' && typeof DB !== 'undefined' && Array.isArray(DB.invoices)) {
-    const cand = {
-      restaurant_name: rest ? rest.name : '',
-      invoice_date: invDateVal,
-      total_sell: totalSell,
-      items_json: items
-    };
+    try {
+      const cand = {
+        restaurant_name: rest ? rest.name : '',
+        invoice_date: invDateVal,
+        total_sell: totalSell,
+        items_json: items
+      };
 
-    let matched = null;
-    let highestScore = 0;
-    for (const ex of DB.invoices) {
-      const s = TTGAudit.calculateHeuristicScore(cand, ex);
-      if (s.score > highestScore) {
-        highestScore = s.score;
-        matched = ex;
-      }
-    }
-
-    if (matched && highestScore >= 0.70) {
-      const mAmt = Number(matched.totalSell || 0).toLocaleString();
-      const mNum = matched.number || 'Invoice';
-      const mItemsCount = (matched.items || []).length;
-      const clientName = rest ? rest.name : 'Selected Client';
-
-      // High-Visibility Hazard Collision Modal
-      const dupModal = document.getElementById('invoiceDuplicateModal');
-      if (dupModal) {
-        document.getElementById('invDupModalHeading').textContent = 
-          `Duplicate Alert: An invoice (#${mNum}) for ${clientName} on ${invDateVal} already exists in Veronica's encrypted vault.`;
-        document.getElementById('invDupModalDetails').textContent = 
-          `Town Treasure Smart Audit matched this entry with ${Math.round(highestScore * 100)}% confidence against vault records. Saving this docket without review may cause double-billing.`;
-        document.getElementById('invDupExistingNum').textContent = `#${mNum} (${clientName})`;
-        document.getElementById('invDupExistingDate').textContent = `Date: ${matched.date || invDateVal} • ${mItemsCount} items`;
-        document.getElementById('invDupExistingTotal').textContent = `KES ${mAmt}`;
-        document.getElementById('invDupNewClient').textContent = `${clientName}`;
-        document.getElementById('invDupNewDate').textContent = `Date: ${invDateVal} • ${items.length} items`;
-        document.getElementById('invDupNewTotal').textContent = `KES ${Number(totalSell || 0).toLocaleString()}`;
-        
-        const overlapEl = document.getElementById('invDupOverlapText');
-        if (overlapEl) {
-          const matchingItems = items.filter(it => 
-            (matched.items || []).some(m => TTGAudit.normalizeItemName(m.desc) === TTGAudit.normalizeItemName(it.desc))
-          ).length;
-          overlapEl.textContent = matchingItems > 0 
-            ? `⚠️ Produce Overlap: ${matchingItems} of ${items.length} produce lines match the existing vault docket.`
-            : `⚠️ Identical Client & Date Collision. Potential double-submission detected.`;
+      let matched = null;
+      let highestScore = 0;
+      for (const ex of DB.invoices) {
+        const s = TTGAudit.calculateHeuristicScore(cand, ex);
+        if (s.score > highestScore) {
+          highestScore = s.score;
+          matched = ex;
         }
-
-        const overrideBtn = document.getElementById('btnConfirmOverrideInvoiceDuplicate');
-        if (overrideBtn) {
-          overrideBtn.onclick = function() {
-            closeModal('invoiceDuplicateModal');
-            saveInvoice(true);
-          };
-        }
-        openModal('invoiceDuplicateModal');
-        return;
       }
 
-      // High-Alert Fallback
-      if (typeof customConfirm === 'function') {
-        customConfirm(
-          `⚠️ INTEGRITY HAZARD: Town Treasure Smart Audit detected an existing invoice (#${mNum}) for ${clientName} on ${invDateVal} for KES ${mAmt}.\n\nSaving this will inject a potential duplicate into Veronica's encrypted vault.\n\nDo you want to proceed and save as an additional separate delivery?`,
-          '⚠️ Integrity Hazard: Duplicate Invoice Collision',
-          'Save as 2nd Delivery Anyway',
-          true,
-          function() {
-            saveInvoice(true);
+      if (matched && highestScore >= 0.70) {
+        const mAmt = Number(matched.totalSell || 0).toLocaleString();
+        const mNum = matched.number || 'Invoice';
+        const mItemsCount = (matched.items || []).length;
+        const clientName = rest ? rest.name : 'Selected Client';
+
+        // High-Visibility Hazard Collision Modal
+        const dupModal = document.getElementById('invoiceDuplicateModal');
+        if (dupModal) {
+          const headingEl = document.getElementById('invDupModalHeading');
+          if (headingEl) {
+            headingEl.textContent = 
+              `Duplicate Alert: An invoice (#${mNum}) for ${clientName} on ${invDateVal} already exists in Veronica's encrypted vault.`;
           }
-        );
-        return;
+          const detailsEl = document.getElementById('invDupModalDetails');
+          if (detailsEl) {
+            detailsEl.textContent = 
+              `Town Treasure Smart Audit matched this entry with ${Math.round(highestScore * 100)}% confidence against vault records. Saving this docket without review may cause double-billing.`;
+          }
+          const exNumEl = document.getElementById('invDupExistingNum');
+          if (exNumEl) exNumEl.textContent = `#${mNum} (${clientName})`;
+          const exDateEl = document.getElementById('invDupExistingDate');
+          if (exDateEl) exDateEl.textContent = `Date: ${matched.date || invDateVal} • ${mItemsCount} items`;
+          const exTotalEl = document.getElementById('invDupExistingTotal');
+          if (exTotalEl) exTotalEl.textContent = `KES ${mAmt}`;
+          const newClientEl = document.getElementById('invDupNewClient');
+          if (newClientEl) newClientEl.textContent = `${clientName}`;
+          const newDateEl = document.getElementById('invDupNewDate');
+          if (newDateEl) newDateEl.textContent = `Date: ${invDateVal} • ${items.length} items`;
+          const newTotalEl = document.getElementById('invDupNewTotal');
+          if (newTotalEl) newTotalEl.textContent = `KES ${Number(totalSell || 0).toLocaleString()}`;
+          
+          const overlapEl = document.getElementById('invDupOverlapText');
+          if (overlapEl) {
+            try {
+              const norm = (str) => {
+                if (typeof TTGAudit !== 'undefined' && typeof TTGAudit.canonicalProduce === 'function') {
+                  return TTGAudit.canonicalProduce(str);
+                }
+                return (str || '').toLowerCase().trim();
+              };
+              const matchingItems = items.filter(it => 
+                (matched.items || []).some(m => norm(m.desc || m.name) === norm(it.desc || it.name))
+              ).length;
+              overlapEl.textContent = matchingItems > 0 
+                ? `⚠️ Produce Overlap: ${matchingItems} of ${items.length} produce lines match the existing vault docket.`
+                : `⚠️ Identical Client & Date Collision. Potential double-submission detected.`;
+            } catch (cmpErr) {
+              overlapEl.textContent = '⚠️ Ledger Collision: Client and date match an existing invoice in the vault.';
+            }
+          }
+
+          const overrideBtn = document.getElementById('btnConfirmOverrideInvoiceDuplicate');
+          if (overrideBtn) {
+            overrideBtn.onclick = function() {
+              closeModal('invoiceDuplicateModal');
+              saveInvoice(true);
+            };
+          }
+          openModal('invoiceDuplicateModal');
+          return;
+        }
+
+        // High-Alert Fallback
+        if (typeof customConfirm === 'function') {
+          customConfirm(
+            `⚠️ INTEGRITY HAZARD: Town Treasure Smart Audit detected an existing invoice (#${mNum}) for ${clientName} on ${invDateVal} for KES ${mAmt}.\n\nSaving this will inject a potential duplicate into Veronica's encrypted vault.\n\nDo you want to proceed and save as an additional separate delivery?`,
+            '⚠️ Integrity Hazard: Duplicate Invoice Collision',
+            'Save as 2nd Delivery Anyway',
+            true,
+            function() {
+              saveInvoice(true);
+            }
+          );
+          return;
+        }
       }
+    } catch (auditErr) {
+      console.warn('[Smart Audit] Invoice duplicate detection note:', auditErr);
     }
   }
 

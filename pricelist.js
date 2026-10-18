@@ -33,9 +33,22 @@ function renderPriceLists() {
 }
 
 function createNewPriceList() {
+  const defaultTodayName = 'Price List — ' + new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+  const existingEmptyDraft = (DB.priceLists || []).find(pl => 
+    pl && pl.status === 'draft' && 
+    pl.name === defaultTodayName && 
+    (!pl.items || pl.items.length <= 1) && 
+    (!pl.items[0]?.name || !pl.items[0].name.trim())
+  );
+  if (existingEmptyDraft) {
+    editPriceList(existingEmptyDraft.id);
+    toast('Resumed today’s active draft price list', 'info');
+    return;
+  }
+
   const pl = {
     id: genId(),
-    name: 'Price List — ' + new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+    name: defaultTodayName,
     subtitle: 'Food Supplies (Veg and Fruits)',
     status: 'draft',
     items: [
@@ -378,41 +391,230 @@ function savePriceListDraft() {
   DB.priceLists = list;
 }
 
+/**
+ * Town Treasure Catalog Collision Audit:
+ * Compares title and produce commodity lines against existing catalog records in DB.priceLists.
+ * Detects identical/duplicate price lists to prevent redundant catalog creation.
+ */
+function checkPriceListCollisions(name, items, excludeId = null) {
+  try {
+    if (!DB || !Array.isArray(DB.priceLists)) return null;
+
+    const normProduce = (str) => {
+      if (typeof TTGAudit !== 'undefined') {
+        if (typeof TTGAudit.canonicalProduce === 'function') return TTGAudit.canonicalProduce(str);
+        if (typeof TTGAudit.normalizeItemName === 'function') return TTGAudit.normalizeItemName(str);
+      }
+      return (str || '').toLowerCase().trim().replace(/[^a-z0-9]/g, '');
+    };
+
+    const normTitle = (str) => {
+      return (str || '').toLowerCase().trim().replace(/\s+/g, ' ').replace(/[^a-z0-9]/g, '');
+    };
+
+    const targetTitle = normTitle(name);
+    const validItems = (items || []).filter(i => !i.isHeader && (i.name || '').trim());
+    const targetProduceKeys = new Set(validItems.map(i => normProduce(i.name)).filter(Boolean));
+
+    const candidates = DB.priceLists.filter(pl => pl && pl.id !== excludeId && !pl.deletedAt);
+    if (!candidates.length) return null;
+
+    const collisions = [];
+
+    for (const pl of candidates) {
+      const candTitle = normTitle(pl.name);
+      const isExactTitle = targetTitle && candTitle && targetTitle === candTitle;
+
+      const candItems = (pl.items || []).filter(i => !i.isHeader && (i.name || '').trim());
+      const candProduceKeys = new Set(candItems.map(i => normProduce(i.name)).filter(Boolean));
+
+      const matchingKeys = [];
+      targetProduceKeys.forEach(k => {
+        if (candProduceKeys.has(k)) matchingKeys.push(k);
+      });
+
+      const minCount = Math.min(targetProduceKeys.size, candProduceKeys.size);
+      const maxCount = Math.max(targetProduceKeys.size, candProduceKeys.size);
+
+      const overlapRatio = minCount > 0 ? (matchingKeys.length / minCount) : 0;
+      const totalRatio = maxCount > 0 ? (matchingKeys.length / maxCount) : 0;
+
+      let confidence = 0;
+
+      if (isExactTitle && (totalRatio >= 0.70 || (targetProduceKeys.size === 0 && candProduceKeys.size === 0))) {
+        confidence = 0.99;
+      } else if (targetProduceKeys.size >= 3 && totalRatio >= 0.85) {
+        confidence = 0.96;
+      } else if (isExactTitle) {
+        confidence = 0.90;
+      } else if (targetProduceKeys.size >= 3 && overlapRatio >= 0.75) {
+        confidence = 0.85;
+      } else if (targetProduceKeys.size >= 1 && minCount <= 2 && overlapRatio === 1.0) {
+        confidence = 0.82;
+      } else if (targetProduceKeys.size >= 4 && overlapRatio >= 0.65) {
+        confidence = 0.75;
+      }
+
+      if (confidence >= 0.75) {
+        collisions.push({
+          matched: pl,
+          confidence,
+          isExactTitle,
+          matchingKeys,
+          overlapRatio,
+          totalRatio,
+          existingItemCount: candItems.length
+        });
+      }
+    }
+
+    if (!collisions.length) return null;
+
+    collisions.sort((a, b) => (b.confidence - a.confidence) || (b.overlapRatio - a.overlapRatio));
+    return collisions[0];
+  } catch (err) {
+    console.warn('[Smart Audit] Price list collision check error:', err);
+    return null;
+  }
+}
+
+/**
+ * Renders the High-Alert Crimson Collision Modal for Price Lists
+ */
+function showPriceListDuplicateModal(opts) {
+  const modal = document.getElementById('priceListDuplicateModal');
+  if (!modal) {
+    if (typeof customConfirm === 'function') {
+      customConfirm(
+        `${opts.heading}\n\n${opts.details}\n\nDo you want to proceed anyway?`,
+        opts.title || '⚠️ Duplicate Price List Detected',
+        'Proceed Anyway',
+        true,
+        opts.onProceed
+      );
+    }
+    return;
+  }
+
+  const titleEl = document.getElementById('plDupModalMainTitle');
+  if (titleEl) titleEl.textContent = opts.title || 'INTEGRITY HAZARD: DUPLICATE PRICE LIST';
+
+  const headingEl = document.getElementById('plDupModalHeading');
+  if (headingEl) headingEl.textContent = opts.heading || 'A matching price list already exists in the catalog ledger.';
+
+  const detailsEl = document.getElementById('plDupModalDetails');
+  if (detailsEl) detailsEl.textContent = opts.details || 'Saving without review will create redundant duplicate catalogs and cause pricing confusion.';
+
+  const exNameEl = document.getElementById('plDupExistingName');
+  if (exNameEl) exNameEl.textContent = opts.existingName || '—';
+
+  const exDateEl = document.getElementById('plDupExistingDate');
+  if (exDateEl) exDateEl.textContent = opts.existingDate || '—';
+
+  const exCountEl = document.getElementById('plDupExistingCount');
+  if (exCountEl) exCountEl.textContent = opts.existingCount || '—';
+
+  const newNameEl = document.getElementById('plDupNewName');
+  if (newNameEl) newNameEl.textContent = opts.newName || '—';
+
+  const newDateEl = document.getElementById('plDupNewDate');
+  if (newDateEl) newDateEl.textContent = opts.newDate || '—';
+
+  const newCountEl = document.getElementById('plDupNewCount');
+  if (newCountEl) newCountEl.textContent = opts.newCount || '—';
+
+  const overlapEl = document.getElementById('plDupOverlapText');
+  if (overlapEl) {
+    overlapEl.textContent = opts.overlapText || '';
+    overlapEl.style.display = opts.overlapText ? 'block' : 'none';
+  }
+
+  const adviceEl = document.getElementById('plDupAdviceText');
+  if (adviceEl && opts.adviceText) adviceEl.textContent = opts.adviceText;
+
+  const btnConfirm = document.getElementById('btnConfirmOverridePriceListDuplicate');
+  if (btnConfirm) {
+    btnConfirm.onclick = function() {
+      closeModal('priceListDuplicateModal');
+      if (typeof opts.onProceed === 'function') {
+        opts.onProceed();
+      }
+    };
+  }
+
+  openModal('priceListDuplicateModal');
+}
+
 function publishPriceList(bypassDuplicateCheck = false) {
   if (!currentPriceListId) return;
   const list = DB.priceLists;
   const idx = list.findIndex(x => x.id === currentPriceListId);
   if (idx < 0) return;
 
-  const items = collectPriceListData().filter(i => i.name);
+  const items = collectPriceListData().filter(i => i.name && i.name.trim());
   if (!items.length) return toast('Add at least one item with a name', 'error');
 
+  const plName = document.getElementById('plEditName')?.value.trim() || list[idx].name;
+
   if (!bypassDuplicateCheck) {
-    const duplicates = auditPriceListDuplicates();
-    if (duplicates.length > 0) {
-      const dupSummary = duplicates.map(d => `• ${d.name} (${d.count} entries)`).join('\n');
-      if (typeof customConfirm === 'function') {
-        customConfirm(
-          `Town Treasure Price List Integrity Audit:\n\nThe following produce commodities are listed multiple times:\n\n${dupSummary}\n\nSaving with duplicate produce lines may cause confusion when sending price lists to restaurants or calculating invoices.\n\nDo you want to save anyway?`,
-          '⚠️ Catalog Hazard: Duplicate Produce Commodities',
-          'Save with Duplicates Anyway',
-          true,
-          function() {
-            publishPriceList(true);
-          }
-        );
-        return;
-      }
+    // 1. Cross-price-list collision check against all other existing price lists
+    const collision = checkPriceListCollisions(plName, items, currentPriceListId);
+    if (collision) {
+      const matchPct = Math.round(collision.confidence * 100);
+      const overlapText = collision.matchingKeys && collision.matchingKeys.length > 0
+        ? `⚠️ Produce Overlap: ${collision.matchingKeys.length} matching commodities (${Math.round(collision.overlapRatio * 100)}% match with "${collision.matched.name}").`
+        : `⚠️ Identical Title Collision: Another price list already exists with the name "${collision.matched.name}".`;
+
+      showPriceListDuplicateModal({
+        title: 'INTEGRITY HAZARD: DUPLICATE PRICE LIST DETECTED',
+        heading: `A matching price list ("${collision.matched.name}") already exists in Veronica's catalog ledger.`,
+        details: `Town Treasure Smart Audit detected ${matchPct}% similarity against an existing saved price list. Saving without review will create redundant duplicate catalogs and cause pricing confusion.`,
+        existingName: collision.matched.name,
+        existingDate: `Date: ${fmtDate(collision.matched.updatedAt || collision.matched.createdAt)}`,
+        existingCount: `${collision.existingItemCount} produce lines`,
+        newName: plName,
+        newDate: `Date: ${fmtDate(new Date())}`,
+        newCount: `${items.filter(i => !i.isHeader).length} produce lines`,
+        overlapText: overlapText,
+        adviceText: 'If this price list is already saved in your catalog, please cancel and view the existing record. If this is an intentional updated version or seasonal revision, you can override and save.',
+        onProceed: function() {
+          publishPriceList(true);
+        }
+      });
+      return;
+    }
+
+    // 2. Internal duplicate commodity check within the active price list
+    const internalDuplicates = auditPriceListDuplicates();
+    if (internalDuplicates.length > 0) {
+      const dupNames = internalDuplicates.map(d => `${d.name} (${d.count}x)`).join(', ');
+      showPriceListDuplicateModal({
+        title: 'CATALOG HAZARD: DUPLICATE PRODUCE COMMODITIES',
+        heading: `Duplicate produce commodities detected in this price list table (${internalDuplicates.length}).`,
+        details: `The following produce items appear multiple times: ${dupNames}. Duplicate produce lines will cause confusion when sending price lists to restaurants or calculating invoices.`,
+        existingName: 'Table Duplicates',
+        existingDate: `${internalDuplicates.length} repeated lines`,
+        existingCount: internalDuplicates.map(d => `• ${d.name} (${d.count}x)`).slice(0, 3).join(', '),
+        newName: plName,
+        newDate: 'Active Draft',
+        newCount: `${items.filter(i => !i.isHeader).length} total items`,
+        overlapText: `⚠️ Repeated Commodities: ${dupNames}`,
+        adviceText: 'Please review the highlighted red rows in your table to consolidate prices or distinguish specific varieties (e.g., Spinach Local vs Spinach Hybrid).',
+        onProceed: function() {
+          publishPriceList(true);
+        }
+      });
+      return;
     }
   }
 
-  list[idx].name = document.getElementById('plEditName')?.value.trim() || list[idx].name;
+  list[idx].name = plName;
   list[idx].subtitle = document.getElementById('plEditSubtitle')?.value.trim() || list[idx].subtitle || '';
   list[idx].status = document.getElementById('plEditStatus')?.value || 'active';
   list[idx].items = items;
   list[idx].updatedAt = new Date().toISOString();
   DB.priceLists = list;
-  toast('Price list saved!');
+  toast('Price list saved!', 'success');
   viewPriceList(currentPriceListId);
 }
 
@@ -1252,17 +1454,42 @@ function renderScannedPriceListResults(result) {
   }
 }
 
-function applyScannedPriceList() {
+function applyScannedPriceList(bypassDuplicateCheck = false) {
   if (!lastExtractedPriceListData || !lastExtractedPriceListData.items || !lastExtractedPriceListData.items.length) {
     return toast('No extracted items to apply', 'warning');
   }
 
   const items = lastExtractedPriceListData.items;
+  const plName = lastExtractedPriceListData.name || ('Price List — ' + new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }));
 
   if (priceListScanTargetMode === 'new') {
+    if (!bypassDuplicateCheck) {
+      const collision = checkPriceListCollisions(plName, items, null);
+      if (collision) {
+        const matchPct = Math.round(collision.confidence * 100);
+        showPriceListDuplicateModal({
+          title: 'INTEGRITY HAZARD: DUPLICATE SCANNED PRICE LIST',
+          heading: `An identical or matching price list ("${collision.matched.name}") already exists in Veronica's catalog ledger.`,
+          details: `Town Treasure Smart Audit detected ${matchPct}% similarity between this scan and existing catalog records. Continuing will create a redundant duplicate price list in the database.`,
+          existingName: collision.matched.name,
+          existingDate: `Date: ${fmtDate(collision.matched.updatedAt || collision.matched.createdAt)}`,
+          existingCount: `${collision.existingItemCount} produce lines`,
+          newName: plName,
+          newDate: `Date: ${fmtDate(new Date())}`,
+          newCount: `${items.filter(i => !i.isHeader).length} produce lines`,
+          overlapText: `⚠️ Produce Overlap: ${collision.matchingKeys.length} matching commodities (${Math.round(collision.overlapRatio * 100)}% overlap with "${collision.matched.name}").`,
+          adviceText: 'An existing price list with matching produce items already exists. You can stop and view the existing catalog, or proceed anyway to create a new separate price list record.',
+          onProceed: function() {
+            applyScannedPriceList(true);
+          }
+        });
+        return;
+      }
+    }
+
     const pl = {
       id: genId(),
-      name: lastExtractedPriceListData.name || ('Price List — ' + new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })),
+      name: plName,
       subtitle: lastExtractedPriceListData.subtitle || 'Food Supplies (Veg and Fruits)',
       status: 'draft',
       items: items,

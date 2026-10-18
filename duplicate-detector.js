@@ -81,6 +81,11 @@ const TTGAudit = {
     return clean;
   },
 
+  /** Alias for canonical produce normalization */
+  normalizeItemName(desc) {
+    return this.canonicalProduce(desc);
+  },
+
   /** Calculate Jaccard and unit similarity between two lists of produce items */
   compareItemLists(itemsA = [], itemsB = []) {
     if (!itemsA.length || !itemsB.length) return { score: 0, matchingCount: 0, matches: [] };
