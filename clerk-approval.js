@@ -310,24 +310,27 @@ async function openClerkReviewModal(id) {
 
         banner.style.display = 'block';
         banner.innerHTML = `
-          <div style="background:#fff7ed; border:1px solid #fdba74; border-left:5px solid #ea580c; border-radius:8px; padding:12px 18px; box-shadow:0 2px 6px rgba(234,88,12,0.1);">
+          <div style="background:#fef2f2; border:2px solid #ef4444; border-left:6px solid #dc2626; border-radius:10px; padding:14px 18px; box-shadow:0 4px 14px rgba(220,38,38,0.2);">
             <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap;">
-              <div style="display:flex; align-items:flex-start; gap:10px;">
-                <div style="color:#ea580c; flex-shrink:0; margin-top:2px;">
-                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+              <div style="display:flex; align-items:flex-start; gap:12px;">
+                <div style="width:36px; height:36px; border-radius:50%; background:#fee2e2; color:#dc2626; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                  <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
                 </div>
                 <div>
-                  <div style="font-weight:700; color:#9a3412; font-size:0.95rem;">Town Treasure Ledger Integrity Alert: Duplicate Order Risk</div>
-                  <div style="font-size:0.85rem; color:#7c2d12; margin-top:3px; line-height:1.4;">${escapeHtml(audit.explanation)}</div>
-                  <div style="font-size:0.8rem; color:#9a3412; margin-top:6px; font-weight:600;">
-                    Matched Vault Invoice: <span style="background:#fed7aa; padding:2px 6px; border-radius:4px;">${escapeHtml(matchedNum)}</span> &bull; Date: ${escapeHtml(matchedDate)} &bull; Amount: KES ${matchedAmt}
+                  <div style="font-weight:800; color:#991b1b; font-size:0.98rem; display:flex; align-items:center; gap:8px;">
+                    <span>🚨 LEDGER COLLISION DETECTED: DUPLICATE ORDER RISK</span>
+                    <span style="background:#dc2626; color:#fff; font-size:0.7rem; padding:2px 7px; border-radius:999px; font-weight:800; letter-spacing:0.5px;">HIGH ALERT</span>
+                  </div>
+                  <div style="font-size:0.86rem; color:#7f1d1d; margin-top:4px; line-height:1.45; font-weight:500;">${escapeHtml(audit.explanation)}</div>
+                  <div style="font-size:0.82rem; color:#991b1b; margin-top:8px; font-weight:700; background:#fee2e2; border:1px solid #fca5a5; padding:6px 10px; border-radius:6px; display:inline-block;">
+                    ⚠️ Matched Vault Invoice: <strong style="color:#b91c1c; text-decoration:underline;">${escapeHtml(matchedNum)}</strong> &bull; Date: ${escapeHtml(matchedDate)} &bull; Amount: KES ${matchedAmt}
                   </div>
                 </div>
               </div>
-              <div style="display:flex; gap:8px;">
+              <div style="display:flex; gap:8px; align-items:center;">
                 ${matched.id ? `
-                  <button type="button" class="btn btn-sm btn-secondary" onclick="viewInvoice('${matched.id}')" style="font-size:0.78rem; padding:4px 10px; font-weight:600;">
-                    Inspect Invoice ${matchedNum}
+                  <button type="button" class="btn btn-sm" onclick="viewInvoice('${matched.id}')" style="background:#dc2626; color:#fff; border:none; font-size:0.8rem; padding:6px 12px; font-weight:700; box-shadow:0 2px 6px rgba(220,38,38,0.3);">
+                    Inspect Vault Invoice ${matchedNum}
                   </button>
                 ` : ''}
               </div>

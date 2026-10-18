@@ -35,7 +35,7 @@ const OCRConsensus = {
     const imgList = Array.isArray(images) ? images : [images];
     const pageCount = imgList.length;
 
-    onProgress(`Analyzing ${pageCount} docket page${pageCount > 1 ? 's' : ''} with Multimodal Vision...`);
+    onProgress(`Analyzing ${pageCount} docket page${pageCount > 1 ? 's' : ''} with Town Treasure Optical Engine...`);
 
     // 1. Run Engine 1: Cloud Vision with multi-tier fallback
     let geminiResult = null;
@@ -43,7 +43,7 @@ const OCRConsensus = {
 
     for (const model of this.MODELS) {
       try {
-        onProgress(`Reading produce data using OCR engine (${model})...`);
+        onProgress('Scanning produce lines & pricing (High-Precision Pass)...');
         geminiResult = await this._runGeminiVision(imgList, model);
         if (geminiResult && geminiResult.items && geminiResult.items.length) {
           break; // Model returned successful parse
@@ -107,14 +107,14 @@ const OCRConsensus = {
     const imgList = Array.isArray(images) ? images : [images];
     const pageCount = imgList.length;
 
-    onProgress(`Analyzing ${pageCount} price list page${pageCount > 1 ? 's' : ''} with Optical Engine...`);
+    onProgress(`Analyzing ${pageCount} price list page${pageCount > 1 ? 's' : ''} with Town Treasure Optical Engine...`);
 
     let extractionResult = null;
     let lastError = null;
 
     for (const model of this.MODELS) {
       try {
-        onProgress(`Reading produce pricing & categories (${model})...`);
+        onProgress('Digitizing produce catalog & commodity prices...');
         extractionResult = await this._runPriceListVision(imgList, model);
         if (extractionResult && extractionResult.items && extractionResult.items.length) {
           break;
@@ -385,7 +385,7 @@ Return ONLY a JSON object matching this exact structure:
   /** Engine 3: Deterministic Mathematical Invariant Validator & Discrepancy Arbiter */
   _reconcileWithMath(geminiData, tesseractData, pageCount = 1) {
     const enginesUsed = [];
-    if (geminiData) enginesUsed.push('Multimodal Vision');
+    if (geminiData) enginesUsed.push('Town Treasure Optical Engine');
     if (tesseractData) enginesUsed.push('On-Device Tesseract');
     enginesUsed.push('Math Invariant Arbiter');
 

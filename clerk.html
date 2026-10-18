@@ -278,17 +278,19 @@
           </div>
 
           <!-- Town Treasure Smart Audit Live Alert Banner -->
-          <div id="clerkDuplicateWarningBanner" style="display:none; background:#fffbeb; border:1px solid #f59e0b; border-left:4px solid #d97706; border-radius:8px; padding:12px 16px; margin:14px 0 6px; box-shadow:0 2px 6px rgba(217,119,6,0.1);">
-            <div style="display:flex; align-items:flex-start; gap:10px;">
-              <div style="color:#d97706; flex-shrink:0; margin-top:2px;">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          <div id="clerkDuplicateWarningBanner" style="display:none; background:#fef2f2; border:2px solid #ef4444; border-left:6px solid #dc2626; border-radius:8px; padding:14px 18px; margin:14px 0 8px; box-shadow:0 4px 12px rgba(220,38,38,0.18);">
+            <div style="display:flex; align-items:flex-start; gap:12px;">
+              <div style="width:32px; height:32px; border-radius:50%; background:#fee2e2; color:#dc2626; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
               </div>
               <div style="flex:1;">
-                <div style="font-weight:700; color:#92400e; font-size:0.92rem;" id="clerkDupBannerTitle">Town Treasure Smart Audit Alert</div>
-                <div style="font-size:0.83rem; color:#78350f; margin-top:2px; line-height:1.4;" id="clerkDupBannerText"></div>
+                <div style="font-weight:800; color:#991b1b; font-size:0.95rem; display:flex; align-items:center; gap:6px;" id="clerkDupBannerTitle">
+                  <span>🚨 DUPLICATE ORDER WARNING: VAULT COLLISION</span>
+                </div>
+                <div style="font-size:0.84rem; color:#7f1d1d; margin-top:3px; line-height:1.45; font-weight:500;" id="clerkDupBannerText"></div>
               </div>
-              <button type="button" onclick="document.getElementById('clerkDuplicateWarningBanner').style.display='none'" style="background:none; border:none; color:#b45309; cursor:pointer; padding:2px;">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              <button type="button" onclick="document.getElementById('clerkDuplicateWarningBanner').style.display='none'" style="background:none; border:none; color:#dc2626; cursor:pointer; padding:4px;">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
               </button>
             </div>
           </div>
@@ -1472,37 +1474,37 @@
   </script>
 
   <!-- ══ Town Treasure Smart Audit — Duplicate Modal ══ -->
-  <div id="clerkDuplicateModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.65); z-index:99999; align-items:center; justify-content:center; padding:16px;">
-    <div style="background:#fff; border-radius:12px; max-width:540px; width:100%; box-shadow:0 12px 36px rgba(0,0,0,0.25); overflow:hidden; border-top:5px solid #d97706;">
-      <div style="padding:18px 24px; border-bottom:1px solid #f3f4f6; display:flex; align-items:center; justify-content:space-between;">
-        <div style="display:flex; align-items:center; gap:10px;">
-          <div style="width:36px; height:36px; border-radius:50%; background:#fef3c7; color:#d97706; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+  <div id="clerkDuplicateModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:99999; align-items:center; justify-content:center; padding:16px;">
+    <div style="background:#fff; border-radius:12px; max-width:540px; width:100%; box-shadow:0 16px 48px rgba(220,38,38,0.3); overflow:hidden; border-top:6px solid #dc2626;">
+      <div style="padding:18px 24px; border-bottom:1px solid #fee2e2; display:flex; align-items:center; justify-content:space-between; background:#fff;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div style="width:38px; height:38px; border-radius:50%; background:#fee2e2; color:#dc2626; display:flex; align-items:center; justify-content:center; flex-shrink:0;">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
           </div>
           <div>
-            <h3 style="margin:0; font-size:1.05rem; font-weight:700; color:#111827;">Town Treasure Smart Audit</h3>
-            <span style="font-size:0.75rem; color:#b45309; font-weight:700; text-transform:uppercase; letter-spacing:0.5px;">Duplicate Delivery Alert</span>
+            <h3 style="margin:0; font-size:1.1rem; font-weight:800; color:#991b1b;">Town Treasure Smart Audit</h3>
+            <span style="font-size:0.75rem; color:#dc2626; font-weight:800; text-transform:uppercase; letter-spacing:0.5px;">🚨 CRITICAL DUPLICATE DELIVERY HAZARD</span>
           </div>
         </div>
         <button type="button" onclick="closeClerkDuplicateModal()" style="background:none; border:none; color:#9ca3af; font-size:24px; cursor:pointer; line-height:1;">&times;</button>
       </div>
 
       <div style="padding:20px 24px;">
-        <div style="background:#fffbeb; border:1px solid #fde68a; border-radius:8px; padding:12px 16px; margin-bottom:16px;">
-          <div style="font-size:0.88rem; color:#92400e; font-weight:600; line-height:1.4;" id="clerkDupModalExplanation">
+        <div style="background:#fef2f2; border:1.5px solid #f87171; border-radius:8px; padding:12px 16px; margin-bottom:16px;">
+          <div style="font-size:0.9rem; color:#991b1b; font-weight:700; line-height:1.45;" id="clerkDupModalExplanation">
             Town Treasure Smart Audit matched this delivery with an existing docket in the system.
           </div>
         </div>
 
-        <div style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:14px; margin-bottom:16px;">
-          <div style="font-size:0.75rem; text-transform:uppercase; font-weight:700; color:#6b7280; margin-bottom:8px;">Matching Order Reference</div>
+        <div style="background:#f9fafb; border:1px solid #fca5a5; border-radius:8px; padding:14px; margin-bottom:16px;">
+          <div style="font-size:0.75rem; text-transform:uppercase; font-weight:800; color:#991b1b; margin-bottom:8px;">Matching Order Reference</div>
           <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; font-size:0.83rem;">
             <div><span style="color:#6b7280;">Client:</span> <strong id="clerkDupModalClient">—</strong></div>
             <div><span style="color:#6b7280;">Date:</span> <strong id="clerkDupModalDate">—</strong></div>
-            <div><span style="color:#6b7280;">Total:</span> <strong id="clerkDupModalTotal">—</strong></div>
+            <div><span style="color:#6b7280;">Total:</span> <strong id="clerkDupModalTotal" style="color:#991b1b;">—</strong></div>
             <div><span style="color:#6b7280;">Recorded By:</span> <strong id="clerkDupModalSubmitter">—</strong></div>
           </div>
-          <div id="clerkDupModalItemMatch" style="margin-top:10px; padding-top:8px; border-top:1px dashed #d1d5db; font-size:0.8rem; color:#374151;"></div>
+          <div id="clerkDupModalItemMatch" style="margin-top:10px; padding-top:8px; border-top:1px dashed #fca5a5; font-size:0.82rem; color:#991b1b; font-weight:600;"></div>
         </div>
 
         <p style="font-size:0.83rem; color:#4b5563; margin:0 0 16px; line-height:1.4;">
@@ -1510,11 +1512,11 @@
         </p>
 
         <div style="display:flex; flex-direction:column; gap:8px;">
-          <button type="button" class="btn btn-primary" onclick="discardClerkDuplicate()" style="background:#15803d; border-color:#15803d; justify-content:center; padding:11px 16px; font-weight:700;">
+          <button type="button" class="btn btn-primary" onclick="discardClerkDuplicate()" style="background:#15803d; border-color:#15803d; justify-content:center; padding:11px 16px; font-weight:700; box-shadow:0 4px 12px rgba(21,128,61,0.2);">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><polyline points="20 6 9 17 4 12"></polyline></svg>
             Discard This Duplicate (Recommended)
           </button>
-          <button type="button" class="btn btn-secondary" onclick="proceedAsSupplementaryClerkDocket()" style="justify-content:center; padding:11px 16px; font-weight:600; color:#b45309; border-color:#f59e0b; background:#fffbeb;">
+          <button type="button" class="btn btn-secondary" onclick="proceedAsSupplementaryClerkDocket()" style="justify-content:center; padding:11px 16px; font-weight:700; color:#991b1b; border:1.5px solid #dc2626; background:#fef2f2;">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:6px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="16"></line><line x1="8" y1="12" x2="16" y2="12"></line></svg>
             This is an Intentional 2nd Dispatch (Supplementary Order)
           </button>

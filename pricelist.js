@@ -74,6 +74,7 @@ function renderPriceListItems(pl) {
 
   body.innerHTML = pl.items.map((item, idx) => item.isHeader ? buildCategoryHeaderRow(item) : buildPriceListRow(item, idx)).join('');
   attachPriceListListeners();
+  auditPriceListDuplicates();
 }
 
 function buildCategoryHeaderRow(item) {
@@ -148,6 +149,7 @@ function removePriceListRow(btn) {
   const body = document.getElementById('plItemsBody');
   if (body.rows.length <= 1) return toast('Must have at least one item', 'warning');
   btn.closest('tr').remove();
+  auditPriceListDuplicates();
   triggerPriceListAutoSave();
 }
 
@@ -242,9 +244,95 @@ function insertPriceListHeaderTop() {
 
 function attachPriceListListeners() {
   document.querySelectorAll('#plItemsBody input, #plItemsBody select').forEach(inp => {
-    inp.removeEventListener('input', triggerPriceListAutoSave);
-    inp.addEventListener('input', triggerPriceListAutoSave);
+    inp.removeEventListener('input', onPriceListFieldInput);
+    inp.addEventListener('input', onPriceListFieldInput);
   });
+}
+
+function onPriceListFieldInput() {
+  auditPriceListDuplicates();
+  triggerPriceListAutoSave();
+}
+
+/**
+ * Town Treasure Catalog Audit: Real-Time Produce Commodity Duplicate Detection
+ * Detects identical commodities or normalized produce names across rows.
+ */
+function auditPriceListDuplicates() {
+  const rows = document.querySelectorAll('#plItemsBody tr:not([data-type="header"])');
+  const counts = new Map();
+
+  rows.forEach(row => {
+    const input = row.querySelector('.pl-item-name');
+    const rawName = (input?.value || '').trim();
+    if (!rawName) return;
+
+    const normKey = (typeof TTGAudit !== 'undefined' && TTGAudit.normalizeItemName)
+      ? TTGAudit.normalizeItemName(rawName)
+      : rawName.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    if (!normKey) return;
+
+    const list = counts.get(normKey) || [];
+    list.push({ row, input, rawName });
+    counts.set(normKey, list);
+  });
+
+  const duplicates = [];
+  counts.forEach((occurrences, normKey) => {
+    if (occurrences.length > 1) {
+      duplicates.push({
+        name: occurrences[0].rawName,
+        normKey,
+        count: occurrences.length,
+        occurrences
+      });
+    }
+  });
+
+  // Clear previous badges & highlights
+  document.querySelectorAll('#plItemsBody .pl-dup-badge').forEach(b => b.remove());
+  rows.forEach(r => {
+    const inp = r.querySelector('.pl-item-name');
+    if (inp) {
+      inp.style.borderColor = '';
+      inp.style.background = '';
+    }
+    r.style.background = '';
+  });
+
+  const banner = document.getElementById('plDuplicateAlertBanner');
+
+  if (duplicates.length > 0) {
+    duplicates.forEach(dup => {
+      dup.occurrences.forEach(occ => {
+        if (occ.input) {
+          occ.input.style.borderColor = '#ef4444';
+          occ.input.style.background = '#fef2f2';
+          occ.row.style.background = '#fff5f5';
+
+          const badge = document.createElement('span');
+          badge.className = 'pl-dup-badge';
+          badge.style.cssText = 'color:#991b1b; font-size:0.72rem; font-weight:700; background:#fee2e2; border:1px solid #fca5a5; padding:2px 6px; border-radius:4px; margin-left:6px; display:inline-flex; align-items:center; gap:3px; vertical-align:middle; white-space:nowrap;';
+          badge.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg> Duplicate (${dup.count}x)`;
+          occ.input.insertAdjacentElement('afterend', badge);
+        }
+      });
+    });
+
+    if (banner) {
+      const namesList = duplicates.map(d => `"${d.name}" (${d.count}x)`).join(', ');
+      const titleEl = document.getElementById('plDupBannerTitle');
+      const textEl = document.getElementById('plDupBannerText');
+      if (titleEl) titleEl.textContent = `🚨 Duplicate Produce Commodities Detected (${duplicates.length})`;
+      if (textEl) textEl.textContent = `The following items appear multiple times in this price list: ${namesList}. Please consolidate prices or distinguish specific varieties.`;
+      banner.style.display = 'block';
+    }
+  } else {
+    if (banner) banner.style.display = 'none';
+  }
+
+  return duplicates;
 }
 
 function triggerPriceListAutoSave() {
@@ -290,7 +378,7 @@ function savePriceListDraft() {
   DB.priceLists = list;
 }
 
-function publishPriceList() {
+function publishPriceList(bypassDuplicateCheck = false) {
   if (!currentPriceListId) return;
   const list = DB.priceLists;
   const idx = list.findIndex(x => x.id === currentPriceListId);
@@ -298,6 +386,25 @@ function publishPriceList() {
 
   const items = collectPriceListData().filter(i => i.name);
   if (!items.length) return toast('Add at least one item with a name', 'error');
+
+  if (!bypassDuplicateCheck) {
+    const duplicates = auditPriceListDuplicates();
+    if (duplicates.length > 0) {
+      const dupSummary = duplicates.map(d => `• ${d.name} (${d.count} entries)`).join('\n');
+      if (typeof customConfirm === 'function') {
+        customConfirm(
+          `Town Treasure Price List Integrity Audit:\n\nThe following produce commodities are listed multiple times:\n\n${dupSummary}\n\nSaving with duplicate produce lines may cause confusion when sending price lists to restaurants or calculating invoices.\n\nDo you want to save anyway?`,
+          '⚠️ Catalog Hazard: Duplicate Produce Commodities',
+          'Save with Duplicates Anyway',
+          true,
+          function() {
+            publishPriceList(true);
+          }
+        );
+        return;
+      }
+    }
+  }
 
   list[idx].name = document.getElementById('plEditName')?.value.trim() || list[idx].name;
   list[idx].subtitle = document.getElementById('plEditSubtitle')?.value.trim() || list[idx].subtitle || '';
@@ -346,9 +453,23 @@ function smartImportItems() {
   const importedItems = Object.values(itemMap).sort((a, b) => a.name.localeCompare(b.name));
   if (!importedItems.length) return toast('No items found in invoices', 'warning');
 
-  // Add imported items to current list
+  // De-duplicate against items already in the active price list
+  const existingNames = new Set(
+    collectPriceListData()
+      .filter(i => !i.isHeader && i.name)
+      .map(i => (typeof TTGAudit !== 'undefined' ? TTGAudit.normalizeItemName(i.name) : i.name.toLowerCase().trim()))
+  );
+
+  const newItems = importedItems.filter(item => {
+    const norm = (typeof TTGAudit !== 'undefined' ? TTGAudit.normalizeItemName(item.name) : item.name.toLowerCase().trim());
+    return !existingNames.has(norm);
+  });
+
+  if (!newItems.length) return toast('All produce items from past invoices are already in this price list', 'info');
+
+  // Add non-duplicate imported items to current list
   const body = document.getElementById('plItemsBody');
-  importedItems.forEach(item => {
+  newItems.forEach(item => {
     const row = document.createElement('tr');
     const id = genId();
     row.setAttribute('data-item-id', id);
@@ -356,8 +477,10 @@ function smartImportItems() {
     body.appendChild(row);
   });
   attachPriceListListeners();
+  auditPriceListDuplicates();
   triggerPriceListAutoSave();
-  toast(`Imported ${importedItems.length} items from past invoices`);
+  const skippedCount = importedItems.length - newItems.length;
+  toast(`Imported ${newItems.length} items${skippedCount > 0 ? ` (${skippedCount} duplicates skipped)` : ''}`);
 }
 
 function guessPriceListCategory(name) {
@@ -1182,10 +1305,17 @@ function applyScannedPriceList() {
         body.appendChild(row);
       });
       attachPriceListListeners();
+      auditPriceListDuplicates();
       triggerPriceListAutoSave();
     }
     closeModal('priceListScannerModal');
-    toast(`Appended ${items.filter(i => !i.isHeader).length} items from optical scan!`, 'success');
+    const scannedCount = items.filter(i => !i.isHeader).length;
+    const dups = typeof auditPriceListDuplicates === 'function' ? auditPriceListDuplicates() : [];
+    if (dups.length > 0) {
+      toast(`Appended ${scannedCount} items from optical scan. ⚠️ ${dups.length} duplicate commodities flagged in table`, 'warning');
+    } else {
+      toast(`Appended ${scannedCount} items from optical scan!`, 'success');
+    }
   }
 }
 
