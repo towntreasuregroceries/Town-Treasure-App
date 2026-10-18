@@ -239,71 +239,89 @@ function applyExtractedItemsToInvoice() {
   const data = lastExtractedDocketData;
 
   // Auto-select restaurant if recognized
-  if (data.restaurantName && typeof DB !== 'undefined') {
-    const rawCand = data.restaurantName.trim();
-    const normCand = (typeof TTGAudit !== 'undefined' && TTGAudit.normalizeHotel)
-      ? TTGAudit.normalizeHotel(rawCand)
-      : rawCand.toLowerCase().replace(/[^a-z0-9]/g, '');
+  try {
+    if (data.restaurantName && typeof DB !== 'undefined') {
+      const rawCand = (data.restaurantName || '').trim();
+      const normCand = (typeof TTGAudit !== 'undefined' && TTGAudit.normalizeHotel)
+        ? TTGAudit.normalizeHotel(rawCand)
+        : rawCand.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-    const matched = (DB.restaurants || []).find(r => {
-      const rNorm = (typeof TTGAudit !== 'undefined' && TTGAudit.normalizeHotel)
-        ? TTGAudit.normalizeHotel(r.name)
-        : r.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-      return (rNorm && normCand && (rNorm === normCand || normCand.includes(rNorm) || rNorm.includes(candNorm)))
-        || r.name.toLowerCase().includes(rawCand.toLowerCase())
-        || rawCand.toLowerCase().includes(r.name.toLowerCase());
-    });
-    if (matched) {
-      document.getElementById('invRestaurant').value = matched.id;
+      const matched = (DB.restaurants || []).find(r => {
+        if (!r || !r.name) return false;
+        const rNorm = (typeof TTGAudit !== 'undefined' && TTGAudit.normalizeHotel)
+          ? TTGAudit.normalizeHotel(r.name)
+          : r.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+        return (rNorm && normCand && (rNorm === normCand || normCand.includes(rNorm) || rNorm.includes(normCand)))
+          || r.name.toLowerCase().includes(rawCand.toLowerCase())
+          || rawCand.toLowerCase().includes(r.name.toLowerCase());
+      });
+      if (matched) {
+        const invRest = document.getElementById('invRestaurant');
+        if (invRest) invRest.value = matched.id;
+      }
     }
+  } catch (restErr) {
+    console.warn('[Invoice Scanner] Auto-select restaurant note:', restErr);
   }
 
   // Set date
-  if (data.date) {
-    document.getElementById('invDate').value = data.date;
+  try {
+    if (data.date) {
+      const invDate = document.getElementById('invDate');
+      if (invDate) invDate.value = data.date;
+    }
+  } catch (dateErr) {
+    console.warn('[Invoice Scanner] Set date note:', dateErr);
   }
 
   // Populate line items
-  const tbody = document.getElementById('lineItemsBody');
-  tbody.innerHTML = '';
+  try {
+    const tbody = document.getElementById('lineItemsBody');
+    if (tbody) {
+      tbody.innerHTML = '';
 
-  (data.items || []).forEach(it => {
-    const row = document.createElement('tr');
-    row.innerHTML = `
-      <td><input type="text" class="item-desc" value="${escapeHtml(it.desc)}" placeholder="Produce item"></td>
-      <td><input type="number" min="0" step="any" class="item-qty" value="${it.qty || 1}"></td>
-      <td>
-        <select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;">
-          <option value="kgs" ${it.unit === 'kgs' || it.unit === 'kg' ? 'selected' : ''}>Kgs</option>
-          <option value="crates" ${it.unit === 'crates' ? 'selected' : ''}>Crates</option>
-          <option value="bags" ${it.unit === 'bags' ? 'selected' : ''}>Bags</option>
-          <option value="pieces" ${it.unit === 'pieces' || it.unit === 'pcs' ? 'selected' : ''}>Pieces</option>
-          <option value="bunches" ${it.unit === 'bunches' ? 'selected' : ''}>Bunches</option>
-          <option value="heads" ${it.unit === 'heads' ? 'selected' : ''}>Heads</option>
-          <option value="pnts" ${it.unit === 'pnts' || it.unit === 'punnets' ? 'selected' : ''}>Punnets</option>
-          <option value="bundles" ${it.unit === 'bundles' ? 'selected' : ''}>Bundles</option>
-          <option value="litres" ${it.unit === 'litres' ? 'selected' : ''}>Litres</option>
-          <option value="trays" ${it.unit === 'trays' ? 'selected' : ''}>Trays</option>
-          <option value="dozen" ${it.unit === 'dozen' ? 'selected' : ''}>Dozen</option>
-        </select>
-      </td>
-      <td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy" value="${it.buyPrice || 0}"></td>
-      <td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell" value="${it.sellPrice || it.price || 0}"></td>
-      <td class="item-total" style="font-weight:600">${fmtMoney(it.total)}</td>
-      <td>
-        <button type="button" class="btn-remove-row" onclick="removeLineItem(this)">
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-        </button>
-      </td>
-    `;
-    tbody.appendChild(row);
-    if (typeof attachLineListeners === 'function') attachLineListeners(row);
-  });
+      (data.items || []).forEach(it => {
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td><input type="text" class="item-desc" value="${escapeHtml(it.desc || '')}" placeholder="Produce item"></td>
+          <td><input type="number" min="0" step="any" class="item-qty" value="${it.qty || 1}"></td>
+          <td>
+            <select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;">
+              <option value="kgs" ${it.unit === 'kgs' || it.unit === 'kg' ? 'selected' : ''}>Kgs</option>
+              <option value="crates" ${it.unit === 'crates' ? 'selected' : ''}>Crates</option>
+              <option value="bags" ${it.unit === 'bags' ? 'selected' : ''}>Bags</option>
+              <option value="pieces" ${it.unit === 'pieces' || it.unit === 'pcs' ? 'selected' : ''}>Pieces</option>
+              <option value="bunches" ${it.unit === 'bunches' ? 'selected' : ''}>Bunches</option>
+              <option value="heads" ${it.unit === 'heads' ? 'selected' : ''}>Heads</option>
+              <option value="pnts" ${it.unit === 'pnts' || it.unit === 'punnets' ? 'selected' : ''}>Punnets</option>
+              <option value="bundles" ${it.unit === 'bundles' ? 'selected' : ''}>Bundles</option>
+              <option value="litres" ${it.unit === 'litres' ? 'selected' : ''}>Litres</option>
+              <option value="trays" ${it.unit === 'trays' ? 'selected' : ''}>Trays</option>
+              <option value="dozen" ${it.unit === 'dozen' ? 'selected' : ''}>Dozen</option>
+            </select>
+          </td>
+          <td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy" value="${it.buyPrice || 0}"></td>
+          <td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell" value="${it.sellPrice || it.price || 0}"></td>
+          <td class="item-total" style="font-weight:600">${fmtMoney(it.total || ((it.qty || 1) * (it.sellPrice || it.price || 0)))}</td>
+          <td>
+            <button type="button" class="btn-remove-row" onclick="removeLineItem(this)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </td>
+        `;
+        tbody.appendChild(row);
+        if (typeof attachLineListeners === 'function') attachLineListeners(row);
+      });
 
-  if (typeof calcInvoiceTotals === 'function') calcInvoiceTotals();
+      if (typeof calcInvoiceTotals === 'function') calcInvoiceTotals();
+    }
 
-  closeModal('invoiceScannerModal');
-  toast(`Applied ${data.items.length} items from docket into invoice form!`, 'success');
+    closeModal('invoiceScannerModal');
+    toast(`Applied ${(data.items || []).length} items from docket into invoice form!`, 'success');
+  } catch (err) {
+    console.error('[Invoice Scanner] Error applying items to table:', err);
+    toast('Error applying items to invoice table: ' + err.message, 'error');
+  }
 }
 
 // Aliases for compatibility
