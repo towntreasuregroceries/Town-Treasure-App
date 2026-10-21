@@ -550,6 +550,11 @@
         const emailEl = document.getElementById('clerkTargetOwnerEmail');
         if (emailEl) emailEl.textContent = targetEmail ? `(${targetEmail})` : '';
 
+        const btnSubmit = document.getElementById('btnSubmitDocket');
+        if (btnSubmit) {
+          btnSubmit.textContent = `Submit Docket for ${targetName}'s Approval`;
+        }
+
         const savedName = localStorage.getItem('ttg_clerk_name');
         if (savedName) {
           const nameInput = document.getElementById('clerkName');
@@ -975,13 +980,14 @@
 
       const btn = document.getElementById('btnSubmitDocket');
       btn.disabled = true;
-      btn.textContent = 'Submitting to Veronica...';
+      const ownerLabel = localStorage.getItem('ttg_target_owner_name') || 'Veronica';
+      btn.textContent = `Submitting to ${ownerLabel}...`;
 
       // Safety check in case the staging.js script failed to load properly
       if (typeof StagingDB === 'undefined' || typeof StagingDB.submitDocket !== 'function') {
         toast('Error: Database connection not ready. Please refresh the page.', 'error');
         btn.disabled = false;
-        btn.textContent = 'Submit Docket for Veronica\'s Approval';
+        btn.textContent = `Submit Docket for ${ownerLabel}'s Approval`;
         return;
       }
 
@@ -1013,14 +1019,14 @@
         if (typeof TTGAudit !== 'undefined' && !bypassDuplicateCheck && !isResubmit) {
           btn.textContent = 'Verifying with Smart Audit...';
           try {
-            const existingPool = await StagingDB.getAllSubmissions(false);
+            const existingPool = await StagingDB.getAllSubmissions(getClerkTargetFilter());
             const auditResult = await TTGAudit.auditSubmission(docketData, existingPool, {
               excludeId: activeEditingDocketId || undefined
             });
 
             if (auditResult && (auditResult.isDuplicate || auditResult.recommendedAction === 'BLOCK_SUBMISSION')) {
               btn.disabled = false;
-              btn.textContent = 'Submit Docket for Veronica\'s Approval';
+              btn.textContent = `Submit Docket for ${targetName}'s Approval`;
               showClerkDuplicateModal(docketData, auditResult);
               return;
             }
@@ -1057,8 +1063,16 @@
         toast('Error submitting docket: ' + err.message, 'error');
       } finally {
         btn.disabled = false;
-        btn.textContent = 'Submit Docket for Veronica\'s Approval';
+        btn.textContent = `Submit Docket for ${targetName}'s Approval`;
       }
+    }
+
+    /** Target filter so a clerk link only ever sees its own owner's dockets */
+    function getClerkTargetFilter() {
+      return {
+        targetOwnerId: localStorage.getItem('ttg_target_owner_id') || '',
+        targetOwnerEmail: localStorage.getItem('ttg_target_owner_email') || ''
+      };
     }
 
     function showClerkDuplicateModal(docketData, auditResult) {
@@ -1219,7 +1233,7 @@
       try {
         let all = [];
         if (typeof StagingDB !== 'undefined' && typeof StagingDB.getAllSubmissions === 'function') {
-          all = await StagingDB.getAllSubmissions(false);
+          all = await StagingDB.getAllSubmissions(getClerkTargetFilter());
         } else {
           const stored = localStorage.getItem('ttg_staged_invoices');
           all = stored ? JSON.parse(stored) : [];
@@ -1340,7 +1354,7 @@
       try {
         let all = [];
         if (typeof StagingDB !== 'undefined' && typeof StagingDB.getAllSubmissions === 'function') {
-          all = await StagingDB.getAllSubmissions(false);
+          all = await StagingDB.getAllSubmissions(getClerkTargetFilter());
         } else {
           const stored = localStorage.getItem('ttg_staged_invoices');
           all = stored ? JSON.parse(stored) : [];

@@ -11,11 +11,15 @@ async function getCurrentUser() {
   if (!supabaseClient) return null;
   const { data: { session } } = await supabaseClient.auth.getSession();
   currentUser = session?.user || null;
+  if (currentUser) {
+    if (currentUser.id) localStorage.setItem('ttg_user_id', currentUser.id);
+    if (currentUser.email) localStorage.setItem('ttg_user_email', currentUser.email.toLowerCase().trim());
+  }
   return currentUser;
 }
 
 function getUserId() {
-  return currentUser?.id || null;
+  return currentUser?.id || localStorage.getItem('ttg_user_id') || null;
 }
 
 async function signUp(email, password) {
@@ -23,6 +27,10 @@ async function signUp(email, password) {
   const { data, error } = await supabaseClient.auth.signUp({ email, password });
   if (error) throw error;
   currentUser = data.user;
+  if (currentUser) {
+    if (currentUser.id) localStorage.setItem('ttg_user_id', currentUser.id);
+    if (currentUser.email) localStorage.setItem('ttg_user_email', currentUser.email.toLowerCase().trim());
+  }
   return data;
 }
 
@@ -31,6 +39,10 @@ async function verifyOtp(email, token) {
   const { data, error } = await supabaseClient.auth.verifyOtp({ email, token, type: 'signup' });
   if (error) throw error;
   currentUser = data.user;
+  if (currentUser) {
+    if (currentUser.id) localStorage.setItem('ttg_user_id', currentUser.id);
+    if (currentUser.email) localStorage.setItem('ttg_user_email', currentUser.email.toLowerCase().trim());
+  }
   return data;
 }
 
@@ -39,6 +51,10 @@ async function signIn(email, password) {
   const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
   if (error) throw error;
   currentUser = data.user;
+  if (currentUser) {
+    if (currentUser.id) localStorage.setItem('ttg_user_id', currentUser.id);
+    if (currentUser.email) localStorage.setItem('ttg_user_email', currentUser.email.toLowerCase().trim());
+  }
   return data;
 }
 
@@ -46,9 +62,11 @@ async function signOut() {
   if (!supabaseClient) return;
   await supabaseClient.auth.signOut();
   currentUser = null;
+  localStorage.removeItem('ttg_user_id');
+  localStorage.removeItem('ttg_user_email');
   // Clear ALL local data on sign out — comprehensive cleanup
   ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices',
    'ttg_staff', 'ttg_salary_payments', 'ttg_recurring_expenses',
    'ttg_price_lists', 'ttg_deleted_staff', 'ttg_deleted_pricelists',
-   'ttg_borrowings', 'ttg_settings', 'ttg_last_page'].forEach(k => localStorage.removeItem(k));
+   'ttg_borrowings', 'ttg_settings', 'ttg_last_page', 'ttg_staged_invoices'].forEach(k => localStorage.removeItem(k));
 }

@@ -226,31 +226,41 @@ const StagingDB = {
   /** Check if a submission belongs to the current user */
   isSubmissionForUser(item, userIdent) {
     if (!userIdent || (!userIdent.uid && !userIdent.email)) {
-      return true; // No active user filter (e.g. clerk portal view)
+      return false; // Never leak store submissions when user identity is unestablished
     }
+
+    const userEmail = (userIdent.email || '').toLowerCase().trim();
+    const userUid = userIdent.uid || '';
 
     // Explicit target user id or email match
     if (item.target_user_id || item.target_user_email) {
-      if (userIdent.uid && item.target_user_id === userIdent.uid) return true;
-      if (userIdent.email && item.target_user_email && item.target_user_email.toLowerCase() === userIdent.email) return true;
+      if (userUid && item.target_user_id === userUid) return true;
+      if (userEmail && item.target_user_email && item.target_user_email.toLowerCase().trim() === userEmail) return true;
       // Targeted to another specific account
       return false;
     }
 
     // Target specified inside notes: [Target: Veronica (email)]
     if (item.notes && item.notes.includes('[Target:')) {
-      if (userIdent.email && item.notes.toLowerCase().includes(userIdent.email)) return true;
-      if (userIdent.uid && item.notes.includes(userIdent.uid)) return true;
+      if (userEmail && item.notes.toLowerCase().includes(userEmail)) return true;
+      if (userUid && item.notes.includes(userUid)) return true;
       // Target specified for someone else
       return false;
     }
 
-    // Default legacy docket: allow review
-    return true;
+    // Default legacy untargeted docket: only show for Veronica's legacy account
+    if (userEmail && (userEmail.includes('veron') || userEmail.includes('njuguna'))) {
+      return true;
+    }
+    return false;
   },
 
   /** Fetch all submissions (combines Supabase and local queue with deduplication and user isolation) */
   async getAllSubmissions(filterForCurrentUser = true) {
+    if (filterForCurrentUser === true && typeof getCurrentUser === 'function' && (!currentUser || !currentUser.id)) {
+      try { await getCurrentUser(); } catch(e) {}
+    }
+
     const local = this.getLocalQueue();
     const hasSb = await this.checkSupabase();
     let combined = local;
@@ -303,6 +313,22 @@ const StagingDB = {
       }
     } else {
       combined = local.filter(x => !x.id || !x.id.startsWith('stg_demo_'));
+    }
+
+    // Support explicit target object filtering (e.g. from clerk portal)
+    if (filterForCurrentUser && typeof filterForCurrentUser === 'object') {
+      const tId = filterForCurrentUser.targetOwnerId || '';
+      const tEmail = (filterForCurrentUser.targetOwnerEmail || '').toLowerCase().trim();
+      return combined.filter(item => {
+        if (tId && item.target_user_id) return item.target_user_id === tId;
+        if (tEmail && item.target_user_email) return item.target_user_email.toLowerCase().trim() === tEmail;
+        if (item.notes && item.notes.includes('[Target:')) {
+          if (tEmail && item.notes.toLowerCase().includes(tEmail)) return true;
+          if (tId && item.notes.includes(tId)) return true;
+          return false;
+        }
+        return false;
+      });
     }
 
     if (!filterForCurrentUser) return combined;
