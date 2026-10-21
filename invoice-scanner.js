@@ -242,22 +242,15 @@ function applyExtractedItemsToInvoice() {
   try {
     if (data.restaurantName && typeof DB !== 'undefined') {
       const rawCand = (data.restaurantName || '').trim();
-      const normCand = (typeof TTGAudit !== 'undefined' && TTGAudit.normalizeHotel)
-        ? TTGAudit.normalizeHotel(rawCand)
-        : rawCand.toLowerCase().replace(/[^a-z0-9]/g, '');
-
-      const matched = (DB.restaurants || []).find(r => {
-        if (!r || !r.name) return false;
-        const rNorm = (typeof TTGAudit !== 'undefined' && TTGAudit.normalizeHotel)
-          ? TTGAudit.normalizeHotel(r.name)
-          : r.name.toLowerCase().replace(/[^a-z0-9]/g, '');
-        return (rNorm && normCand && (rNorm === normCand || normCand.includes(rNorm) || rNorm.includes(normCand)))
-          || r.name.toLowerCase().includes(rawCand.toLowerCase())
-          || rawCand.toLowerCase().includes(r.name.toLowerCase());
-      });
+      const matched = findRestaurantByName(rawCand, DB.restaurants || []);
       if (matched) {
         const invRest = document.getElementById('invRestaurant');
         if (invRest) invRest.value = matched.id;
+      } else {
+        const possibleMatches = findPotentialRestaurantMatches(rawCand, DB.restaurants || []);
+        if (possibleMatches.length && typeof toast === 'function') {
+          toast(`OCR read “${rawCand}”. Check whether it is ${possibleMatches[0].name}; add the OCR spelling as an alias to link them.`, 'warning');
+        }
       }
     }
   } catch (restErr) {

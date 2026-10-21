@@ -1434,6 +1434,7 @@
         <input type="hidden" id="editRestaurantId">
         <div class="form-group"><label>Restaurant Name</label><input type="text" class="form-control" id="restName"
             required></div>
+        <div class="form-group"><label>Other invoice spellings / aliases</label><textarea class="form-control" id="restAliases" rows="2" placeholder="Thrive Craft, Thrive Kitchen"></textarea><small style="color:var(--text-2)">Enter one spelling per line. OCR and invoice approval will link these spellings to this restaurant. Matching existing restaurant records can be merged with their invoices.</small></div>
         <div class="form-row">
           <div class="form-group"><label>Contact Person</label><input type="text" class="form-control" id="restContact">
           </div>
@@ -2435,17 +2436,17 @@
       }
     })();
   </script>
-  <script src="data.js?v=1.2.3"></script>
-  <script src="nav.js?v=1.2.3"></script>
+  <script src="data.js?v=1.2.7"></script>
+  <script src="nav.js?v=1.2.7"></script>
   <script src="invoices.js?v=1.2.3"></script>
   <script src="views.js?v=1.2.3"></script>
   <script src="dashboard.js?v=1.2.3"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="ocr-consensus.js?v=1.2.6"></script>
-  <script src="staging.js?v=1.2.6"></script>
+  <script src="staging.js?v=1.2.7"></script>
   <script src="duplicate-detector.js?v=1.0.0"></script>
   <script src="clerk-approval.js?v=1.2.6"></script>
-  <script src="invoice-scanner.js?v=1.2.6"></script>
+  <script src="invoice-scanner.js?v=1.2.7"></script>
   <script>
   /* ══ Signature Scanner — Inline ══ */
   function openSignatureScanner() {

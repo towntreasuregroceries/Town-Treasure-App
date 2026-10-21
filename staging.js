@@ -455,15 +455,20 @@ const StagingDB = {
     const otherCost = parseFloat(adjustedData.otherCost !== undefined ? adjustedData.otherCost : item.other_cost) || 0;
     const profit = totalSell - totalBuy - deliveryCost - otherCost;
 
-    const restName = (adjustedData.restaurantName || item.restaurant_name || 'General Wholesale').trim();
+    let restName = (adjustedData.restaurantName || item.restaurant_name || 'General Wholesale').trim();
 
     // Check if restaurant exists in Veronica's restaurant book
     let restId = null;
     if (typeof DB !== 'undefined' && DB.restaurants) {
-      const match = DB.restaurants.find(r => r.name.toLowerCase() === restName.toLowerCase());
+      const match = findRestaurantByName(restName, DB.restaurants);
       if (match) {
         restId = match.id;
+        restName = match.name; // Keep reports and invoices under the canonical account name.
       } else {
+        const possibleMatches = findPotentialRestaurantMatches(restName, DB.restaurants);
+        if (possibleMatches.length) {
+          throw new Error(`“${restName}” may be ${possibleMatches[0].name}. Add it as an alias to the correct restaurant, then approve again.`);
+        }
         // Auto-create restaurant record if not present
         restId = typeof genId === 'function' ? genId() : 'rst_' + Date.now();
         const rList = DB.restaurants;

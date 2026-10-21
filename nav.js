@@ -32,35 +32,71 @@ document.querySelectorAll('.nav-item[data-page]').forEach(n => {
 /* ══ Restaurants ══ */
 function openNewRestaurantModal() {
   document.getElementById('editRestaurantId').value = '';
-  ['restName','restContact','restPhone','restAddress'].forEach(f => document.getElementById(f).value = '');
+  ['restName','restAliases','restContact','restPhone','restAddress'].forEach(f => document.getElementById(f).value = '');
   document.getElementById('restaurantModalTitle').textContent = 'Add Restaurant';
   openModal('restaurantModal');
 }
 function saveRestaurant() {
   const id = document.getElementById('editRestaurantId').value;
-  const r = { id: id || genId(), name: document.getElementById('restName').value.trim(), contact: document.getElementById('restContact').value.trim(), phone: document.getElementById('restPhone').value.trim(), address: document.getElementById('restAddress').value.trim() };
+  const aliases = (document.getElementById('restAliases').value || '').split(/[\n,;]+/).map(x => x.trim()).filter(Boolean);
+  const r = { id: id || genId(), name: document.getElementById('restName').value.trim(), aliases, contact: document.getElementById('restContact').value.trim(), phone: document.getElementById('restPhone').value.trim(), address: document.getElementById('restAddress').value.trim() };
   if (!r.name) return toast('Name is required', 'error');
   const list = DB.restaurants;
   const idx = list.findIndex(x => x.id === r.id);
   const isNew = idx < 0;
-  if (!isNew) list[idx] = r; else list.push(r);
+  const otherRestaurants = list.filter(x => x.id !== r.id);
+  const proposedNames = [r.name, ...r.aliases];
+  const duplicates = otherRestaurants.filter(existing =>
+    proposedNames.some(name => findRestaurantByName(name, [existing]))
+  );
+  if (isNew && duplicates.length) {
+    return toast(`“${duplicates[0].name}” already exists. Edit it and add other spellings as aliases.`, 'error');
+  }
+  const commit = () => saveRestaurantRecord(r, isNew, duplicates);
+  if (duplicates.length) {
+    const names = duplicates.map(x => x.name).join(', ');
+    return customConfirm(
+      `Merge ${names} into ${r.name}? Existing invoices will be reassigned to ${r.name}, and future OCR matches will use this restaurant.`,
+      'Merge Duplicate Restaurants', 'Merge & Save', false, commit
+    );
+  }
+  commit();
+}
+function saveRestaurantRecord(r, isNew, duplicates = []) {
+  const duplicateIds = new Set(duplicates.map(x => x.id));
+  if (duplicateIds.size) {
+    const duplicateNames = new Set(duplicates.flatMap(x => [x.name, ...(Array.isArray(x.aliases) ? x.aliases : [])])
+      .map(normalizeRestaurantName));
+    DB.deletedRestaurantIds = Array.from(new Set([...(DB.deletedRestaurantIds || []), ...duplicateIds]));
+    DB.invoices = DB.invoices.map(invoice => duplicateIds.has(invoice.restaurantId)
+      || duplicateNames.has(normalizeRestaurantName(invoice.restaurantName))
+      ? { ...invoice, restaurantId: r.id, restaurantName: r.name }
+      : invoice);
+  }
+  const list = DB.restaurants.filter(existing => !duplicateIds.has(existing.id));
+  const idx = list.findIndex(x => x.id === r.id);
+  if (idx >= 0) list[idx] = r; else list.push(r);
   DB.restaurants = list;
   closeModal('restaurantModal');
   document.getElementById('editRestaurantId').value = '';
-  ['restName','restContact','restPhone','restAddress'].forEach(f => document.getElementById(f).value = '');
+  ['restName','restAliases','restContact','restPhone','restAddress'].forEach(f => document.getElementById(f).value = '');
   renderRestaurants();
   populateRestaurantDropdowns();
   if (isNew) {
     const invRestaurant = document.getElementById('invRestaurant');
     if (invRestaurant) invRestaurant.value = r.id;
   }
-  toast(isNew ? 'Restaurant added' : 'Restaurant updated');
+  if (typeof DB.syncNow === 'function') DB.syncNow();
+  toast(duplicates.length
+    ? `Restaurant saved; merged ${duplicates.length} duplicate restaurant record${duplicates.length === 1 ? '' : 's'}.`
+    : (isNew ? 'Restaurant added' : 'Restaurant updated'));
 }
 function editRestaurant(id) {
   const r = DB.restaurants.find(x => x.id === id);
   if (!r) return;
   document.getElementById('editRestaurantId').value = r.id;
   document.getElementById('restName').value = r.name;
+  document.getElementById('restAliases').value = Array.isArray(r.aliases) ? r.aliases.join('\n') : '';
   document.getElementById('restContact').value = r.contact || '';
   document.getElementById('restPhone').value = r.phone || '';
   document.getElementById('restAddress').value = r.address || '';
@@ -69,8 +105,10 @@ function editRestaurant(id) {
 }
 function deleteRestaurant(id) {
   customConfirm('Are you sure you want to delete this restaurant? All associated invoices will remain but show as Unknown.', 'Delete Restaurant', 'Yes, Delete', true, () => {
+    DB.deletedRestaurantIds = Array.from(new Set([...(DB.deletedRestaurantIds || []), id]));
     DB.restaurants = DB.restaurants.filter(x => x.id !== id);
     renderRestaurants();
+    if (typeof DB.syncNow === 'function') DB.syncNow();
     toast('Restaurant deleted');
   });
 }

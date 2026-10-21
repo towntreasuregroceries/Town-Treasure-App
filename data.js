@@ -94,6 +94,7 @@ const Crypto = {
 
 const state = {
   restaurants: JSON.parse(localStorage.getItem('ttg_restaurants') || '[]'),
+  deletedRestaurantIds: JSON.parse(localStorage.getItem('ttg_deleted_restaurant_ids') || '[]'),
   invoices: JSON.parse(localStorage.getItem('ttg_invoices') || '[]'),
   expenses: JSON.parse(localStorage.getItem('ttg_expenses') || '[]'),
   deletedInvoices: JSON.parse(localStorage.getItem('ttg_deleted_invoices') || '[]'),
@@ -111,6 +112,8 @@ const state = {
 const DB = {
   get restaurants() { return state.restaurants; },
   set restaurants(v) { state.restaurants = v; localStorage.setItem('ttg_restaurants', JSON.stringify(v)); this.syncToSupabase(); },
+  get deletedRestaurantIds() { return state.deletedRestaurantIds; },
+  set deletedRestaurantIds(v) { state.deletedRestaurantIds = Array.isArray(v) ? v : []; localStorage.setItem('ttg_deleted_restaurant_ids', JSON.stringify(state.deletedRestaurantIds)); this.syncToSupabase(); },
   get invoices() { return state.invoices; },
   set invoices(v) { state.invoices = v; localStorage.setItem('ttg_invoices', JSON.stringify(v)); this.syncToSupabase(); },
   get expenses() { return state.expenses; },
@@ -201,14 +204,25 @@ const DB = {
               }
             }
 
-            // Merge remote restaurants that might be missing locally
+            // A deletion tombstone prevents intentional restaurant removals from
+            // being resurrected by the safety merge from a stale remote snapshot.
+            const deletedRestaurantIds = new Set([
+              ...(state.deletedRestaurantIds || []),
+              ...(remoteVault.deletedRestaurantIds || [])
+            ]);
+            state.deletedRestaurantIds = Array.from(deletedRestaurantIds);
+            localStorage.setItem('ttg_deleted_restaurant_ids', JSON.stringify(state.deletedRestaurantIds));
+            state.restaurants = state.restaurants.filter(r => r && !deletedRestaurantIds.has(r.id));
+            localStorage.setItem('ttg_restaurants', JSON.stringify(state.restaurants));
+
+            // Merge remote restaurants that might be missing locally, except those deleted.
             if (Array.isArray(remoteVault.restaurants) && remoteVault.restaurants.length > 0) {
               const localRestMap = new Map();
               state.restaurants.forEach(r => localRestMap.set(r.name || r.id, r));
               let addedAny = false;
               remoteVault.restaurants.forEach(remRest => {
                 const key = remRest.name || remRest.id;
-                if (!localRestMap.has(key)) {
+                if (remRest && !deletedRestaurantIds.has(remRest.id) && !localRestMap.has(key)) {
                   localRestMap.set(key, remRest);
                   addedAny = true;
                 }
@@ -232,6 +246,7 @@ const DB = {
         invoices: state.invoices,
         expenses: state.expenses,
         restaurants: state.restaurants,
+        deletedRestaurantIds: state.deletedRestaurantIds,
         deletedInvoices: state.deletedInvoices,
         staff: state.staff,
         salaryPayments: state.salaryPayments,
@@ -280,6 +295,8 @@ const DB = {
       return false;
     }
 
+    const localDeletedRestaurantIds = new Set(state.deletedRestaurantIds || []);
+
     try {
       const { data, error } = await supabaseClient
         .from('encrypted_vault')
@@ -295,9 +312,18 @@ const DB = {
         const appState = await Crypto.decrypt(data.data, jwkKey);
         
         if (appState) {
+          const remoteDeletedRestaurantIds = new Set(appState.deletedRestaurantIds || []);
+          const hasUnsyncedLocalRestaurantDeletion = [...localDeletedRestaurantIds]
+            .some(id => !remoteDeletedRestaurantIds.has(id));
+          // Keep local deletion tombstones during offline use, and merge them
+          // with remote tombstones so other signed-in devices honor deletions.
+          state.deletedRestaurantIds = Array.from(new Set([
+            ...(state.deletedRestaurantIds || []),
+            ...(appState.deletedRestaurantIds || [])
+          ]));
           state.invoices = appState.invoices || [];
           state.expenses = appState.expenses || [];
-          state.restaurants = appState.restaurants || [];
+          state.restaurants = (appState.restaurants || []).filter(r => r && !state.deletedRestaurantIds.includes(r.id));
           state.deletedInvoices = appState.deletedInvoices || [];
           state.staff = appState.staff || [];
           state.salaryPayments = appState.salaryPayments || [];
@@ -311,6 +337,7 @@ const DB = {
           localStorage.setItem('ttg_invoices', JSON.stringify(state.invoices));
           localStorage.setItem('ttg_expenses', JSON.stringify(state.expenses));
           localStorage.setItem('ttg_restaurants', JSON.stringify(state.restaurants));
+          localStorage.setItem('ttg_deleted_restaurant_ids', JSON.stringify(state.deletedRestaurantIds));
           localStorage.setItem('ttg_deleted_invoices', JSON.stringify(state.deletedInvoices));
           localStorage.setItem('ttg_staff', JSON.stringify(state.staff));
           localStorage.setItem('ttg_salary_payments', JSON.stringify(state.salaryPayments));
@@ -320,6 +347,9 @@ const DB = {
           localStorage.setItem('ttg_deleted_pricelists', JSON.stringify(state.deletedPriceLists));
           localStorage.setItem('ttg_borrowings', JSON.stringify(state.borrowings));
           localStorage.setItem('ttg_settings', JSON.stringify(state.settings));
+
+          // Carry offline deletions back to the encrypted vault on reconnection.
+          if (hasUnsyncedLocalRestaurantDeletion) this.syncToSupabase();
           
           console.log('Loaded and decrypted data from vault');
           return true;
@@ -338,6 +368,7 @@ const DB = {
 
   clearLocalData() {
     state.restaurants = [];
+    state.deletedRestaurantIds = [];
     state.invoices = [];
     state.expenses = [];
     state.deletedInvoices = [];
@@ -349,12 +380,48 @@ const DB = {
     state.deletedPriceLists = [];
     state.borrowings = [];
     state.settings = {};
-    ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices',
+    ['ttg_restaurants', 'ttg_deleted_restaurant_ids', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices',
      'ttg_staff', 'ttg_salary_payments', 'ttg_recurring_expenses',
      'ttg_price_lists', 'ttg_deleted_staff', 'ttg_deleted_pricelists',
      'ttg_borrowings', 'ttg_settings'].forEach(k => localStorage.removeItem(k));
   }
 };
+
+/** Normalize restaurant names for exact name and alias matching. */
+function normalizeRestaurantName(name) {
+  return String(name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/&/g, ' and ')
+    .replace(/\b(the|hotel|hotels|restaurant|restaurants|suites|resort|club|inn|lodge|limited|ltd)\b/g, ' ')
+    .replace(/[^a-z0-9]/g, '');
+}
+
+/** Resolve an OCR or clerk-entered name only when it exactly matches a known name/alias. */
+function findRestaurantByName(name, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
+  const key = normalizeRestaurantName(name);
+  if (!key) return null;
+  return (restaurants || []).find(r => r && [r.name, ...(Array.isArray(r.aliases) ? r.aliases : [])]
+    .some(value => normalizeRestaurantName(value) === key)) || null;
+}
+
+/** Identify possible near matches that need a human to register as an alias. */
+function findPotentialRestaurantMatches(name, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
+  const tokens = value => String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/&/g, ' and ')
+    .replace(/\b(the|hotel|hotels|restaurant|restaurants|suites|resort|club|inn|lodge|limited|ltd)\b/g, ' ')
+    .match(/[a-z0-9]+/g) || [];
+  const candidateTokens = new Set(tokens(name));
+  if (!candidateTokens.size) return [];
+  return (restaurants || []).map(r => {
+    if (!r) return null;
+    const variants = [r.name, ...(Array.isArray(r.aliases) ? r.aliases : [])];
+    const score = Math.max(...variants.map(value => {
+      const variantTokens = new Set(tokens(value));
+      const shared = [...candidateTokens].filter(token => variantTokens.has(token)).length;
+      return shared / Math.max(1, Math.min(candidateTokens.size, variantTokens.size));
+    }));
+    return score >= 0.5 ? { restaurant: r, score } : null;
+  }).filter(Boolean).sort((a, b) => b.score - a.score).map(match => match.restaurant);
+}
 
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function fmtMoney(n) { return Number(n || 0).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
