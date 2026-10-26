@@ -124,12 +124,14 @@ async function renderClerkSubmissionsPage() {
               View Details
             </button>
           `}
-          <button class="btn btn-sm" onclick="confirmDeleteSubmission('${item.id}', '${escapeHtml(item.restaurant_name)}')" title="Delete this docket" style="background:#fff; border:1px solid #fecaca; color:#dc2626; padding:5px 8px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="3 6 5 6 21 6"></polyline>
-              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-            </svg>
-          </button>
+          ${item.status !== 'approved' ? `
+            <button class="btn btn-sm" onclick="confirmDeleteSubmission('${item.id}', '${escapeHtml(item.restaurant_name)}')" title="Delete this docket" style="background:#fff; border:1px solid #fecaca; color:#dc2626; padding:5px 8px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center;">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="3 6 5 6 21 6"></polyline>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+              </svg>
+            </button>
+          ` : ''}
         </div>
       `;
 
@@ -279,6 +281,7 @@ async function openClerkReviewModal(id) {
   // Button visibility based on status
   const approveBtn = document.getElementById('btnCrmApprove');
   const rejectBtn = document.getElementById('btnCrmReject');
+  const deleteBtn = document.getElementById('btnCrmDelete');
   const suppWrap = document.getElementById('crmSupplementaryConfirmWrap');
   const chkConfirm = document.getElementById('crmConfirmSupplementaryCheckbox');
   const banner = document.getElementById('crmIntegrityAlertBanner');
@@ -297,13 +300,18 @@ async function openClerkReviewModal(id) {
     if (approveBtn) approveBtn.style.display = 'none';
     if (rejectBtn) rejectBtn.style.display = 'none';
   }
+  if (deleteBtn) deleteBtn.style.display = item.status === 'approved' ? 'none' : 'inline-flex';
 
   // ══ Town Treasure Ledger Integrity Guard Check ══
   if (banner && typeof TTGAudit !== 'undefined' && typeof DB !== 'undefined' && Array.isArray(DB.invoices)) {
     banner.style.display = 'none';
     banner.innerHTML = '';
 
-    TTGAudit.auditSubmission(item, DB.invoices.filter(invoice => invoice && invoice.status !== 'draft')).then(audit => {
+    StagingDB.getAllSubmissions(false).then(staged => {
+      const otherPending = (staged || []).filter(record => record && record.id !== id && record.status === 'pending');
+      const ledgerInvoices = DB.invoices.filter(invoice => invoice && invoice.status !== 'draft');
+      return TTGAudit.auditSubmission(item, [...ledgerInvoices, ...otherPending]);
+    }).then(audit => {
       if (activeReviewSubmissionId !== id) return;
       if (!audit) {
         activeReviewAudit = { id, state: 'error' };
@@ -608,49 +616,44 @@ async function confirmDeleteSubmission(id, restName) {
 
 /** Helper to build a personalized, targeted Clerk Portal URL for the active account */
 async function getClerkPortalShareUrl() {
-  let user = null;
-  if (typeof getCurrentUser === 'function') {
-    try { user = await getCurrentUser(); } catch(e) {}
+  if (typeof StagingDB === 'undefined' || typeof StagingDB.createClerkInvite !== 'function') {
+    throw new Error('Secure clerk invite service is not available yet.');
   }
-  const uid = user ? user.id : (localStorage.getItem('ttg_user_id') || '');
-  const email = user ? (user.email || '') : (localStorage.getItem('ttg_user_email') || '');
-  const name = user?.user_metadata?.full_name || (email ? email.split('@')[0] : 'Veronica');
-  
+  const result = await StagingDB.createClerkInvite();
+  if (!result.token) throw new Error('The server did not return a clerk invite token.');
   const baseUrl = window.location.origin + window.location.pathname.replace(/[^\/]*$/, 'clerk.html');
-  const params = new URLSearchParams();
-  if (uid) params.set('to', uid);
-  if (name) params.set('name', name);
-  if (email) params.set('email', email);
-  
-  const query = params.toString();
-  return query ? `${baseUrl}?${query}` : baseUrl;
+  return `${baseUrl}#invite=${encodeURIComponent(result.token)}`;
 }
 
 /** Copy personalized Clerk Portal direct URL to clipboard */
 async function copyClerkPortalLink() {
-  const url = await getClerkPortalShareUrl();
-  const ident = typeof StagingDB !== 'undefined' ? StagingDB.getCurrentUserIdentifier() : {};
-  const targetLabel = ident.email || 'Veronica';
-  
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(url).then(() => {
-      toast(`Clerk Portal link copied! Linked directly to your account (${targetLabel}).`, 'success');
-    }).catch(() => {
-      prompt(`Copy this Clerk Portal link (routed to ${targetLabel}):`, url);
-    });
-  } else {
-    prompt(`Copy this Clerk Portal link (routed to ${targetLabel}):`, url);
+  try {
+    const url = await getClerkPortalShareUrl();
+    const ident = typeof StagingDB !== 'undefined' ? StagingDB.getCurrentUserIdentifier() : {};
+    const targetLabel = ident.email || 'your account';
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(url);
+      toast(`Secure Clerk Link copied for ${targetLabel}. Previous links were revoked; this one expires after 30 days.`, 'success');
+    } else {
+      prompt(`Copy this secure Clerk Link for ${targetLabel}:`, url);
+    }
+  } catch (err) {
+    toast('Could not create a secure Clerk Link: ' + err.message, 'error');
   }
 }
 
 /** Share personalized Clerk Portal URL directly via WhatsApp */
 async function shareClerkPortalWhatsApp() {
-  const url = await getClerkPortalShareUrl();
-  const ident = typeof StagingDB !== 'undefined' ? StagingDB.getCurrentUserIdentifier() : {};
-  const name = ident.email ? ident.email.split('@')[0] : 'Veronica';
-  const text = `Hi! Here is your Town Treasure Groceries Clerk Portal link to submit produce dockets directly for ${name}'s review and approval:\n\n${url}`;
-  const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
-  window.open(waUrl, '_blank');
+  try {
+    const url = await getClerkPortalShareUrl();
+    const ident = typeof StagingDB !== 'undefined' ? StagingDB.getCurrentUserIdentifier() : {};
+    const name = ident.email ? ident.email.split('@')[0] : 'the account owner';
+    const text = `Hi! Here is your secure Town Treasure Groceries Clerk Portal link to submit dockets for ${name}'s review. This link expires after 30 days; older clerk links are no longer valid:\n\n${url}`;
+    const waUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`;
+    window.open(waUrl, '_blank');
+  } catch (err) {
+    toast('Could not create a secure Clerk Link: ' + err.message, 'error');
+  }
 }
 
 /** Check for incoming shared docket code in URL parameters */

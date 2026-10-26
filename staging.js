@@ -5,10 +5,58 @@
 
 const StagingDB = {
   _supabaseAvailable: null,
+  _clerkInviteOwner: null,
+
+  getClerkInviteToken() {
+    try {
+      return sessionStorage.getItem('ttg_clerk_invite_token') || '';
+    } catch (e) {
+      return '';
+    }
+  },
+
+  isClerkPortalPage() {
+    return /(?:^|\/)clerk\.html$/i.test(window.location.pathname);
+  },
+
+  getClerkSubmissionKey() {
+    let key = '';
+    try { key = sessionStorage.getItem('ttg_clerk_submission_key') || ''; } catch (e) {}
+    if (!key) {
+      key = typeof crypto !== 'undefined' && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `sub_${Date.now()}_${Math.random().toString(36).slice(2, 14)}`;
+      try { sessionStorage.setItem('ttg_clerk_submission_key', key); } catch (e) {}
+    }
+    return key;
+  },
+
+  resetClerkSubmissionKey() {
+    try { sessionStorage.removeItem('ttg_clerk_submission_key'); } catch (e) {}
+  },
+
+  async callClerkApi(body) {
+    if (!supabaseClient) throw new Error('Secure clerk service is unavailable. Reconnect and retry.');
+    const { data, error } = await supabaseClient.functions.invoke('clerk-api', { body });
+    if (error) {
+      let message = error.message || 'Clerk request failed.';
+      try {
+        const detail = await error.context?.json();
+        if (detail?.error) message = detail.error;
+      } catch (e) {}
+      throw new Error(message);
+    }
+    if (!data || data.error) throw new Error(data?.error || 'Clerk service returned no result.');
+    return data;
+  },
+
+  async createClerkInvite() {
+    return await this.callClerkApi({ action: 'create_invite' });
+  },
 
   /** Check if Supabase client is initialized and staged_invoices table is accessible */
   async checkSupabase() {
-    if (this._supabaseAvailable !== null) return this._supabaseAvailable;
+    if (this._supabaseAvailable === true) return true;
     if (typeof supabaseClient === 'undefined' || !supabaseClient) {
       this._supabaseAvailable = false;
       return false;
@@ -16,7 +64,7 @@ const StagingDB = {
     try {
       const { error } = await supabaseClient.from('staged_invoices').select('id').limit(1);
       this._supabaseAvailable = !error;
-      return this._supabaseAvailable;
+      return !error;
     } catch (e) {
       this._supabaseAvailable = false;
       return false;
@@ -245,6 +293,8 @@ const StagingDB = {
     const userEmail = (userIdent.email || '').toLowerCase().trim();
     const userUid = userIdent.uid || '';
 
+    if (item.owner_user_id) return Boolean(userUid && item.owner_user_id === userUid);
+
     // Explicit target user id or email match
     if (item.target_user_id || item.target_user_email) {
       if (userUid && item.target_user_id === userUid) return true;
@@ -270,12 +320,29 @@ const StagingDB = {
 
   /** Fetch all submissions (combines Supabase and local queue with deduplication and user isolation) */
   async getAllSubmissions(filterForCurrentUser = true) {
-    if (filterForCurrentUser === true && typeof getCurrentUser === 'function' && (!currentUser || !currentUser.id)) {
+    const inviteToken = this.getClerkInviteToken();
+    if (inviteToken) {
+      const result = await this.callClerkApi({ action: 'list', invite_token: inviteToken });
+      this._clerkInviteOwner = result.owner || null;
+      return Array.isArray(result.submissions) ? result.submissions : [];
+    }
+    if (this.isClerkPortalPage()) {
+      throw new Error('This clerk page needs a valid invite link. Ask the account owner for a new one.');
+    }
+
+    if (typeof getCurrentUser === 'function' && (!currentUser || !currentUser.id)) {
       try { await getCurrentUser(); } catch(e) {}
     }
 
+    const userIdent = this.getCurrentUserIdentifier();
     const deletedIds = new Set(this.getDeletedQueueIds());
-    const local = this.getLocalQueue().filter(item => !deletedIds.has(item.id));
+    const local = this.getLocalQueue().filter(item => {
+      if (deletedIds.has(item.id)) return false;
+      if (!userIdent?.uid) return false;
+      return item.owner_user_id === userIdent.uid
+        || item.target_user_id === userIdent.uid
+        || (userIdent.email && (item.target_user_email || '').toLowerCase().trim() === userIdent.email.toLowerCase().trim());
+    });
     const hasSb = await this.checkSupabase();
     let combined = local;
 
@@ -357,7 +424,6 @@ const StagingDB = {
 
     if (!filterForCurrentUser) return combined;
 
-    const userIdent = this.getCurrentUserIdentifier();
     return combined.filter(item => this.isSubmissionForUser(item, userIdent));
   },
 
@@ -374,7 +440,10 @@ const StagingDB = {
       return 'stg_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
     };
 
-    const targetId = docket.target_user_id || localStorage.getItem('ttg_target_owner_id') || null;
+    const signedInUserId = (typeof getUserId === 'function' && getUserId())
+      || (typeof currentUser !== 'undefined' && currentUser?.id)
+      || null;
+    const targetId = signedInUserId || docket.target_user_id || localStorage.getItem('ttg_target_owner_id') || null;
     const targetEmail = docket.target_user_email || localStorage.getItem('ttg_target_owner_email') || null;
     const targetName = docket.target_user_name || localStorage.getItem('ttg_target_owner_name') || 'Veronica';
 
@@ -388,6 +457,7 @@ const StagingDB = {
 
     const record = {
       id: docket.id || genUUID(),
+      owner_user_id: signedInUserId || targetId,
       clerk_name: (docket.clerk_name || 'Clerk').trim(),
       restaurant_name: (docket.restaurant_name || 'General Wholesale').trim(),
       invoice_date: docket.invoice_date || new Date().toISOString().slice(0, 10),
@@ -407,10 +477,38 @@ const StagingDB = {
       created_at: docket.created_at || new Date().toISOString()
     };
 
-    // An explicit resubmission with the same ID clears an earlier delete marker.
-    this.setDeletedQueueIds(this.getDeletedQueueIds().filter(deletedId => deletedId !== record.id));
+    const inviteToken = this.getClerkInviteToken();
+    if (inviteToken) {
+      // The invite token is verified server-side. Never fall back to a local
+      // queue or direct anon-table write when the secure service is unavailable.
+      const result = await this.callClerkApi({
+        action: 'submit',
+        invite_token: inviteToken,
+        submission_key: docket.submission_key || this.getClerkSubmissionKey(),
+        docket: record,
+      });
+      const saved = result.submission;
+      if (!saved?.id) throw new Error('The server did not confirm the saved docket. Keep this form open and retry.');
+      this.setDeletedQueueIds(this.getDeletedQueueIds().filter(deletedId => deletedId !== saved.id));
+      const inviteLocal = this.getLocalQueue();
+      const inviteIndex = inviteLocal.findIndex(item => item.id === saved.id);
+      if (inviteIndex >= 0) inviteLocal[inviteIndex] = saved;
+      else inviteLocal.unshift(saved);
+      this.setLocalQueue(inviteLocal);
+      return saved;
+    }
+    if (this.isClerkPortalPage()) {
+      throw new Error('This clerk page needs a valid invite link. Ask the account owner for a new one.');
+    }
 
-    // 1. Save or update in local queue
+    if (!signedInUserId) throw new Error('Sign in to save a clerk docket to the review queue.');
+    const hasSb = await this.checkSupabase();
+    if (!hasSb) throw new Error('Could not reach the secure review queue. The docket was not submitted; keep the form open and retry.');
+    const { error: saveError } = await supabaseClient.from('staged_invoices').upsert([record], { onConflict: 'id' });
+    if (saveError) throw new Error('The review queue did not confirm this docket: ' + saveError.message);
+
+    // Update local cache only after the server confirms the write.
+    this.setDeletedQueueIds(this.getDeletedQueueIds().filter(deletedId => deletedId !== record.id));
     const local = this.getLocalQueue();
     const existingIdx = local.findIndex(x => x.id === record.id);
     if (existingIdx >= 0) {
@@ -420,29 +518,7 @@ const StagingDB = {
     }
     this.setLocalQueue(local);
 
-    // 2. Upsert into Supabase if accessible
-    const hasSb = await this.checkSupabase();
-    if (hasSb) {
-      try {
-        const { error } = await supabaseClient.from('staged_invoices').upsert([record], { onConflict: 'id' });
-        if (error) {
-          if (error.message && (error.message.includes('column') || error.code === '42703')) {
-            console.warn('[Staging] Table missing target columns, retrying core upsert:', error.message);
-            const coreRecord = { ...record };
-            delete coreRecord.target_user_id;
-            delete coreRecord.target_user_email;
-            delete coreRecord.target_user_name;
-            await supabaseClient.from('staged_invoices').upsert([coreRecord], { onConflict: 'id' });
-          } else {
-            console.warn('[Staging] Supabase upsert warning:', error);
-          }
-        }
-      } catch (sbErr) {
-        console.warn('[Staging] Supabase upsert error:', sbErr);
-      }
-    }
-
-    // 3. Update pending badge if in app
+    // Update pending badge if in app
     if (typeof this.updatePendingCountBadge === 'function') {
       this.updatePendingCountBadge();
     }
@@ -475,14 +551,17 @@ const StagingDB = {
         local.unshift({ ...item, status: 'approved', rejection_reason: '', generated_invoice_number: existingInvoice.number });
       }
       this.setLocalQueue(local);
-      if (typeof DB.syncNow === 'function') await DB.syncNow();
+      if (typeof DB.syncNow !== 'function' || !(await DB.syncNow())) {
+        throw new Error('The invoice is only saved locally because the encrypted vault did not confirm sync. Keep this docket pending and retry sync before approving again.');
+      }
       try {
-        if (await this.checkSupabase()) {
-          await supabaseClient.from('staged_invoices')
-            .update({ status: 'approved', rejection_reason: '' }).eq('id', id);
-        }
+        if (!(await this.checkSupabase())) throw new Error('Review queue is unavailable.');
+        const { data: updated, error: statusError } = await supabaseClient.from('staged_invoices')
+          .update({ status: 'approved', rejection_reason: '' }).eq('id', id).select('id').maybeSingle();
+        if (statusError) throw statusError;
+        if (!updated) throw new Error('Staged docket is no longer available.');
       } catch (statusErr) {
-        console.warn('[Staging] Existing invoice found; status repair deferred:', statusErr);
+        throw new Error('The invoice is already safely in the vault, but its docket status could not be updated. Refresh and retry to repair the status.');
       }
       this.updatePendingCountBadge();
       return existingInvoice;
@@ -587,7 +666,9 @@ const StagingDB = {
       else invList.unshift(newInvoice);
       DB.invoices = invList;
     }
-    if (typeof DB.syncNow === 'function') await DB.syncNow();
+    if (typeof DB.syncNow !== 'function' || !(await DB.syncNow())) {
+      throw new Error('The invoice is only saved locally because the encrypted vault did not confirm sync. The docket remains pending; retry sync before approving again.');
+    }
 
     // Update staging status locally
     const local = this.getLocalQueue();
@@ -638,21 +719,20 @@ const StagingDB = {
           total_buy: totalBuy,
           items_json: items
         };
-        const { error } = await supabaseClient
+        const { data: statusUpdate, error } = await supabaseClient
           .from('staged_invoices')
           .update(updatePayload)
-          .eq('id', id);
+          .eq('id', id)
+          .select('id')
+          .maybeSingle();
 
-        if (error) {
-          console.warn('[Staging] Full status update warning, trying minimal:', error.message);
-          await supabaseClient
-            .from('staged_invoices')
-            .update({ status: 'approved', rejection_reason: '' })
-            .eq('id', id);
-        }
+        if (error) throw error;
+        if (!statusUpdate) throw new Error('The staged docket was not updated.');
       } catch (sbErr) {
-        console.warn('[Staging] Error updating status in Supabase:', sbErr);
+        throw new Error('The invoice is safely in the vault, but the docket status did not sync. Refresh and retry to repair the status.');
       }
+    } else {
+      throw new Error('The invoice is safely saved locally, but Supabase could not confirm the docket status. Reconnect and retry before treating the approval as complete.');
     }
 
     // Update badges
@@ -663,6 +743,13 @@ const StagingDB = {
 
   /** Reject a submission and send feedback back to the clerk */
   async rejectSubmission(id, reason = '') {
+    if (!(await this.checkSupabase())) throw new Error('Could not reach the review queue. The docket was not returned; reconnect and retry.');
+    const { data: updated, error: updateError } = await supabaseClient.from('staged_invoices')
+      .update({ status: 'rejected', rejection_reason: reason, updated_at: new Date().toISOString() })
+      .eq('id', id).eq('status', 'pending').select('id').maybeSingle();
+    if (updateError) throw updateError;
+    if (!updated) throw new Error('This docket is no longer pending. Refresh the queue before changing it.');
+
     const local = this.getLocalQueue();
     const lIdx = local.findIndex(x => x.id === id);
     if (lIdx >= 0) {
@@ -677,43 +764,28 @@ const StagingDB = {
     }
     this.setLocalQueue(local);
 
-    const hasSb = await this.checkSupabase();
-    if (hasSb) {
-      try {
-        const { error } = await supabaseClient
-          .from('staged_invoices')
-          .update({
-            status: 'rejected',
-            rejection_reason: reason
-          })
-          .eq('id', id);
-        if (error) console.warn('[Staging] Supabase reject error:', error);
-      } catch (sbErr) {
-        console.warn('[Staging] Error rejecting in Supabase:', sbErr);
-      }
-    }
-
     this.updatePendingCountBadge();
   },
 
   /** Permanently delete a docket from review queue (both Supabase and local cache) */
   async deleteSubmission(id) {
+    const inviteToken = this.getClerkInviteToken();
+    if (inviteToken) {
+      const result = await this.callClerkApi({ action: 'delete', invite_token: inviteToken, id });
+      if (result.deleted !== true) throw new Error('The server did not confirm this docket deletion.');
+      this.setLocalQueue(this.getLocalQueue().filter(item => item.id !== id));
+      this.setDeletedQueueIds([...this.getDeletedQueueIds(), id]);
+      return true;
+    }
+
+    if (!(await this.checkSupabase())) throw new Error('Could not reach the review queue. The docket was not deleted; reconnect and retry.');
+    const { data: removed, error: deleteError } = await supabaseClient.from('staged_invoices')
+      .delete().eq('id', id).neq('status', 'approved').select('id').maybeSingle();
+    if (deleteError) throw deleteError;
+    if (!removed) throw new Error('Only an unapproved docket can be deleted. Refresh the queue and check its status.');
     this.setDeletedQueueIds([...this.getDeletedQueueIds(), id]);
     const local = this.getLocalQueue().filter(x => x.id !== id);
     this.setLocalQueue(local);
-
-    const hasSb = await this.checkSupabase();
-    if (hasSb) {
-      try {
-        const { error } = await supabaseClient
-          .from('staged_invoices')
-          .delete()
-          .eq('id', id);
-        if (error) console.warn('[Staging] Supabase delete warning:', error);
-      } catch (sbErr) {
-        console.warn('[Staging] Error deleting from Supabase:', sbErr);
-      }
-    }
 
     this.updatePendingCountBadge();
     return true;

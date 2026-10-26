@@ -34,59 +34,9 @@ ALTER TABLE public.staged_invoices ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP
 -- Enable Row Level Security (RLS)
 ALTER TABLE public.staged_invoices ENABLE ROW LEVEL SECURITY;
 
--- Idempotent RLS policies (Created safely without DROP commands)
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies 
-    WHERE schemaname = 'public' 
-      AND tablename = 'staged_invoices' 
-      AND policyname = 'Allow public read of staged_invoices'
-  ) THEN
-    CREATE POLICY "Allow public read of staged_invoices" 
-      ON public.staged_invoices 
-      FOR SELECT 
-      USING (true);
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies 
-    WHERE schemaname = 'public' 
-      AND tablename = 'staged_invoices' 
-      AND policyname = 'Allow public insert of staged_invoices'
-  ) THEN
-    CREATE POLICY "Allow public insert of staged_invoices" 
-      ON public.staged_invoices 
-      FOR INSERT 
-      WITH CHECK (true);
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies 
-    WHERE schemaname = 'public' 
-      AND tablename = 'staged_invoices' 
-      AND policyname = 'Allow update of staged_invoices'
-  ) THEN
-    CREATE POLICY "Allow update of staged_invoices" 
-      ON public.staged_invoices 
-      FOR UPDATE 
-      USING (true) 
-      WITH CHECK (true);
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies 
-    WHERE schemaname = 'public' 
-      AND tablename = 'staged_invoices' 
-      AND policyname = 'Allow delete of staged_invoices'
-  ) THEN
-    CREATE POLICY "Allow delete of staged_invoices" 
-      ON public.staged_invoices 
-      FOR DELETE 
-      USING (true);
-  END IF;
-END
-$$;
+-- Do not add public/anon RLS policies here. Apply
+-- supabase_clerk_invite_security.sql after deploying the clerk-api Edge
+-- Function to enable authenticated owner access and verified invite actions.
 
 -- Indexes for speedy queries and multi-user isolation
 CREATE INDEX IF NOT EXISTS idx_staged_invoices_status ON public.staged_invoices(status);
