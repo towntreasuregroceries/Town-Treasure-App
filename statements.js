@@ -1,5 +1,34 @@
 /* ══ Monthly Restaurant Statements ══ */
 
+/**
+ * Match invoices to a restaurant by ID first. If an older invoice still points
+ * at a deleted/duplicate ID, allow a unique exact canonical name/alias match.
+ * Ambiguous names are excluded so a statement never combines two customers.
+ */
+function statementInvoiceBelongsToRestaurant(invoice, restaurant) {
+  if (!invoice || !restaurant) return false;
+  if (invoice.restaurantId === restaurant.id) return true;
+
+  const invoiceName = normalizeRestaurantName(invoice.restaurantName || '');
+  if (!invoiceName) return false;
+  const matches = (DB.restaurants || []).filter(candidate =>
+    [candidate.name, ...(Array.isArray(candidate.aliases) ? candidate.aliases : [])]
+      .some(name => normalizeRestaurantName(name) === invoiceName)
+  );
+  return matches.length === 1 && matches[0].id === restaurant.id;
+}
+
+function getStatementInvoices(restaurant) {
+  return (Array.isArray(DB.invoices) ? DB.invoices : []).filter(invoice =>
+    invoice && invoice.status !== 'draft' && statementInvoiceBelongsToRestaurant(invoice, restaurant)
+  );
+}
+
+function getStatementMonthEnd(month, year, monthNumber) {
+  const finalDay = new Date(year, monthNumber, 0).getDate();
+  return `${month}-${String(finalDay).padStart(2, '0')}`;
+}
+
 function renderStatementsPage() {
   const restSelect = document.getElementById('stmtRestaurant');
   if (restSelect) {
@@ -40,11 +69,10 @@ function buildStatementHTML(rest, month) {
   const [yr, mo] = month.split('-').map(Number);
   const monthName = new Date(yr, mo - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
   const monthStart = `${month}-01`;
-  const nextMonth = mo === 12 ? `${yr + 1}-01` : `${yr}-${String(mo + 1).padStart(2, '0')}`;
-  const monthEnd = new Date(yr, mo, 0).toISOString().slice(0, 10); // Last day of month
+  const monthEnd = getStatementMonthEnd(month, yr, mo);
 
-  // Get ALL invoices for this restaurant (not drafts)
-  const allInvoices = DB.invoices.filter(i => i.restaurantId === rest.id && i.status !== 'draft');
+  // Include exact restaurant-ID matches and uniquely resolved legacy aliases.
+  const allInvoices = getStatementInvoices(rest);
 
   // Opening balance: sum of unpaid invoices BEFORE this month
   const priorInvoices = allInvoices.filter(i => appDateKey(i.date) < appDateKey(monthStart));
@@ -334,7 +362,7 @@ async function downloadStatementPDF() {
     const [yr, mo] = month.split('-').map(Number);
     const monthName = new Date(yr, mo - 1, 1).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
     const monthStart = `${month}-01`;
-    const monthEnd = new Date(yr, mo, 0).toISOString().slice(0, 10);
+    const monthEnd = getStatementMonthEnd(month, yr, mo);
     
     // --- Title Row ---
     doc.setFont("helvetica", "bold");
@@ -386,7 +414,7 @@ async function downloadStatementPDF() {
     if (rest.phone) doc.text(rest.phone, 555, startY + 49, { align: "right" });
 
     // --- Data Processing ---
-    const allInvoices = DB.invoices.filter(i => i.restaurantId === rest.id && i.status !== 'draft');
+    const allInvoices = getStatementInvoices(rest);
     const priorInvoices = allInvoices.filter(i => appDateKey(i.date) < appDateKey(monthStart));
     const priorPaidTotal = priorInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.totalSell, 0);
     const priorInvoicedTotal = priorInvoices.reduce((s, i) => s + i.totalSell, 0);
