@@ -48,14 +48,14 @@ async function renderClerkSubmissionsPage() {
               When clerks or assistants enter or scan dockets at clerk.html, they appear here awaiting your review and encrypted approval.
             </p>
             <div style="display:flex; justify-content:center; gap:10px; flex-wrap:wrap;">
-              <a href="clerk.html" target="_blank" class="btn btn-sm btn-primary" style="text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+              <button type="button" onclick="openClerkIntakePortal()" class="btn btn-sm btn-primary" style="display:inline-flex; align-items:center; gap:6px;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
                   <polyline points="15 3 21 3 21 9"></polyline>
                   <line x1="10" y1="14" x2="21" y2="3"></line>
                 </svg>
                 Open Clerk Intake Portal
-              </a>
+              </button>
               <button class="btn btn-sm btn-secondary" onclick="openImportDocketModal()" style="display:inline-flex; align-items:center; gap:6px;">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
@@ -623,6 +623,27 @@ async function getClerkPortalShareUrl() {
   if (!result.token) throw new Error('The server did not return a clerk invite token.');
   const baseUrl = window.location.origin + window.location.pathname.replace(/[^\/]*$/, 'clerk.html');
   return `${baseUrl}#invite=${encodeURIComponent(result.token)}`;
+}
+
+/** Open a fresh, owner-scoped clerk portal using a newly issued invite. */
+async function openClerkIntakePortal() {
+  // Open synchronously from the click so the browser does not block the tab
+  // while the server creates the secure invite.
+  const portalWindow = window.open('about:blank', '_blank');
+  if (!portalWindow) {
+    toast('Allow pop-ups for this app, then open the Clerk Intake Portal again.', 'error');
+    return;
+  }
+
+  try {
+    portalWindow.opener = null;
+    portalWindow.document.title = 'Opening Clerk Intake Portal…';
+    const url = await getClerkPortalShareUrl();
+    portalWindow.location.replace(url);
+  } catch (err) {
+    portalWindow.close();
+    toast('Could not open the Clerk Intake Portal: ' + err.message, 'error');
+  }
 }
 
 /** Copy personalized Clerk Portal direct URL to clipboard */
