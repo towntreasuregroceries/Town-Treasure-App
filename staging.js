@@ -481,11 +481,15 @@ const StagingDB = {
     if (inviteToken) {
       // The invite token is verified server-side. Never fall back to a local
       // queue or direct anon-table write when the secure service is unavailable.
+      // A local ID is generated above for the legacy/local queue path. Only send
+      // an ID to the API when the clerk is explicitly correcting a returned row.
+      const apiDocket = { ...record };
+      if (!docket.id) delete apiDocket.id;
       const result = await this.callClerkApi({
         action: 'submit',
         invite_token: inviteToken,
         submission_key: docket.submission_key || this.getClerkSubmissionKey(),
-        docket: record,
+        docket: apiDocket,
       });
       const saved = result.submission;
       if (!saved?.id) throw new Error('The server did not confirm the saved docket. Keep this form open and retry.');
