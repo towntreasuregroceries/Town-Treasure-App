@@ -307,10 +307,40 @@ async function openClerkReviewModal(id) {
     banner.style.display = 'none';
     banner.innerHTML = '';
 
-    StagingDB.getAllSubmissions(false).then(staged => {
-      const otherPending = (staged || []).filter(record => record && record.id !== id && record.status === 'pending');
-      const ledgerInvoices = DB.invoices.filter(invoice => invoice && invoice.status !== 'draft');
-      return TTGAudit.auditSubmission(item, [...ledgerInvoices, ...otherPending]);
+    StagingDB.getAllSubmissions(false).then(async staged => {
+      if (typeof DB.syncNow !== 'function' || !(await DB.syncNow())) {
+        throw new Error('Could not sync the current account ledger before duplicate review.');
+      }
+      const remoteSnapshot = await DB.getRemoteInvoiceSnapshot();
+      if (!remoteSnapshot?.ok) throw new Error('Could not read the current account ledger from the server.');
+      const restaurantName = item.restaurant_name || item.restaurantName || '';
+      const restaurantKey = normalizeRestaurantName(restaurantName);
+      const restaurantMatch = resolveRestaurantName(restaurantName, DB.restaurants || []);
+      const sameRestaurant = recordName => {
+        if (restaurantMatch.status === 'matched') {
+          const otherMatch = resolveRestaurantName(recordName, DB.restaurants || []);
+          return otherMatch.status === 'matched' && otherMatch.restaurant.id === restaurantMatch.restaurant.id;
+        }
+        // Until the name is registered uniquely, compare exact normalized names
+        // only. Fuzzy brand overlap must not flag another customer's invoice.
+        return restaurantMatch.status !== 'ambiguous'
+          && restaurantKey
+          && normalizeRestaurantName(recordName) === restaurantKey;
+      };
+      const otherPending = (staged || []).filter(record => record && record.id !== id
+        && record.status === 'pending' && sameRestaurant(record.restaurant_name || record.restaurantName || ''));
+      const ledgerInvoices = remoteSnapshot.invoices.filter(invoice => invoice && invoice.status !== 'draft'
+        && (restaurantMatch.status === 'matched'
+          ? invoiceBelongsToRestaurant(invoice, restaurantMatch.restaurant)
+          : restaurantMatch.status !== 'ambiguous'
+            && restaurantKey
+            && normalizeRestaurantName(invoice.restaurantName) === restaurantKey));
+      const auditPool = [...ledgerInvoices, ...otherPending];
+      return TTGAudit.auditSubmission(item, auditPool).then(audit => ({
+        ...audit,
+        auditRecordCount: auditPool.length,
+        restaurantIdentityVerified: restaurantMatch.status === 'matched'
+      }));
     }).then(audit => {
       if (activeReviewSubmissionId !== id) return;
       if (!audit) {
@@ -376,7 +406,11 @@ async function openClerkReviewModal(id) {
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
             </div>
             <div style="font-size:0.84rem; color:#14532d; font-weight:600;">
-              Town Treasure Smart Audit: No duplicate entries found in your ledger for this client and date window.
+              ${audit.auditRecordCount === 0
+                ? (audit.restaurantIdentityVerified
+                  ? 'No saved invoices or pending dockets are linked to this restaurant yet.'
+                  : 'No exact same-name records were available to compare. Confirm or register this restaurant before relying on the duplicate check.')
+                : `Town Treasure Smart Audit: No duplicate found among ${audit.auditRecordCount} same-customer record(s) checked.`}
             </div>
           </div>
         `;
@@ -391,7 +425,7 @@ async function openClerkReviewModal(id) {
         }
         if (banner) {
           banner.style.display = 'block';
-          banner.textContent = 'Duplicate check failed. Close and reopen this docket to retry before approving.';
+          banner.textContent = 'Could not verify the current server ledger. Check the connection, then close and reopen this docket before approving.';
         }
       }
     });

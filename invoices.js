@@ -49,7 +49,7 @@ function generateSecureInvoiceNumber(dateStr) {
 }
 
 /* ══ Save Invoice ══ */
-function saveInvoice(bypassDuplicateCheck = false) {
+async function saveInvoice(bypassDuplicateCheck = false) {
   const restId = document.getElementById('invRestaurant').value;
   if (!restId) return toast('Select a restaurant', 'error');
   const items = [];
@@ -67,6 +67,7 @@ function saveInvoice(bypassDuplicateCheck = false) {
   const totalSell = items.reduce((s, i) => s + i.total, 0);
   const totalBuy = items.reduce((s, i) => s + i.qty * i.buyPrice, 0);
   const rest = DB.restaurants.find(r => r.id === restId);
+  if (!rest) return toast('That restaurant record is unavailable. Refresh the restaurant list before saving.', 'error');
   const invDateVal = document.getElementById('invDate').value || new Date().toISOString().slice(0,10);
   let invId = document.getElementById('editInvoiceId').value;
   const existingEditRecord = invId ? DB.invoices.find(i => i.id === invId) : null;
@@ -74,8 +75,23 @@ function saveInvoice(bypassDuplicateCheck = false) {
   // ══ Town Treasure Smart Audit — Ledger Collision Guard ══
   if ((!invId || existingEditRecord?.status === 'draft') && !bypassDuplicateCheck && typeof TTGAudit !== 'undefined' && typeof DB !== 'undefined' && Array.isArray(DB.invoices)) {
     try {
+      const syncConfirmed = typeof DB.syncNow === 'function' && await DB.syncNow();
+      const remoteSnapshot = syncConfirmed && typeof DB.getRemoteInvoiceSnapshot === 'function'
+        ? await DB.getRemoteInvoiceSnapshot()
+        : null;
+      if (!remoteSnapshot?.ok) {
+        customConfirm(
+          'The current server invoice list could not be verified, so the duplicate check is unavailable. Saving now may create a repeat invoice if this delivery was already entered on another device. You can keep working on this device, but confirm the invoice first.',
+          'Duplicate Check Unavailable', 'Save on This Device', false,
+          () => saveInvoice(true)
+        );
+        return;
+      }
+      const currentRestaurant = DB.restaurants.find(restaurant => restaurant.id === restId);
+      if (!currentRestaurant) return toast('This restaurant changed while checking the server. Refresh and review the form before saving.', 'error');
+
       const cand = {
-        restaurant_name: rest ? rest.name : '',
+        restaurant_name: currentRestaurant.name,
         invoice_date: invDateVal,
         total_sell: totalSell,
         items_json: items
@@ -83,8 +99,8 @@ function saveInvoice(bypassDuplicateCheck = false) {
 
       let matched = null;
       let highestScore = 0;
-      for (const ex of DB.invoices.filter(invoice => invoice && invoice.status !== 'draft' && invoice.id !== invId)) {
-        if (restId && ex.restaurantId && ex.restaurantId !== restId) continue;
+      for (const ex of remoteSnapshot.invoices.filter(invoice => invoice && invoice.id !== invId)) {
+        if (!invoiceBelongsToRestaurant(ex, currentRestaurant)) continue;
         const s = TTGAudit.calculateHeuristicScore(cand, ex);
         if (s.score > highestScore) {
           highestScore = s.score;
@@ -92,7 +108,8 @@ function saveInvoice(bypassDuplicateCheck = false) {
         }
       }
 
-      if (matched && highestScore >= 0.70) {
+      const matchedScore = matched ? TTGAudit.calculateHeuristicScore(cand, matched) : null;
+      if (matched && TTGAudit.isHighConfidenceDuplicate(matchedScore)) {
         const mAmt = Number(matched.totalSell || 0).toLocaleString();
         const mNum = matched.number || 'Invoice';
         const mItemsCount = (matched.items || matched.items_json || []).length;
@@ -103,13 +120,13 @@ function saveInvoice(bypassDuplicateCheck = false) {
         if (dupModal) {
           const headingEl = document.getElementById('invDupModalHeading');
           if (headingEl) {
-            headingEl.textContent = 
-              `Duplicate Alert: An invoice (#${mNum}) for ${clientName} on ${invDateVal} already exists in Veronica's encrypted vault.`;
+            headingEl.textContent =
+              `Possible duplicate: Invoice #${mNum} for ${clientName} on ${matched.date || invDateVal} looks very similar.`;
           }
           const detailsEl = document.getElementById('invDupModalDetails');
           if (detailsEl) {
             detailsEl.textContent = 
-              `Town Treasure Smart Audit matched this entry with ${Math.round(highestScore * 100)}% confidence against vault records. Saving this docket without review may cause double-billing.`;
+              `This similarity check found the same customer, date, amount, and overlapping items in the records currently loaded on this device. Verify invoice #${mNum} before deciding whether this is a repeat delivery.`;
           }
           const exNumEl = document.getElementById('invDupExistingNum');
           if (exNumEl) exNumEl.textContent = `#${mNum} (${clientName})`;
@@ -158,7 +175,7 @@ function saveInvoice(bypassDuplicateCheck = false) {
         // High-Alert Fallback
         if (typeof customConfirm === 'function') {
           customConfirm(
-            `⚠️ INTEGRITY HAZARD: Town Treasure Smart Audit detected an existing invoice (#${mNum}) for ${clientName} on ${invDateVal} for KES ${mAmt}.\n\nSaving this will inject a potential duplicate into Veronica's encrypted vault.\n\nDo you want to proceed and save as an additional separate delivery?`,
+            `Possible duplicate: a very similar invoice (#${mNum}) for ${clientName} on ${matched.date || invDateVal} for KES ${mAmt} appears in the records currently loaded on this device. This is a similarity warning, not proof that the invoices are the same.\n\nCheck invoice #${mNum}, then choose whether this is an additional delivery.`,
             '⚠️ Integrity Hazard: Duplicate Invoice Collision',
             'Save as 2nd Delivery Anyway',
             true,
@@ -171,6 +188,12 @@ function saveInvoice(bypassDuplicateCheck = false) {
       }
     } catch (auditErr) {
       console.warn('[Smart Audit] Invoice duplicate detection note:', auditErr);
+      customConfirm(
+        'The duplicate check did not complete. Saving now may create a repeat invoice if this delivery was already entered on another device. Review the current invoice list before continuing.',
+        'Duplicate Check Failed', 'Save Anyway', false,
+        () => saveInvoice(true)
+      );
+      return;
     }
   }
 
@@ -217,8 +240,11 @@ function saveInvoice(bypassDuplicateCheck = false) {
     expList.push({ id: genId(), invId, type: 'expense', date: invDateVal, desc: `Ops Cost: ${inv.number} (${inv.restaurantName})`, category: 'other', amount: otherCost });
   }
   DB.expenses = expList;
-  if (typeof DB.syncNow === 'function') DB.syncNow();
-  toast('Invoice ' + inv.number + ' created!');
+  const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+  toast(synced
+    ? `Invoice ${inv.number} saved and synced.`
+    : `Invoice ${inv.number} is saved on this device, but cloud sync was not confirmed. Keep this device's data; retry sync before switching devices.`,
+    synced ? 'success' : 'warning');
   document.getElementById('editInvoiceId').value = '';
   if(typeof checkInvoiceDraft === 'function') checkInvoiceDraft();
   resetInvoiceForm();
@@ -391,7 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function deleteDraft(id) {
-  customConfirm('Are you sure you want to delete this draft?', 'Delete Draft', 'Yes, Delete', true, () => {
+  customConfirm('Are you sure you want to delete this draft?', 'Delete Draft', 'Yes, Delete', true, async () => {
     clearTimeout(autoSaveTimer);
     const draft = DB.invoices.find(i => i.id === id);
     if (draft) {
@@ -404,8 +430,9 @@ function deleteDraft(id) {
     }
     DB.invoices = DB.invoices.filter(i => i.id !== id);
     if (document.getElementById('editInvoiceId').value === id) resetInvoiceForm();
-    if (typeof DB.syncNow === 'function') DB.syncNow();
-    checkInvoiceDraft(); toast('Draft deleted');
+    checkInvoiceDraft();
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+    toast(synced ? 'Draft deleted and synced.' : 'Draft deleted on this device, but cloud sync was not confirmed.', synced ? 'success' : 'warning');
   });
 }
 
@@ -437,7 +464,7 @@ function renderInvoicesList() {
   }).join('');
 }
 function deleteInvoice(id) {
-  customConfirm('This invoice will be moved to the Recycle Bin. You can restore it later.', 'Delete Invoice', 'Yes, Delete', true, () => {
+  customConfirm('This invoice will be moved to the Recycle Bin. You can restore it later.', 'Delete Invoice', 'Yes, Delete', true, async () => {
     clearTimeout(autoSaveTimer);
     const inv = DB.invoices.find(i => i.id === id);
     if (inv) {
@@ -454,9 +481,9 @@ function deleteInvoice(id) {
     DB.expenses.filter(e => e.invId === id).forEach(expense => DB.markRecordDeleted?.('expenses', expense.id));
     DB.expenses = DB.expenses.filter(e => e.invId !== id);
     if (document.getElementById('editInvoiceId').value === id) resetInvoiceForm();
-    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderInvoicesList();
-    toast('Invoice moved to Recycle Bin');
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+    toast(synced ? 'Invoice moved to Recycle Bin and synced.' : 'Invoice moved to this device’s Recycle Bin, but cloud sync was not confirmed.', synced ? 'success' : 'warning');
   });
 }
 
@@ -532,7 +559,7 @@ function renderBin() {
   }
 }
 
-function restoreInvoice(id) {
+async function restoreInvoice(id) {
   const bin = DB.deletedInvoices;
   const inv = bin.find(i => i.id === id);
   if (!inv) return toast('Invoice not found in bin.', 'error');
@@ -550,9 +577,9 @@ function restoreInvoice(id) {
   if (restored.deliveryCost > 0) expList.push({ id: genId(), invId: id, type: 'expense', date: restored.date, desc: `Delivery: ${restored.number} (${restored.restaurantName})`, category: 'transport', amount: restored.deliveryCost });
   if (restored.otherCost > 0) expList.push({ id: genId(), invId: id, type: 'expense', date: restored.date, desc: `Ops Cost: ${restored.number} (${restored.restaurantName})`, category: 'other', amount: restored.otherCost });
   DB.expenses = expList;
-  if (typeof DB.syncNow === 'function') DB.syncNow();
-  
-  renderBin(); toast('Invoice restored!');
+  renderBin();
+  const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+  toast(synced ? 'Invoice restored and synced.' : 'Invoice restored on this device, but cloud sync was not confirmed.', synced ? 'success' : 'warning');
 }
 
 function restoreSelectedBinItems() {
@@ -560,7 +587,7 @@ function restoreSelectedBinItems() {
   if (!checkboxes.length) return toast('No items selected.', 'error');
   const ids = Array.from(checkboxes).map(cb => cb.value);
   
-  customConfirm(`Restore ${ids.length} selected item(s)?`, 'Restore Items', 'Yes, Restore', false, () => {
+  customConfirm(`Restore ${ids.length} selected item(s)?`, 'Restore Items', 'Yes, Restore', false, async () => {
     if (binTab === 'invoices') {
       const bin = DB.deletedInvoices; const list = DB.invoices; let expList = DB.expenses;
       ids.forEach(id => {
@@ -596,9 +623,9 @@ function restoreSelectedBinItems() {
       DB.priceLists = list; DB.deletedPriceLists = bin.filter(i => !ids.includes(i.id));
       ids.forEach(id => { if (bin.some(item => item.id === id)) DB.markRecordRestored?.('priceLists', id); });
     }
-    if (typeof DB.syncNow === 'function') DB.syncNow();
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
     renderBin();
-    toast(ids.length + ' item(s) restored!');
+    toast(synced ? `${ids.length} item(s) restored and synced.` : `${ids.length} item(s) restored on this device, but cloud sync was not confirmed.`, synced ? 'success' : 'warning');
   });
 }
 

@@ -1147,6 +1147,11 @@ async function handleChangePassword() {
 /* ══ Logout ══ */
 async function handleLogout() {
   customConfirm('Are you sure you want to sign out?', 'Sign Out', 'Yes, Sign Out', false, async () => {
+    const synced = typeof DB.syncNow === 'function' && await DB.syncNow();
+    if (!synced) {
+      toast('Sign out was canceled because the latest data could not be confirmed in the cloud. Reconnect and try again; this device still has your local data.', 'warning');
+      return;
+    }
     const signedOut = await signOut();
     if (!signedOut) return;
     DB.clearLocalData();

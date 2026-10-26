@@ -121,7 +121,7 @@ function saveRestaurant() {
   }
   commitWithExactMerge();
 }
-function saveRestaurantRecord(r, isNew, duplicates = []) {
+async function saveRestaurantRecord(r, isNew, duplicates = []) {
   const duplicateIds = new Set(duplicates.map(x => x.id));
   const now = new Date().toISOString();
   const mergedNames = new Set([...restaurantNameVariants(r), ...duplicates.flatMap(restaurantNameVariants)]
@@ -161,10 +161,11 @@ function saveRestaurantRecord(r, isNew, duplicates = []) {
     const invRestaurant = document.getElementById('invRestaurant');
     if (invRestaurant) invRestaurant.value = r.id;
   }
-  if (typeof DB.syncNow === 'function') DB.syncNow();
-  toast(duplicates.length
+  const message = duplicates.length
     ? `Restaurant saved; merged ${duplicates.length} duplicate restaurant record${duplicates.length === 1 ? '' : 's'}.`
-    : (isNew ? 'Restaurant added' : 'Restaurant updated'));
+    : (isNew ? 'Restaurant added' : 'Restaurant updated');
+  const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+  toast(synced ? `${message} Changes synced.` : `${message} on this device, but cloud sync was not confirmed.`, synced ? 'success' : 'warning');
 }
 function editRestaurant(id) {
   const r = DB.restaurants.find(x => x.id === id);
@@ -186,12 +187,12 @@ function deleteRestaurant(id) {
   if (references) {
     return toast(`Cannot delete ${restaurant.name}: ${references} active or recycled invoice(s) are linked to it. Edit the restaurant and merge aliases into the correct record instead.`, 'error');
   }
-  customConfirm('Are you sure you want to delete this restaurant? All associated invoices will remain but show as Unknown.', 'Delete Restaurant', 'Yes, Delete', true, () => {
+  customConfirm('Are you sure you want to delete this restaurant? All associated invoices will remain but show as Unknown.', 'Delete Restaurant', 'Yes, Delete', true, async () => {
     DB.deletedRestaurantIds = Array.from(new Set([...(DB.deletedRestaurantIds || []), id]));
     DB.restaurants = DB.restaurants.filter(x => x.id !== id);
     renderRestaurants();
-    if (typeof DB.syncNow === 'function') DB.syncNow();
-    toast('Restaurant deleted');
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+    toast(synced ? 'Restaurant deleted and synced.' : 'Restaurant deleted on this device, but cloud sync was not confirmed.', synced ? 'success' : 'warning');
   });
 }
 function renderRestaurants() {

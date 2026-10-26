@@ -239,6 +239,16 @@ const TTGAudit = {
     };
   },
 
+  /** A duplicate needs same-day, near-identical value, and meaningful line-item overlap. */
+  isHighConfidenceDuplicate(scoreObj) {
+    return Boolean(scoreObj
+      && scoreObj.hotelScore >= 0.85
+      && scoreObj.dateScore === 1
+      && scoreObj.amountScore >= 0.85
+      && scoreObj.itemScore >= 0.60
+      && (scoreObj.itemCmp?.matchingCount || 0) > 0);
+  },
+
   /** Safe API key getter for incognito background intelligence */
   getApiKey() {
     if (typeof OCRConsensus !== 'undefined' && typeof OCRConsensus.getApiKey === 'function') {
@@ -293,8 +303,13 @@ const TTGAudit = {
       }
     }
 
-    // If highest score is below threshold, instant pass without network call
-    if (!bestMatch || bestScoreObj.score < 0.40) {
+    // Similar client/date/amount alone is not enough to call an invoice a
+    // duplicate. Require line-item overlap before displaying a duplicate alert
+    // or sending the pair to the optional semantic audit.
+    if (!bestMatch || bestScoreObj.score < 0.40
+      || bestScoreObj.hotelScore < 0.85
+      || bestScoreObj.dateScore < 0.70
+      || bestScoreObj.itemScore < 0.45) {
       return {
         isDuplicate: false,
         confidence: Math.round(bestScoreObj.score * 100),
@@ -306,11 +321,12 @@ const TTGAudit = {
     }
 
     // Check if background deep semantic audit should be dispatched
-    const canUseDeepAudit = options.useDeepAudit !== false && Boolean(this.getApiKey());
+    const canUseDeepAudit = options.useDeepAudit !== false && Boolean(this.getApiKey())
+      && bestScoreObj.amountScore >= 0.50;
 
     if (!canUseDeepAudit) {
       // Heuristic fallback
-      const isDup = bestScoreObj.score >= 0.70;
+      const isDup = this.isHighConfidenceDuplicate(bestScoreObj);
       const determination = isDup ? 'EXACT_DUPLICATE' : (bestScoreObj.dateScore >= 0.7 && bestScoreObj.hotelScore >= 0.85 ? 'SUPPLEMENTARY_ORDER' : 'DISTINCT_ORDER');
       const hotel = candidate.restaurant_name || candidate.restaurantName || 'Client';
       const date = candidate.invoice_date || candidate.date || 'today';
@@ -339,7 +355,7 @@ const TTGAudit = {
     }
 
     // High-confidence heuristic fallback if deep audit fails
-    const isDup = bestScoreObj.score >= 0.65;
+    const isDup = this.isHighConfidenceDuplicate(bestScoreObj);
     return {
       isDuplicate: isDup,
       confidence: Math.round(bestScoreObj.score * 100),

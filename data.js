@@ -315,7 +315,6 @@ const DB = {
   _syncInFlight: null,
   _syncRequestedAgain: false,
   _remoteRevision: null,
-  _legacyVaultSyncNoticeShown: false,
 
   markRecordDeleted(collection, id) {
     if (!collection || !id) return;
@@ -379,33 +378,24 @@ const DB = {
       const jwkKey = JSON.parse(e2eKeyStr);
 
       // Revision compare-and-swap prevents two devices from overwriting each
-      // other's changes. Until the SQL migration is applied, retain the current
-      // read/merge/write path so the release can roll out without stopping sync.
+      // other's changes. Never fall back to an unguarded vault write.
       for (let attempt = 1; attempt <= 3; attempt++) {
-        let revisionSupport = true;
         let { data: remoteRow, error: remoteReadError } = await supabaseClient
           .from('encrypted_vault')
           .select('data, revision')
           .eq('user_id', uid)
           .maybeSingle();
         if (isMissingVaultRevisionColumn(remoteReadError)) {
-          revisionSupport = false;
-          if (!this._legacyVaultSyncNoticeShown) {
-            console.warn('[Vault] Server revision migration is pending; using the existing merged sync path for now.');
-            this._legacyVaultSyncNoticeShown = true;
-          }
-          ({ data: remoteRow, error: remoteReadError } = await supabaseClient
-            .from('encrypted_vault')
-            .select('data')
-            .eq('user_id', uid)
-            .maybeSingle());
+          const migrationError = new Error('Server revision protection is not available. Cloud sync was stopped to protect existing records; apply supabase_vault_revision.sql and retry.');
+          migrationError.code = 'VAULT_REVISION_MIGRATION_MISSING';
+          throw migrationError;
         }
         if (remoteReadError) throw remoteReadError;
-        const expectedRevision = revisionSupport ? Number(remoteRow?.revision ?? 0) : null;
-        if (revisionSupport && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)) {
+        const expectedRevision = Number(remoteRow?.revision ?? 0);
+        if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
           throw new Error('The server returned an invalid vault revision; sync was stopped to protect existing records.');
         }
-        this._remoteRevision = revisionSupport ? expectedRevision : null;
+        this._remoteRevision = expectedRevision;
 
         if (remoteRow && remoteRow.data) {
           const remoteVault = await Crypto.decrypt(remoteRow.data, jwkKey);
@@ -493,14 +483,6 @@ const DB = {
           settings: state.settings
         };
         const encryptedPayload = await Crypto.encrypt(appState, jwkKey);
-        if (!revisionSupport) {
-          const { error: legacySaveError } = await supabaseClient
-            .from('encrypted_vault')
-            .upsert({ user_id: uid, data: encryptedPayload }, { onConflict: 'user_id' });
-          if (legacySaveError) throw legacySaveError;
-          return true;
-        }
-
         const { data: saveResult, error: saveError } = await supabaseClient.rpc('save_encrypted_vault_cas', {
           p_user_id: uid,
           p_expected_revision: expectedRevision,
@@ -540,7 +522,9 @@ const DB = {
       if (!window.lastOfflineToast || now - window.lastOfflineToast > 5000) {
         const message = e?.code === 'VAULT_REVISION_CONFLICT'
           ? 'Sync paused because the vault is changing on another device. Your local data is saved; try syncing again shortly.'
-          : 'Offline mode: Data saved locally.';
+          : e?.code === 'VAULT_REVISION_MIGRATION_MISSING'
+            ? 'Cloud sync paused because server revision protection is missing. Your local data is preserved; contact the account owner before switching devices.'
+            : 'Offline mode: Data saved locally.';
         if (typeof toast === 'function') toast(message, 'warning');
         window.lastOfflineToast = now;
       }
@@ -553,6 +537,46 @@ const DB = {
     if (this._syncTimer) clearTimeout(this._syncTimer);
     this._syncTimer = null;
     return await this._doSync();
+  },
+
+  /** Read the current server ledger without merging browser-cache records into it. */
+  async getRemoteInvoiceSnapshot() {
+    if (!supabaseClient || !getUserId()) return { ok: false, invoices: [] };
+    const keyString = localStorage.getItem('ttg_e2e_key');
+    if (!keyString) return { ok: false, invoices: [] };
+
+    try {
+      let { data, error } = await supabaseClient
+        .from('encrypted_vault')
+        .select('data, revision')
+        .eq('user_id', getUserId())
+        .maybeSingle();
+      if (isMissingVaultRevisionColumn(error)) {
+        ({ data, error } = await supabaseClient
+          .from('encrypted_vault')
+          .select('data')
+          .eq('user_id', getUserId())
+          .maybeSingle());
+      }
+      if (error) throw error;
+      if (!data?.data) return { ok: true, invoices: [], revision: Number(data?.revision || 0) };
+
+      const vault = await Crypto.decrypt(data.data, JSON.parse(keyString));
+      if (!vault || typeof vault !== 'object') throw new Error('Could not decrypt the current server vault.');
+      const actions = includeLegacyInvoiceActions(
+        vault.recordActions || {},
+        vault.deletedInvoiceIds || [],
+        vault.restoredInvoiceIds || [],
+        vault.deletedInvoices || [],
+        vault.invoices || []
+      );
+      const invoices = mergeInvoicesById([], vault.invoices || [], actions)
+        .filter(invoice => invoice && invoice.status !== 'draft');
+      return { ok: true, invoices, revision: Number(data.revision ?? 0) };
+    } catch (error) {
+      console.error('[Vault] Could not read current server invoice snapshot:', error);
+      return { ok: false, invoices: [] };
+    }
   },
 
   /** Re-encrypt a vault after its old key was verified by loadFromSupabase(). */
@@ -594,10 +618,7 @@ const DB = {
         }
         this._remoteRevision = returnedRevision;
       } else {
-        const { error } = await supabaseClient
-          .from('encrypted_vault')
-          .upsert({ user_id: getUserId(), data: encryptedPayload }, { onConflict: 'user_id' });
-        if (error) throw error;
+        throw new Error('Server revision protection is not available; key migration write was stopped.');
       }
       return true;
     } catch (error) {
