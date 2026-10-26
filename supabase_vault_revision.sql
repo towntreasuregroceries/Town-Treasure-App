@@ -3,6 +3,8 @@
 -- Existing encrypted_vault.data values are left intact. Existing rows begin at
 -- revision 0 and are copied into the private history table as a recovery point.
 
+BEGIN;
+
 ALTER TABLE public.encrypted_vault
   ADD COLUMN IF NOT EXISTS revision BIGINT NOT NULL DEFAULT 0;
 
@@ -162,3 +164,5 @@ $wrapper$;
 
 REVOKE ALL PRIVILEGES ON FUNCTION public.save_encrypted_vault_cas(UUID, BIGINT, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.save_encrypted_vault_cas(UUID, BIGINT, TEXT) TO authenticated;
+
+COMMIT;
