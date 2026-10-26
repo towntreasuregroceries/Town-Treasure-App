@@ -59,14 +59,30 @@ async function signIn(email, password) {
 }
 
 async function signOut() {
-  if (!supabaseClient) return;
-  await supabaseClient.auth.signOut();
+  if (!supabaseClient) return false;
+  if (typeof DB !== 'undefined' && typeof DB.syncNow === 'function') {
+    const synced = await DB.syncNow();
+    if (!synced) {
+      if (typeof toast === 'function') toast('Sign out paused: the latest changes could not be synced. Reconnect and try again so they are not lost.', 'error');
+      return false;
+    }
+  }
+  try {
+    const { error } = await supabaseClient.auth.signOut();
+    if (error) throw error;
+  } catch (error) {
+    console.error('Sign out failed:', error);
+    if (typeof toast === 'function') toast('Sign out failed. Your local data has been kept.', 'error');
+    return false;
+  }
   currentUser = null;
   localStorage.removeItem('ttg_user_id');
   localStorage.removeItem('ttg_user_email');
   // Clear ALL local data on sign out — comprehensive cleanup
-  ['ttg_restaurants', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices',
+  ['ttg_restaurants', 'ttg_deleted_restaurant_ids', 'ttg_invoices', 'ttg_deleted_invoice_ids', 'ttg_restored_invoice_ids',
+   'ttg_expenses', 'ttg_deleted_invoices', 'ttg_record_actions',
    'ttg_staff', 'ttg_salary_payments', 'ttg_recurring_expenses',
    'ttg_price_lists', 'ttg_deleted_staff', 'ttg_deleted_pricelists',
    'ttg_borrowings', 'ttg_settings', 'ttg_last_page', 'ttg_staged_invoices'].forEach(k => localStorage.removeItem(k));
+  return true;
 }

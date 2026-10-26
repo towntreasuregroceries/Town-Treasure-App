@@ -39,10 +39,12 @@ function openNewRestaurantModal() {
 function saveRestaurant() {
   const id = document.getElementById('editRestaurantId').value;
   const aliases = (document.getElementById('restAliases').value || '').split(/[\n,;]+/).map(x => x.trim()).filter(Boolean);
-  const r = { id: id || genId(), name: document.getElementById('restName').value.trim(), aliases, contact: document.getElementById('restContact').value.trim(), phone: document.getElementById('restPhone').value.trim(), address: document.getElementById('restAddress').value.trim() };
+  const r = { id: id || genId(), name: document.getElementById('restName').value.trim(), aliases, contact: document.getElementById('restContact').value.trim(), phone: document.getElementById('restPhone').value.trim(), address: document.getElementById('restAddress').value.trim(), updatedAt: new Date().toISOString() };
   if (!r.name) return toast('Name is required', 'error');
   const list = DB.restaurants;
   const idx = list.findIndex(x => x.id === r.id);
+  if (idx >= 0) r.createdAt = list[idx].createdAt || r.updatedAt;
+  else r.createdAt = r.updatedAt;
   const isNew = idx < 0;
   const otherRestaurants = list.filter(x => x.id !== r.id);
   const proposedNames = [r.name, ...r.aliases];
@@ -70,7 +72,7 @@ function saveRestaurantRecord(r, isNew, duplicates = []) {
     DB.deletedRestaurantIds = Array.from(new Set([...(DB.deletedRestaurantIds || []), ...duplicateIds]));
     DB.invoices = DB.invoices.map(invoice => duplicateIds.has(invoice.restaurantId)
       || duplicateNames.has(normalizeRestaurantName(invoice.restaurantName))
-      ? { ...invoice, restaurantId: r.id, restaurantName: r.name }
+      ? { ...invoice, restaurantId: r.id, restaurantName: r.name, updatedAt: new Date().toISOString() }
       : invoice);
   }
   const list = DB.restaurants.filter(existing => !duplicateIds.has(existing.id));

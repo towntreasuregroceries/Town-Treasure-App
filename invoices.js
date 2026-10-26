@@ -36,24 +36,16 @@ document.querySelectorAll('#lineItemsBody tr').forEach(attachLineListeners);
 
 /* ══ Secure Invoice Number Generation ══ */
 function generateSecureInvoiceNumber(dateStr) {
-  const d = new Date(dateStr || Date.now());
-  const dayBin = d.getDate().toString(2).padStart(5, '0');
-  const moBin = (d.getMonth() + 1).toString(2).padStart(4, '0');
-  const yrBin = (d.getFullYear() % 100).toString(2).padStart(7, '0');
-  
-  // Combine into a 16-bit integer and convert to base 36 (produces 3 uppercase chars)
-  const binDate = parseInt(yrBin + moBin + dayBin, 2); 
-  const dateCode = binDate.toString(36).toUpperCase().padStart(3, '0');
-  
-  // Generate 3 random uppercase letters/numbers
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-  let randCode = '';
-  for(let i=0; i<3; i++) {
-    randCode += chars.charAt(Math.floor(Math.random() * chars.length));
+  const used = new Set((typeof DB !== 'undefined' ? [...DB.invoices, ...(DB.deletedInvoices || [])] : [])
+    .filter(inv => inv && inv.status !== 'draft').map(inv => String(inv.number || '').toUpperCase()));
+  for (let attempt = 0; attempt < 1000; attempt++) {
+    let suffix = '';
+    for (let i = 0; i < 4; i++) suffix += chars.charAt(Math.floor(Math.random() * chars.length));
+    const number = `TTG-${suffix}`;
+    if (!used.has(number)) return number;
   }
-  
-  // Mix them securely: Date[0] + Rand[0] + Date[1] + Rand[1] + Date[2] + Rand[2]
-  return 'TTG-' + dateCode[0] + randCode[0] + dateCode[1] + randCode[1] + dateCode[2] + randCode[2];
+  throw new Error('Could not generate a unique invoice number. Please try saving again.');
 }
 
 /* ══ Save Invoice ══ */
@@ -77,9 +69,10 @@ function saveInvoice(bypassDuplicateCheck = false) {
   const rest = DB.restaurants.find(r => r.id === restId);
   const invDateVal = document.getElementById('invDate').value || new Date().toISOString().slice(0,10);
   let invId = document.getElementById('editInvoiceId').value;
+  const existingEditRecord = invId ? DB.invoices.find(i => i.id === invId) : null;
 
   // ══ Town Treasure Smart Audit — Ledger Collision Guard ══
-  if (!invId && !bypassDuplicateCheck && typeof TTGAudit !== 'undefined' && typeof DB !== 'undefined' && Array.isArray(DB.invoices)) {
+  if ((!invId || existingEditRecord?.status === 'draft') && !bypassDuplicateCheck && typeof TTGAudit !== 'undefined' && typeof DB !== 'undefined' && Array.isArray(DB.invoices)) {
     try {
       const cand = {
         restaurant_name: rest ? rest.name : '',
@@ -90,7 +83,8 @@ function saveInvoice(bypassDuplicateCheck = false) {
 
       let matched = null;
       let highestScore = 0;
-      for (const ex of DB.invoices) {
+      for (const ex of DB.invoices.filter(invoice => invoice && invoice.status !== 'draft' && invoice.id !== invId)) {
+        if (restId && ex.restaurantId && ex.restaurantId !== restId) continue;
         const s = TTGAudit.calculateHeuristicScore(cand, ex);
         if (s.score > highestScore) {
           highestScore = s.score;
@@ -101,7 +95,7 @@ function saveInvoice(bypassDuplicateCheck = false) {
       if (matched && highestScore >= 0.70) {
         const mAmt = Number(matched.totalSell || 0).toLocaleString();
         const mNum = matched.number || 'Invoice';
-        const mItemsCount = (matched.items || []).length;
+        const mItemsCount = (matched.items || matched.items_json || []).length;
         const clientName = rest ? rest.name : 'Selected Client';
 
         // High-Visibility Hazard Collision Modal
@@ -181,9 +175,15 @@ function saveInvoice(bypassDuplicateCheck = false) {
   }
 
   let invNumber, createdAt = new Date().toISOString();
+  const originalInvoice = existingEditRecord;
   if (invId) {
-    const existing = DB.invoices.find(i => i.id === invId);
-    if (existing) { invNumber = existing.number.replace('-D', ''); createdAt = existing.createdAt; }
+    const existing = originalInvoice;
+    if (existing) {
+      createdAt = existing.createdAt || createdAt;
+      invNumber = existing.status === 'draft' || /-D$/i.test(existing.number || '')
+        ? generateSecureInvoiceNumber(invDateVal)
+        : existing.number;
+    }
   }
   if (!invId) { invId = genId(); invNumber = generateSecureInvoiceNumber(invDateVal); }
 
@@ -197,7 +197,9 @@ function saveInvoice(bypassDuplicateCheck = false) {
       dueDate: document.getElementById('invDueDate').value || '',
       items, totalSell, totalBuy, deliveryCost, otherCost, profit: totalSell - totalBuy - deliveryCost - otherCost,
       notes: document.getElementById('invNotes').value.trim(),
-      status: 'pending', createdAt
+      status: originalInvoice && originalInvoice.status !== 'draft' ? originalInvoice.status : 'pending',
+      paidDate: originalInvoice?.paidDate,
+      createdAt, updatedAt: new Date().toISOString()
     };
   const list = DB.invoices; 
   const idx = list.findIndex(i => i.id === invId);
@@ -205,7 +207,9 @@ function saveInvoice(bypassDuplicateCheck = false) {
   DB.invoices = list;
   
   // Create or update associated expenses
-  let expList = DB.expenses.filter(e => e.invId !== invId); // Remove existing tied expenses
+  const replacedExpenses = DB.expenses.filter(e => e.invId === invId);
+  replacedExpenses.forEach(expense => DB.markRecordDeleted?.('expenses', expense.id));
+  let expList = DB.expenses.filter(e => e.invId !== invId); // Replace auto-generated linked costs
   if (deliveryCost > 0) {
     expList.push({ id: genId(), invId, type: 'expense', date: invDateVal, desc: `Delivery: ${inv.number} (${inv.restaurantName})`, category: 'transport', amount: deliveryCost });
   }
@@ -213,6 +217,7 @@ function saveInvoice(bypassDuplicateCheck = false) {
     expList.push({ id: genId(), invId, type: 'expense', date: invDateVal, desc: `Ops Cost: ${inv.number} (${inv.restaurantName})`, category: 'other', amount: otherCost });
   }
   DB.expenses = expList;
+  if (typeof DB.syncNow === 'function') DB.syncNow();
   toast('Invoice ' + inv.number + ' created!');
   document.getElementById('editInvoiceId').value = '';
   if(typeof checkInvoiceDraft === 'function') checkInvoiceDraft();
@@ -253,6 +258,11 @@ function saveInvoiceDraft(silent = false) {
   const invDateVal = document.getElementById('invDate').value || new Date().toISOString().slice(0,10);
   
   let invId = document.getElementById('editInvoiceId').value;
+  const currentRecord = invId ? DB.invoices.find(i => i.id === invId) : null;
+  if (currentRecord && currentRecord.status !== 'draft') {
+    if (!silent) toast('This is an existing invoice. Use Save Invoice to update it.', 'warning');
+    return;
+  }
   let invNumber, createdAt = new Date().toISOString();
   if (invId) {
     const existing = DB.invoices.find(i => i.id === invId);
@@ -273,7 +283,8 @@ function saveInvoiceDraft(silent = false) {
     items, totalSell, totalBuy, deliveryCost, otherCost, profit: totalSell - totalBuy - deliveryCost - otherCost,
     notes: document.getElementById('invNotes').value.trim(),
     status: 'draft',
-    createdAt
+    createdAt,
+    updatedAt: new Date().toISOString()
   };
 
   const list = DB.invoices;
@@ -299,7 +310,7 @@ function loadInvoiceDraft(id) {
   
   document.getElementById('editInvoiceId').value = draft.id;
   if (draft.restaurantId) document.getElementById('invRestaurant').value = draft.restaurantId;
-  if (draft.date) document.getElementById('invDate').value = draft.date;
+  if (draft.date) document.getElementById('invDate').value = normalizeAppDate(draft.date);
   if (draft.dueDate) document.getElementById('invDueDate').value = draft.dueDate;
   if (draft.notes) document.getElementById('invNotes').value = draft.notes;
   if (draft.deliveryCost) document.getElementById('invDeliveryCost').value = draft.deliveryCost;
@@ -332,7 +343,7 @@ function checkInvoiceDraft() {
   if (drafts.length > 0) {
     section.style.display = 'block';
     body.innerHTML = drafts.map(d => {
-      const dateStr = d.createdAt ? new Date(d.createdAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : fmtDate(d.date);
+      const dateStr = fmtDate(d.createdAt || d.date);
       const itemsCount = d.items ? d.items.length : 0;
       return `<tr>
         <td>${dateStr}</td>
@@ -352,6 +363,10 @@ let autoSaveTimer = null;
 function triggerAutoSave() {
   clearTimeout(autoSaveTimer);
   autoSaveTimer = setTimeout(() => {
+    const editingId = document.getElementById('editInvoiceId')?.value;
+    const editingRecord = editingId ? DB.invoices.find(i => i.id === editingId) : null;
+    // Editing a saved invoice is explicit-save only; never demote it to a draft.
+    if (editingRecord && editingRecord.status !== 'draft') return;
     const restId = document.getElementById('invRestaurant')?.value;
     let hasItems = false;
     document.querySelectorAll('#lineItemsBody tr').forEach(row => {
@@ -377,7 +392,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function deleteDraft(id) {
   customConfirm('Are you sure you want to delete this draft?', 'Delete Draft', 'Yes, Delete', true, () => {
+    clearTimeout(autoSaveTimer);
+    const draft = DB.invoices.find(i => i.id === id);
+    if (draft) {
+      const bin = DB.deletedInvoices.filter(i => i.id !== id);
+      bin.push({ ...draft, deletedAt: new Date().toISOString(), originalStatus: 'draft' });
+      DB.deletedInvoices = bin;
+      DB.deletedInvoiceIds = Array.from(new Set([...(DB.deletedInvoiceIds || []), id]));
+      DB.restoredInvoiceIds = (DB.restoredInvoiceIds || []).filter(restoredId => restoredId !== id);
+      DB.markRecordDeleted?.('invoices', id);
+    }
     DB.invoices = DB.invoices.filter(i => i.id !== id);
+    if (document.getElementById('editInvoiceId').value === id) resetInvoiceForm();
+    if (typeof DB.syncNow === 'function') DB.syncNow();
     checkInvoiceDraft(); toast('Draft deleted');
   });
 }
@@ -388,7 +415,10 @@ function renderInvoicesList() {
   const search = (document.getElementById('invoiceSearch')?.value || '').toLowerCase();
   const filterRest = document.getElementById('invoiceFilterRestaurant')?.value || '';
   const filterStatus = document.getElementById('invoiceFilterStatus')?.value || '';
-  let invs = DB.invoices.filter(i => i.status !== 'draft').slice().reverse();
+  const dateKey = appDateKey;
+  let invs = DB.invoices.filter(i => i.status !== 'draft').slice()
+    .sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date))
+      || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   if (search) invs = invs.filter(i => i.number.toLowerCase().includes(search) || i.restaurantName.toLowerCase().includes(search));
   if (filterRest) invs = invs.filter(i => i.restaurantId === filterRest);
   if (filterStatus) invs = invs.filter(i => i.status === filterStatus);
@@ -401,6 +431,7 @@ function renderInvoicesList() {
 }
 function deleteInvoice(id) {
   customConfirm('This invoice will be moved to the Recycle Bin. You can restore it later.', 'Delete Invoice', 'Yes, Delete', true, () => {
+    clearTimeout(autoSaveTimer);
     const inv = DB.invoices.find(i => i.id === id);
     if (inv) {
       // Move to recycle bin with deletion timestamp
@@ -408,9 +439,15 @@ function deleteInvoice(id) {
       const bin = DB.deletedInvoices;
       bin.push(deleted);
       DB.deletedInvoices = bin;
+      DB.deletedInvoiceIds = Array.from(new Set([...(DB.deletedInvoiceIds || []), id]));
+      DB.restoredInvoiceIds = (DB.restoredInvoiceIds || []).filter(restoredId => restoredId !== id);
+      DB.markRecordDeleted?.('invoices', id);
     }
     DB.invoices = DB.invoices.filter(i => i.id !== id);
+    DB.expenses.filter(e => e.invId === id).forEach(expense => DB.markRecordDeleted?.('expenses', expense.id));
     DB.expenses = DB.expenses.filter(e => e.invId !== id);
+    if (document.getElementById('editInvoiceId').value === id) resetInvoiceForm();
+    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderInvoicesList();
     toast('Invoice moved to Recycle Bin');
   });
@@ -495,13 +532,18 @@ function restoreInvoice(id) {
   const restored = { ...inv };
   restored.status = inv.originalStatus || inv.status || 'pending';
   delete restored.deletedAt; delete restored.originalStatus;
+  restored.updatedAt = new Date().toISOString();
   const list = DB.invoices; list.push(restored); DB.invoices = list;
   DB.deletedInvoices = bin.filter(i => i.id !== id);
+  DB.deletedInvoiceIds = (DB.deletedInvoiceIds || []).filter(deletedId => deletedId !== id);
+  DB.restoredInvoiceIds = Array.from(new Set([...(DB.restoredInvoiceIds || []), id]));
+  DB.markRecordRestored?.('invoices', id);
   
   let expList = DB.expenses.filter(e => e.invId !== id);
   if (restored.deliveryCost > 0) expList.push({ id: genId(), invId: id, type: 'expense', date: restored.date, desc: `Delivery: ${restored.number} (${restored.restaurantName})`, category: 'transport', amount: restored.deliveryCost });
   if (restored.otherCost > 0) expList.push({ id: genId(), invId: id, type: 'expense', date: restored.date, desc: `Ops Cost: ${restored.number} (${restored.restaurantName})`, category: 'other', amount: restored.otherCost });
   DB.expenses = expList;
+  if (typeof DB.syncNow === 'function') DB.syncNow();
   
   renderBin(); toast('Invoice restored!');
 }
@@ -517,13 +559,17 @@ function restoreSelectedBinItems() {
       ids.forEach(id => {
         const inv = bin.find(i => i.id === id);
         if (inv) { 
-          const r = { ...inv }; r.status = inv.originalStatus || inv.status || 'pending'; delete r.deletedAt; delete r.originalStatus; list.push(r);
+          const r = { ...inv }; r.status = inv.originalStatus || inv.status || 'pending'; delete r.deletedAt; delete r.originalStatus; r.updatedAt = new Date().toISOString(); list.push(r);
           expList = expList.filter(e => e.invId !== id);
           if (r.deliveryCost > 0) expList.push({ id: genId(), invId: id, type: 'expense', date: r.date, desc: `Delivery: ${r.number} (${r.restaurantName})`, category: 'transport', amount: r.deliveryCost });
           if (r.otherCost > 0) expList.push({ id: genId(), invId: id, type: 'expense', date: r.date, desc: `Ops Cost: ${r.number} (${r.restaurantName})`, category: 'other', amount: r.otherCost });
         }
       });
       DB.invoices = list; DB.deletedInvoices = bin.filter(i => !ids.includes(i.id)); DB.expenses = expList;
+      const restoredIds = ids.filter(id => bin.some(item => item.id === id));
+      DB.deletedInvoiceIds = (DB.deletedInvoiceIds || []).filter(deletedId => !restoredIds.includes(deletedId));
+      DB.restoredInvoiceIds = Array.from(new Set([...(DB.restoredInvoiceIds || []), ...restoredIds]));
+      restoredIds.forEach(id => DB.markRecordRestored?.('invoices', id));
     } 
     else if (binTab === 'staff') {
       const bin = DB.deletedStaff; const list = DB.staff;
@@ -532,6 +578,7 @@ function restoreSelectedBinItems() {
         if (s) { const r = { ...s }; delete r.deletedAt; list.push(r); }
       });
       DB.staff = list; DB.deletedStaff = bin.filter(i => !ids.includes(i.id));
+      ids.forEach(id => { if (bin.some(item => item.id === id)) DB.markRecordRestored?.('staff', id); });
     }
     else if (binTab === 'pricelists') {
       const bin = DB.deletedPriceLists; const list = DB.priceLists;
@@ -540,7 +587,9 @@ function restoreSelectedBinItems() {
         if (p) { const r = { ...p }; delete r.deletedAt; list.push(r); }
       });
       DB.priceLists = list; DB.deletedPriceLists = bin.filter(i => !ids.includes(i.id));
+      ids.forEach(id => { if (bin.some(item => item.id === id)) DB.markRecordRestored?.('priceLists', id); });
     }
+    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderBin();
     toast(ids.length + ' item(s) restored!');
   });
@@ -568,6 +617,7 @@ function markAsPaid(id) {
   if (inv) {
     inv.status = 'paid';
     inv.paidDate = new Date().toISOString().slice(0, 10);
+    inv.updatedAt = new Date().toISOString();
     DB.invoices = list;
     toast('Marked as paid');
     viewInvoice(id);
@@ -582,7 +632,7 @@ function editInvoice(id) {
   
   document.getElementById('editInvoiceId').value = inv.id;
   if (inv.restaurantId) document.getElementById('invRestaurant').value = inv.restaurantId;
-  if (inv.date) document.getElementById('invDate').value = inv.date;
+  if (inv.date) document.getElementById('invDate').value = normalizeAppDate(inv.date);
   if (inv.dueDate) document.getElementById('invDueDate').value = inv.dueDate;
   if (inv.notes) document.getElementById('invNotes').value = inv.notes;
   if (inv.deliveryCost) document.getElementById('invDeliveryCost').value = inv.deliveryCost;

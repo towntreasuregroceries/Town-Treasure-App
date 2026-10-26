@@ -152,6 +152,19 @@ const StagingDB = {
     }
   },
 
+  getDeletedQueueIds() {
+    try {
+      const ids = JSON.parse(localStorage.getItem('ttg_deleted_staged_invoice_ids') || '[]');
+      return Array.isArray(ids) ? ids : [];
+    } catch (e) {
+      return [];
+    }
+  },
+
+  setDeletedQueueIds(ids) {
+    localStorage.setItem('ttg_deleted_staged_invoice_ids', JSON.stringify(Array.from(new Set(ids || []))));
+  },
+
   /** Reset or re-seed sample dockets */
   seedDemoDockets(force = true) {
     const demo = this.createDefaultDemoDockets();
@@ -261,7 +274,8 @@ const StagingDB = {
       try { await getCurrentUser(); } catch(e) {}
     }
 
-    const local = this.getLocalQueue();
+    const deletedIds = new Set(this.getDeletedQueueIds());
+    const local = this.getLocalQueue().filter(item => !deletedIds.has(item.id));
     const hasSb = await this.checkSupabase();
     let combined = local;
 
@@ -274,11 +288,21 @@ const StagingDB = {
 
         if (error) throw error;
 
+        // Retry failed remote deletes while keeping those records hidden locally.
+        if (deletedIds.size) {
+          const { error: deleteError } = await supabaseClient
+            .from('staged_invoices')
+            .delete()
+            .in('id', Array.from(deletedIds));
+          if (deleteError) console.warn('[Staging] Pending delete retry warning:', deleteError);
+        }
+
         // Merge Supabase data with local items
         const map = new Map();
         (data || []).forEach(item => {
           if (item.id && item.id.startsWith('stg_demo_')) return;
           map.set(item.id, {
+            ...item,
             id: item.id,
             clerk_name: item.clerk_name,
             restaurant_name: item.restaurant_name,
@@ -306,13 +330,13 @@ const StagingDB = {
           if (!map.has(item.id)) map.set(item.id, item);
         });
 
-        combined = Array.from(map.values());
+        combined = Array.from(map.values()).filter(item => !deletedIds.has(item.id));
       } catch (e) {
         console.warn('[Staging] Error fetching from Supabase, using local queue:', e);
-        combined = local.filter(x => !x.id || !x.id.startsWith('stg_demo_'));
+        combined = local.filter(x => !x.id || (!x.id.startsWith('stg_demo_') && !deletedIds.has(x.id)));
       }
     } else {
-      combined = local.filter(x => !x.id || !x.id.startsWith('stg_demo_'));
+      combined = local.filter(x => !x.id || (!x.id.startsWith('stg_demo_') && !deletedIds.has(x.id)));
     }
 
     // Support explicit target object filtering (e.g. from clerk portal)
@@ -383,6 +407,9 @@ const StagingDB = {
       created_at: docket.created_at || new Date().toISOString()
     };
 
+    // An explicit resubmission with the same ID clears an earlier delete marker.
+    this.setDeletedQueueIds(this.getDeletedQueueIds().filter(deletedId => deletedId !== record.id));
+
     // 1. Save or update in local queue
     const local = this.getLocalQueue();
     const existingIdx = local.findIndex(x => x.id === record.id);
@@ -432,6 +459,44 @@ const StagingDB = {
     const all = await this.getAllSubmissions(false);
     const item = all.find(x => x.id === id);
     if (!item) throw new Error('Submission not found in staging queue.');
+
+    // A docket is an idempotent approval unit. If an earlier click committed it
+    // but the status update or response was interrupted, reuse that invoice.
+    const existingInvoice = (DB.invoices || []).find(invoice => invoice && (
+      invoice.sourceSubmissionId === id ||
+      (item.generated_invoice_number && invoice.number === item.generated_invoice_number)
+    ));
+    if (existingInvoice) {
+      const local = this.getLocalQueue();
+      const index = local.findIndex(record => record.id === id);
+      if (index >= 0) {
+        local[index] = { ...local[index], status: 'approved', rejection_reason: '', generated_invoice_number: existingInvoice.number };
+      } else {
+        local.unshift({ ...item, status: 'approved', rejection_reason: '', generated_invoice_number: existingInvoice.number });
+      }
+      this.setLocalQueue(local);
+      if (typeof DB.syncNow === 'function') await DB.syncNow();
+      try {
+        if (await this.checkSupabase()) {
+          await supabaseClient.from('staged_invoices')
+            .update({ status: 'approved', rejection_reason: '' }).eq('id', id);
+        }
+      } catch (statusErr) {
+        console.warn('[Staging] Existing invoice found; status repair deferred:', statusErr);
+      }
+      this.updatePendingCountBadge();
+      return existingInvoice;
+    }
+    const archivedInvoice = (DB.deletedInvoices || []).find(invoice => invoice && (
+      invoice.sourceSubmissionId === id ||
+      (item.generated_invoice_number && invoice.number === item.generated_invoice_number)
+    ));
+    if (archivedInvoice) {
+      throw new Error(`This docket already has invoice ${archivedInvoice.number} in the Recycle Bin. Restore that invoice instead of approving the docket again.`);
+    }
+    if (item.status !== 'pending') {
+      throw new Error(`This docket is already ${item.status}. No new invoice was created. Check the invoice list or recycle bin before changing its status.`);
+    }
 
     // Prepare line items
     const rawItems = adjustedData.items || item.items_json || [];
@@ -486,13 +551,15 @@ const StagingDB = {
     const invDate = adjustedData.date || item.invoice_date || new Date().toISOString().slice(0, 10);
     const invNumber = typeof generateSecureInvoiceNumber === 'function'
       ? generateSecureInvoiceNumber(invDate)
-      : 'TTG-' + Math.random().toString(36).substring(2, 7).toUpperCase();
+      : 'TTG-' + Math.random().toString(36).substring(2, 6).toUpperCase();
 
     const clerkNote = item.clerk_name ? `[Submitted by Clerk: ${item.clerk_name}]` : '';
     const combinedNotes = [item.notes, clerkNote].filter(Boolean).join(' ');
 
     const newInvoice = {
-      id: typeof genId === 'function' ? genId() : 'inv_' + Date.now(),
+      // Same source docket always maps to the same invoice ID, including across tabs.
+      id: `stg_${String(id)}`,
+      sourceSubmissionId: id,
       number: invNumber,
       restaurantId: restId,
       restaurantName: restName,
@@ -506,7 +573,8 @@ const StagingDB = {
       profit: profit,
       notes: combinedNotes,
       status: 'pending', // Pending payment from restaurant client
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
     };
 
     // ══ COMMIT TO VERONICA'S VAULT ══
@@ -514,9 +582,12 @@ const StagingDB = {
     // completely encrypts this new invoice using Veronica's master password key!
     if (typeof DB !== 'undefined' && DB.invoices) {
       const invList = DB.invoices;
-      invList.unshift(newInvoice);
+      const existingIndex = invList.findIndex(invoice => invoice && invoice.id === newInvoice.id);
+      if (existingIndex >= 0) invList[existingIndex] = newInvoice;
+      else invList.unshift(newInvoice);
       DB.invoices = invList;
     }
+    if (typeof DB.syncNow === 'function') await DB.syncNow();
 
     // Update staging status locally
     const local = this.getLocalQueue();
@@ -627,6 +698,7 @@ const StagingDB = {
 
   /** Permanently delete a docket from review queue (both Supabase and local cache) */
   async deleteSubmission(id) {
+    this.setDeletedQueueIds([...this.getDeletedQueueIds(), id]);
     const local = this.getLocalQueue().filter(x => x.id !== id);
     this.setLocalQueue(local);
 

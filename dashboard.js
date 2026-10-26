@@ -3,10 +3,10 @@ let revenueChartInst = null, topRestChartInst = null;
 function refreshDashboard() {
   const invs = DB.invoices.filter(i => i.status !== 'draft');
   const now = new Date();
-  const thisMonth = invs.filter(i => { const d = new Date(i.date); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
+  const thisMonth = invs.filter(i => { const d = parseAppDate(i.date); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); });
   const totalSales = thisMonth.reduce((s, i) => s + i.totalSell, 0);
   let totalProfit = thisMonth.reduce((s, i) => s + i.profit, 0);
-  const thisMonthExpenses = DB.expenses.filter(e => { const d = new Date(e.date); return e.type === 'expense' && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).reduce((s, e) => s + e.amount, 0);
+  const thisMonthExpenses = DB.expenses.filter(e => { const d = parseAppDate(e.date); return e.type === 'expense' && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).reduce((s, e) => s + e.amount, 0);
   totalProfit -= thisMonthExpenses;
   const totalCost = thisMonth.reduce((s, i) => s + i.totalBuy, 0);
   const paidCount = thisMonth.filter(i => i.status === 'paid').length;
@@ -21,8 +21,8 @@ function refreshDashboard() {
   for (let m = 5; m >= 0; m--) {
     const d = new Date(now.getFullYear(), now.getMonth() - m, 1);
     months.push(d.toLocaleDateString('en', { month: 'short', year: '2-digit' }));
-    const mi = invs.filter(i => { const id = new Date(i.date); return id.getMonth() === d.getMonth() && id.getFullYear() === d.getFullYear(); });
-    const me = DB.expenses.filter(e => { const ed = new Date(e.date); return e.type === 'expense' && ed.getMonth() === d.getMonth() && ed.getFullYear() === d.getFullYear(); });
+    const mi = invs.filter(i => { const id = parseAppDate(i.date); return id.getMonth() === d.getMonth() && id.getFullYear() === d.getFullYear(); });
+    const me = DB.expenses.filter(e => { const ed = parseAppDate(e.date); return e.type === 'expense' && ed.getMonth() === d.getMonth() && ed.getFullYear() === d.getFullYear(); });
     salesData.push(mi.reduce((s, i) => s + i.totalSell, 0));
     profitData.push(mi.reduce((s, i) => s + i.profit, 0) - me.reduce((s, e) => s + e.amount, 0));
   }
@@ -55,7 +55,10 @@ function refreshDashboard() {
     });
   }
   // Recent invoices (This Month)
-  const recent = thisMonth.slice().reverse().slice(0, 8);
+  const recent = thisMonth.slice()
+    .sort((a, b) => appDateKey(b.date).localeCompare(appDateKey(a.date))
+      || String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .slice(0, 8);
   const tbody = document.getElementById('recentInvoicesBody');
   if (!recent.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><h3>No invoices yet this month</h3><p>Create an invoice to see data here.</p></td></tr>'; return; }
   tbody.innerHTML = recent.map(i => {
@@ -118,8 +121,8 @@ function generateReport() {
   
   // ── Invoice Data ──
   let invs = DB.invoices.filter(i => i.status !== 'draft');
-  if (from) invs = invs.filter(i => i.date >= from);
-  if (to) invs = invs.filter(i => i.date <= to);
+  if (from) invs = invs.filter(i => appDateKey(i.date) >= appDateKey(from));
+  if (to) invs = invs.filter(i => appDateKey(i.date) <= appDateKey(to));
   
   if (type === 'product') {
     const productName = (document.getElementById('reportProduct')?.value || '').toLowerCase().trim();
@@ -230,7 +233,7 @@ function generateReport() {
          ${matches.length > 0 ? `
          <table class="receipt-table">
             <thead><tr><th>Invoice</th><th>Restaurant</th><th>Date</th><th style="text-align: right;">Qty</th><th>Unit</th><th style="text-align: right;">Sell Price</th><th style="text-align: right;">Total</th><th style="text-align: right;">Profit</th></tr></thead>
-            <tbody>${matches.sort((a,b)=>a.date.localeCompare(b.date)).map(m=>`<tr><td>${m.invoiceNum}</td><td>${m.restaurant}</td><td>${fmtDate(m.date)}</td><td style="text-align: right;">${m.qty}</td><td style="text-transform: capitalize;">${escapeHtml(m.unit)}</td><td style="text-align: right;">KES ${fmtMoney(m.sellPrice)}</td><td style="text-align: right;">KES ${fmtMoney(m.total)}</td><td style="text-align: right; color: var(--green-700);">KES ${fmtMoney(m.profit)}</td></tr>`).join('')}</tbody>
+            <tbody>${matches.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(m=>`<tr><td>${m.invoiceNum}</td><td>${m.restaurant}</td><td>${fmtDate(m.date)}</td><td style="text-align: right;">${m.qty}</td><td style="text-transform: capitalize;">${escapeHtml(m.unit)}</td><td style="text-align: right;">KES ${fmtMoney(m.sellPrice)}</td><td style="text-align: right;">KES ${fmtMoney(m.total)}</td><td style="text-align: right; color: var(--green-700);">KES ${fmtMoney(m.profit)}</td></tr>`).join('')}</tbody>
          </table>
          ` : '<p style="padding: 20px; color: #616161;">No transactions found for this product in the selected period.</p>'}
       </div>
@@ -262,8 +265,8 @@ function generateReport() {
   let expenses = [];
   if (isGeneral) {
     expenses = DB.expenses.slice();
-    if (from) expenses = expenses.filter(e => e.date >= from);
-    if (to) expenses = expenses.filter(e => e.date <= to);
+    if (from) expenses = expenses.filter(e => appDateKey(e.date) >= appDateKey(from));
+    if (to) expenses = expenses.filter(e => appDateKey(e.date) <= appDateKey(to));
   }
   const expenseItems = expenses.filter(e => e.type === 'expense');
   const capitalItems = expenses.filter(e => e.type === 'capital');
@@ -390,7 +393,7 @@ function generateReport() {
        <h3 style="font-size:0.95rem;margin-bottom:10px;color: #424242;">Capital Injections</h3>
        <table class="receipt-table">
           <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align: right;">Amount</th></tr></thead>
-          <tbody>${capitalItems.sort((a,b)=>a.date.localeCompare(b.date)).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${escapeHtml(e.desc)}</td><td style="text-transform: capitalize;">${escapeHtml(e.category)}</td><td style="text-align: right; color: #2563eb;">KES ${fmtMoney(e.amount)}</td></tr>`).join('')}</tbody>
+          <tbody>${capitalItems.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${escapeHtml(e.desc)}</td><td style="text-transform: capitalize;">${escapeHtml(e.category)}</td><td style="text-align: right; color: #2563eb;">KES ${fmtMoney(e.amount)}</td></tr>`).join('')}</tbody>
        </table>
     </div>
     ` : ''}
@@ -400,7 +403,7 @@ function generateReport() {
        <h3 style="font-size:0.95rem;margin-bottom:10px;color: #424242;">All Invoices</h3>
        <table class="receipt-table">
           <thead><tr><th>#</th><th>Restaurant</th><th>Date</th><th style="text-align: right;">Amount</th><th style="text-align: right;">Profit</th><th style="text-align: center;">Status</th></tr></thead>
-          <tbody>${invs.sort((a,b)=>a.date.localeCompare(b.date)).map(i=>`<tr><td>${escapeHtml(i.number)}</td><td>${escapeHtml(i.restaurantName)}</td><td>${fmtDate(i.date)}</td><td style="text-align: right;">KES ${fmtMoney(i.totalSell)}</td><td style="text-align: right;">KES ${fmtMoney(i.profit)}</td><td style="text-align: center;"><span class="badge ${i.status==='paid'?'badge-success':'badge-warning'}">${i.status}</span></td></tr>`).join('')}</tbody>
+          <tbody>${invs.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(i=>`<tr><td>${escapeHtml(i.number)}</td><td>${escapeHtml(i.restaurantName)}</td><td>${fmtDate(i.date)}</td><td style="text-align: right;">KES ${fmtMoney(i.totalSell)}</td><td style="text-align: right;">KES ${fmtMoney(i.profit)}</td><td style="text-align: center;"><span class="badge ${i.status==='paid'?'badge-success':'badge-warning'}">${i.status}</span></td></tr>`).join('')}</tbody>
        </table>
     </div>
 
@@ -410,7 +413,7 @@ function generateReport() {
        <h3 style="font-size:0.95rem;margin-bottom:10px;color: #424242;">All Expenses</h3>
        <table class="receipt-table">
           <thead><tr><th>Date</th><th>Description</th><th>Category</th><th style="text-align: right;">Amount</th></tr></thead>
-          <tbody>${expenseItems.sort((a,b)=>a.date.localeCompare(b.date)).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${escapeHtml(e.desc)}</td><td style="text-transform: capitalize;">${escapeHtml(e.category)}</td><td style="text-align: right; color: #dc2626;">KES ${fmtMoney(e.amount)}</td></tr>`).join('')}</tbody>
+          <tbody>${expenseItems.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(e=>`<tr><td>${fmtDate(e.date)}</td><td>${escapeHtml(e.desc)}</td><td style="text-transform: capitalize;">${escapeHtml(e.category)}</td><td style="text-align: right; color: #dc2626;">KES ${fmtMoney(e.amount)}</td></tr>`).join('')}</tbody>
        </table>
     </div>
     ` : ''}
@@ -460,8 +463,8 @@ async function downloadReportPDF() {
   } else { dateRange = 'All Time'; }
   
   let invs = DB.invoices.filter(i => i.status !== 'draft');
-  if (from) invs = invs.filter(i => i.date >= from);
-  if (to) invs = invs.filter(i => i.date <= to);
+  if (from) invs = invs.filter(i => appDateKey(i.date) >= appDateKey(from));
+  if (to) invs = invs.filter(i => appDateKey(i.date) <= appDateKey(to));
 
   toast('Generating Report PDF...', 'info');
 
@@ -586,8 +589,8 @@ async function downloadReportPDF() {
     let exps = [];
     if (isGeneral) {
       exps = DB.expenses.slice();
-      if (from) exps = exps.filter(e => e.date >= from);
-      if (to) exps = exps.filter(e => e.date <= to);
+      if (from) exps = exps.filter(e => appDateKey(e.date) >= appDateKey(from));
+      if (to) exps = exps.filter(e => appDateKey(e.date) <= appDateKey(to));
     }
     const expItems = exps.filter(e => e.type === 'expense');
     const capItems = exps.filter(e => e.type === 'capital');
@@ -642,14 +645,14 @@ async function downloadReportPDF() {
       }
 
       if (capItems.length) {
-        const capData = capItems.sort((a,b)=>a.date.localeCompare(b.date)).map(e => [fmtDate(e.date), e.desc, e.category, `KES ${fmtMoney(e.amount)}`]);
+        const capData = capItems.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(e => [fmtDate(e.date), e.desc, e.category, `KES ${fmtMoney(e.amount)}`]);
         doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("Capital Injections", 40, currentY);
         doc.autoTable({ startY: currentY + 10, head: [["Date", "Description", "Category", "Amount"]], body: capData, theme: 'plain', styles: { fontSize: 9 }, headStyles: { fillColor: '#f1f5f9', textColor: '#424242' }, margin: tableMargins, didDrawPage: (data) => { if (data.pageNumber > 1) drawHeaderShapes(false); } });
         currentY = doc.lastAutoTable.finalY + 25;
       }
     }
 
-    const invData = invs.sort((a,b)=>a.date.localeCompare(b.date)).map(i => [i.number, i.restaurantName, fmtDate(i.date), `KES ${fmtMoney(i.totalSell)}`, `KES ${fmtMoney(i.profit)}`, i.status]);
+    const invData = invs.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(i => [i.number, i.restaurantName, fmtDate(i.date), `KES ${fmtMoney(i.totalSell)}`, `KES ${fmtMoney(i.profit)}`, i.status]);
     if (invData.length) {
       doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("All Invoices", 40, currentY);
       doc.autoTable({ startY: currentY + 10, head: [["#", "Restaurant", "Date", "Amount", "Profit", "Status"]], body: invData, theme: 'plain', styles: { fontSize: 9 }, headStyles: { fillColor: '#f1f5f9', textColor: '#424242' }, margin: tableMargins, didDrawPage: (data) => { if (data.pageNumber > 1) drawHeaderShapes(false); } });
@@ -657,7 +660,7 @@ async function downloadReportPDF() {
     }
 
 
-    const expData = expItems.sort((a,b)=>a.date.localeCompare(b.date)).map(e => [fmtDate(e.date), e.desc, e.category, `KES ${fmtMoney(e.amount)}`]);
+    const expData = expItems.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(e => [fmtDate(e.date), e.desc, e.category, `KES ${fmtMoney(e.amount)}`]);
     if (expData.length) {
       doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("All Expenses", 40, currentY);
       doc.autoTable({ startY: currentY + 10, head: [["Date", "Description", "Category", "Amount"]], body: expData, theme: 'plain', styles: { fontSize: 9 }, headStyles: { fillColor: '#f1f5f9', textColor: '#424242' }, margin: tableMargins, didDrawPage: (data) => { if (data.pageNumber > 1) drawHeaderShapes(false); } });
@@ -1132,7 +1135,8 @@ async function handleChangePassword() {
 /* ══ Logout ══ */
 async function handleLogout() {
   customConfirm('Are you sure you want to sign out?', 'Sign Out', 'Yes, Sign Out', false, async () => {
-    await signOut();
+    const signedOut = await signOut();
+    if (!signedOut) return;
     DB.clearLocalData();
     localStorage.removeItem('ttg_e2e_key'); // Clear encryption key from memory
     document.getElementById('appShell').style.display = 'none';

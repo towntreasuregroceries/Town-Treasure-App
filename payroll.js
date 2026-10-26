@@ -37,13 +37,15 @@ function saveStaff() {
     id: id || genId(),
     name, role, salary, phone, payDay,
     status: 'active',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   };
 
   const list = DB.staff;
   const idx = list.findIndex(x => x.id === staffMember.id);
   if (idx >= 0) {
     staffMember.createdAt = list[idx].createdAt;
+    staffMember.updatedAt = new Date().toISOString();
     list[idx] = staffMember;
   } else {
     list.push(staffMember);
@@ -64,6 +66,8 @@ function deleteStaff(id) {
       DB.deletedStaff = bin;
     }
     DB.staff = DB.staff.filter(x => x.id !== id);
+    DB.markRecordDeleted?.('staff', id);
+    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderPayrollTab();
     toast('Staff moved to Recycle Bin');
   });
@@ -79,6 +83,8 @@ function restoreStaff(id) {
   list.push(restored);
   DB.staff = list;
   DB.deletedStaff = bin.filter(x => x.id !== id);
+  DB.markRecordRestored?.('staff', id);
+  if (typeof DB.syncNow === 'function') DB.syncNow();
   renderBin();
   toast('Staff member restored');
 }
@@ -144,9 +150,13 @@ function undoSalaryPayment(staffId) {
   if (!payment) return;
 
   customConfirm(`Undo salary payment for this month? This will also remove the expense entry.`, 'Undo Payment', 'Yes, Undo', true, () => {
+    DB.markRecordDeleted?.('salaryPayments', payment.id);
     DB.salaryPayments = DB.salaryPayments.filter(p => p.id !== payment.id);
     // Remove matching expense
+    DB.expenses.filter(e => e.category === 'salaries' && e.desc.includes(payment.staffName) && e.date === payment.datePaid && e.amount === payment.amount)
+      .forEach(expense => DB.markRecordDeleted?.('expenses', expense.id));
     DB.expenses = DB.expenses.filter(e => !(e.category === 'salaries' && e.desc.includes(payment.staffName) && e.date === payment.datePaid && e.amount === payment.amount));
+    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderPayrollTab();
     toast('Payment undone');
   });
@@ -183,10 +193,10 @@ function saveRecurring() {
   if (!desc) return toast('Description is required', 'error');
   if (!amount) return toast('Amount is required', 'error');
 
-  const item = { id: id || genId(), desc, category, amount, dueDay, createdAt: new Date().toISOString() };
+  const item = { id: id || genId(), desc, category, amount, dueDay, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   const list = DB.recurringExpenses;
   const idx = list.findIndex(x => x.id === item.id);
-  if (idx >= 0) { item.createdAt = list[idx].createdAt; list[idx] = item; }
+  if (idx >= 0) { item.createdAt = list[idx].createdAt; item.updatedAt = new Date().toISOString(); list[idx] = item; }
   else list.push(item);
   DB.recurringExpenses = list;
   closeModal('recurringModal');
@@ -196,7 +206,9 @@ function saveRecurring() {
 
 function deleteRecurring(id) {
   customConfirm('Delete this recurring expense?', 'Delete', 'Yes, Delete', true, () => {
+    DB.markRecordDeleted?.('recurringExpenses', id);
     DB.recurringExpenses = DB.recurringExpenses.filter(x => x.id !== id);
+    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderRecurringTab();
     toast('Deleted');
   });
@@ -467,9 +479,10 @@ function saveBorrowing() {
     list[idx].date = date;
     list[idx].desc = desc;
     list[idx].amount = amount;
+    list[idx].updatedAt = new Date().toISOString();
     updateLinkedExpense(list[idx].id, amount, date, desc, 'borrow');
   } else {
-    const item = { id: genId(), date, desc, amount, repayments: [], createdAt: new Date().toISOString() };
+    const item = { id: genId(), date, desc, amount, repayments: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     list.push(item);
     createLinkedExpense(item.id, amount, date, desc, 'borrow');
   }
@@ -487,7 +500,9 @@ function deleteBorrowing(id) {
       deleteLinkedExpense(loan.id, 'borrow');
       (loan.repayments || []).forEach(r => deleteLinkedExpense(r.id, 'repay'));
     }
+    DB.markRecordDeleted?.('borrowings', id);
     DB.borrowings = DB.borrowings.filter(x => x.id !== id);
+    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderBorrowingsTab();
     toast('Loan deleted');
   });
@@ -547,6 +562,7 @@ function deleteRepayment(loanId, repayId) {
     const loan = list.find(x => x.id === loanId);
     if(loan && loan.repayments) {
       loan.repayments = loan.repayments.filter(r => r.id !== repayId);
+      loan.updatedAt = new Date().toISOString();
       deleteLinkedExpense(repayId, 'repay');
       DB.borrowings = list;
       viewRepayments(loanId);
@@ -573,12 +589,15 @@ function updateLinkedExpense(refId, amount, date, desc, type) {
   if (exp) {
     exp.amount = amount;
     exp.date = date;
+    exp.updatedAt = new Date().toISOString();
     if(type === 'borrow') exp.desc = `Boss Loan: ${desc}`;
     DB.expenses = expList;
   }
 }
 
 function deleteLinkedExpense(refId, type) {
+  const matching = DB.expenses.filter(e => e.refId === refId && e.refType === (type === 'borrow' ? 'boss_loan' : 'boss_repay'));
+  matching.forEach(expense => DB.markRecordDeleted?.('expenses', expense.id));
   DB.expenses = DB.expenses.filter(e => !(e.refId === refId && e.refType === (type === 'borrow' ? 'boss_loan' : 'boss_repay')));
 }
 

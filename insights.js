@@ -16,7 +16,7 @@ function generateInsights() {
     if (i.status === 'paid') return false;
     if (i.dueDate && new Date(i.dueDate) < now) return true;
     // If no due date, consider overdue after 30 days
-    const invDate = new Date(i.date);
+    const invDate = parseAppDate(i.date);
     return (now - invDate) > 30 * 24 * 60 * 60 * 1000 && i.status !== 'paid';
   });
   if (overdue.length > 0) {
@@ -53,7 +53,7 @@ function generateInsights() {
   // ATTENTION: Restaurants with old unpaid invoices
   const restDebts = {};
   activeInvoices.filter(i => i.status !== 'paid').forEach(inv => {
-    const days = Math.floor((now - new Date(inv.date)) / (1000 * 60 * 60 * 24));
+    const days = Math.floor((now - parseAppDate(inv.date)) / (1000 * 60 * 60 * 24));
     if (days > 30) {
       if (!restDebts[inv.restaurantName]) restDebts[inv.restaurantName] = { total: 0, days: 0 };
       restDebts[inv.restaurantName].total += inv.totalSell;

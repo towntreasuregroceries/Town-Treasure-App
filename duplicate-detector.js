@@ -148,6 +148,32 @@ const TTGAudit = {
   },
 
   /** Fast Tier 1 local heuristic match score between candidate and an existing record */
+  parseDateValue(value) {
+    if (!value) return null;
+    const text = String(value).trim();
+    let match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (!match) {
+      const compact = text.match(/^(\d{8})$/);
+      if (compact) {
+        const value = compact[1];
+        const yearFirst = [Number(value.slice(0, 4)), Number(value.slice(4, 6)), Number(value.slice(6, 8))];
+        const dayFirst = [Number(value.slice(4, 8)), Number(value.slice(2, 4)), Number(value.slice(0, 2))];
+        const valid = ([year, month, day]) => {
+          if (year < 1000 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+          const date = new Date(year, month - 1, day);
+          return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+        };
+        if (valid(yearFirst)) match = [value, value.slice(0, 4), value.slice(4, 6), value.slice(6, 8)];
+        else if (valid(dayFirst)) return new Date(dayFirst[0], dayFirst[1] - 1, dayFirst[2]);
+      }
+    }
+    if (match) return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+    match = text.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+    if (match) return new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]));
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  },
+
   calculateHeuristicScore(candidate, existing) {
     const candHotel = this.normalizeHotel(candidate.restaurant_name || candidate.restaurantName || '');
     const existHotel = this.normalizeHotel(existing.restaurant_name || existing.restaurantName || '');
@@ -170,8 +196,8 @@ const TTGAudit = {
     const existDateStr = existing.invoice_date || existing.date || '';
     let dateScore = 0;
     if (candDateStr && existDateStr) {
-      const d1 = new Date(candDateStr).getTime();
-      const d2 = new Date(existDateStr).getTime();
+      const d1 = this.parseDateValue(candDateStr)?.getTime() ?? NaN;
+      const d2 = this.parseDateValue(existDateStr)?.getTime() ?? NaN;
       const diffDays = Math.abs(d1 - d2) / (1000 * 60 * 60 * 24);
       if (diffDays === 0) dateScore = 1.0;
       else if (diffDays <= 1) dateScore = 0.7; // Late-night delivery vs morning billing
@@ -251,7 +277,9 @@ const TTGAudit = {
     }
 
     const excludeId = options.excludeId || candidate.id;
-    const validPool = pool.filter(p => p && p.id && p.id !== excludeId);
+    // Autosaved drafts are working copies, not issued invoices; comparing against
+    // them produces false duplicate alerts and draft-only invoice references.
+    const validPool = pool.filter(p => p && p.id && p.id !== excludeId && p.status !== 'draft');
 
     // 1. Tier 1: Fast Heuristic Ranking
     let bestMatch = null;

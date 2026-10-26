@@ -6,6 +6,7 @@
 
 let currentClerkTab = 'pending';
 let activeReviewSubmissionId = null;
+let activeReviewAudit = { id: null, state: 'idle' };
 
 /** Render the Clerk Submissions page */
 async function renderClerkSubmissionsPage() {
@@ -135,7 +136,7 @@ async function renderClerkSubmissionsPage() {
       return `
         <tr>
           <td>${photoThumb}</td>
-          <td><strong>${escapeHtml(item.invoice_date || '—')}</strong></td>
+          <td><strong>${escapeHtml(fmtDate(item.invoice_date))}</strong></td>
           <td><strong>${escapeHtml(item.restaurant_name || 'General Wholesale')}</strong></td>
           <td><span style="color:var(--text-2);">${escapeHtml(item.clerk_name || 'Clerk')}</span></td>
           <td>${itemsCount} item${itemsCount !== 1 ? 's' : ''}</td>
@@ -185,7 +186,9 @@ function openImportDocketModal() {
 /** Open the Side-by-Side Review & Approval Modal */
 async function openClerkReviewModal(id) {
   activeReviewSubmissionId = id;
+  activeReviewAudit = { id, state: 'checking' };
   const all = await StagingDB.getAllSubmissions();
+  if (activeReviewSubmissionId !== id) return;
   const item = all.find(x => x.id === id);
   if (!item) return toast('Submission not found', 'error');
 
@@ -193,7 +196,7 @@ async function openClerkReviewModal(id) {
   document.getElementById('crmClerkName').textContent = item.clerk_name || 'Assistant';
   document.getElementById('crmSubmittedAt').textContent = new Date(item.created_at).toLocaleString();
   document.getElementById('crmRestaurantName').value = item.restaurant_name || '';
-  document.getElementById('crmInvoiceDate').value = item.invoice_date || new Date().toISOString().slice(0, 10);
+  document.getElementById('crmInvoiceDate').value = normalizeAppDate(item.invoice_date) || new Date().toISOString().slice(0, 10);
   document.getElementById('crmDeliveryCost').value = item.delivery_cost || 0;
   document.getElementById('crmOtherCost').value = item.other_cost || 0;
   document.getElementById('crmClerkNotes').textContent = item.notes ? `"${item.notes}"` : 'No notes provided by clerk.';
@@ -286,8 +289,8 @@ async function openClerkReviewModal(id) {
   if (item.status === 'pending') {
     if (approveBtn) {
       approveBtn.style.display = 'inline-flex';
-      approveBtn.disabled = false;
-      approveBtn.title = '';
+      approveBtn.disabled = true;
+      approveBtn.title = 'Checking this docket against saved invoices';
     }
     if (rejectBtn) rejectBtn.style.display = 'inline-flex';
   } else {
@@ -300,13 +303,20 @@ async function openClerkReviewModal(id) {
     banner.style.display = 'none';
     banner.innerHTML = '';
 
-    TTGAudit.auditSubmission(item, DB.invoices).then(audit => {
-      if (!audit) return;
+    TTGAudit.auditSubmission(item, DB.invoices.filter(invoice => invoice && invoice.status !== 'draft')).then(audit => {
+      if (activeReviewSubmissionId !== id) return;
+      if (!audit) {
+        activeReviewAudit = { id, state: 'error' };
+        banner.style.display = 'block';
+        banner.textContent = 'Duplicate check did not complete. Close and reopen this docket before approving.';
+        return;
+      }
       if (audit.isDuplicate || audit.determination === 'EXACT_DUPLICATE') {
+        activeReviewAudit = { id, state: 'duplicate' };
         const matched = audit.matchedRecord || {};
         const matchedNum = matched.number || 'Existing Invoice';
         const matchedAmt = (matched.totalSell || matched.total_sell || 0).toLocaleString();
-        const matchedDate = matched.date || matched.invoice_date || '';
+        const matchedDate = fmtDate(matched.date || matched.invoice_date || '');
 
         banner.style.display = 'block';
         banner.innerHTML = `
@@ -346,6 +356,11 @@ async function openClerkReviewModal(id) {
           }
         }
       } else {
+        activeReviewAudit = { id, state: 'clear' };
+        if (approveBtn && item.status === 'pending') {
+          approveBtn.disabled = false;
+          approveBtn.title = '';
+        }
         banner.style.display = 'block';
         banner.innerHTML = `
           <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-left:5px solid #16a34a; border-radius:8px; padding:10px 16px; display:flex; align-items:center; gap:8px;">
@@ -360,6 +375,17 @@ async function openClerkReviewModal(id) {
       }
     }).catch(err => {
       console.warn('[Smart Audit] Review audit note:', err);
+      if (activeReviewSubmissionId === id) {
+        activeReviewAudit = { id, state: 'error' };
+        if (approveBtn && item.status === 'pending') {
+          approveBtn.disabled = true;
+          approveBtn.title = 'Duplicate check failed. Close and reopen this docket to retry.';
+        }
+        if (banner) {
+          banner.style.display = 'block';
+          banner.textContent = 'Duplicate check failed. Close and reopen this docket to retry before approving.';
+        }
+      }
     });
   }
 
@@ -369,7 +395,7 @@ async function openClerkReviewModal(id) {
 function handleCrmSupplementaryToggle(chk) {
   const approveBtn = document.getElementById('btnCrmApprove');
   if (approveBtn) {
-    approveBtn.disabled = !chk.checked;
+    approveBtn.disabled = !(chk.checked && activeReviewAudit.id === activeReviewSubmissionId && activeReviewAudit.state === 'duplicate');
   }
 }
 
@@ -467,6 +493,12 @@ async function openPhotoZoom(id) {
 /** Execute Approval: Commit to Veronica's encrypted vault! */
 async function executeClerkApproval() {
   if (!activeReviewSubmissionId) return;
+  if (activeReviewAudit.id !== activeReviewSubmissionId || !['clear', 'duplicate'].includes(activeReviewAudit.state)) {
+    return toast('Wait for the duplicate check to finish before approving this docket.', 'warning');
+  }
+  if (activeReviewAudit.state === 'duplicate' && !document.getElementById('crmConfirmSupplementaryCheckbox')?.checked) {
+    return toast('Confirm this intentional repeat dispatch before approving.', 'warning');
+  }
 
   const restName = document.getElementById('crmRestaurantName').value.trim();
   if (!restName) return toast('Restaurant Name is required', 'error');

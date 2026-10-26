@@ -96,6 +96,9 @@ const state = {
   restaurants: JSON.parse(localStorage.getItem('ttg_restaurants') || '[]'),
   deletedRestaurantIds: JSON.parse(localStorage.getItem('ttg_deleted_restaurant_ids') || '[]'),
   invoices: JSON.parse(localStorage.getItem('ttg_invoices') || '[]'),
+  deletedInvoiceIds: JSON.parse(localStorage.getItem('ttg_deleted_invoice_ids') || '[]'),
+  restoredInvoiceIds: JSON.parse(localStorage.getItem('ttg_restored_invoice_ids') || '[]'),
+  recordActions: JSON.parse(localStorage.getItem('ttg_record_actions') || '{}'),
   expenses: JSON.parse(localStorage.getItem('ttg_expenses') || '[]'),
   deletedInvoices: JSON.parse(localStorage.getItem('ttg_deleted_invoices') || '[]'),
   staff: JSON.parse(localStorage.getItem('ttg_staff') || '[]'),
@@ -109,6 +112,157 @@ const state = {
   nextInvNum: 1001
 };
 
+function mergeRecordActions(local = {}, remote = {}) {
+  const merged = {};
+  new Set([...Object.keys(local || {}), ...Object.keys(remote || {})]).forEach(collection => {
+    const ids = new Set([...Object.keys(local?.[collection] || {}), ...Object.keys(remote?.[collection] || {})]);
+    merged[collection] = {};
+    ids.forEach(id => {
+      const a = local?.[collection]?.[id] || {};
+      const b = remote?.[collection]?.[id] || {};
+      const deletedAt = Math.max(Number(a.deletedAt || 0), Number(b.deletedAt || 0));
+      const restoredAt = Math.max(Number(a.restoredAt || 0), Number(b.restoredAt || 0));
+      merged[collection][id] = { deletedAt, restoredAt };
+    });
+  });
+  return merged;
+}
+
+function isRecordDeleted(actions, collection, id) {
+  const action = actions?.[collection]?.[id];
+  return !!action && Number(action.deletedAt || 0) > 0 && Number(action.deletedAt || 0) >= Number(action.restoredAt || 0);
+}
+
+function includeLegacyDeleteBins(actions, collection, records = []) {
+  const result = { ...(actions || {}) };
+  const byId = { ...(result[collection] || {}) };
+  (Array.isArray(records) ? records : []).forEach(item => {
+    if (!item?.id) return;
+    const current = byId[item.id] || {};
+    const deletedAt = Date.parse(item.deletedAt || '') || 1;
+    byId[item.id] = { ...current, deletedAt: Math.max(Number(current.deletedAt || 0), deletedAt) };
+  });
+  result[collection] = byId;
+  return result;
+}
+
+function includeLegacyInvoiceActions(actions, deletedIds = [], restoredIds = [], deletedRecords = [], activeRecords = []) {
+  const result = { ...(actions || {}) };
+  const byId = { ...(result.invoices || {}) };
+  const deletedSet = new Set(deletedIds || []);
+  const restoredSet = new Set(restoredIds || []);
+  const deletedById = new Map((deletedRecords || []).filter(item => item?.id).map(item => [item.id, item]));
+  const activeIds = new Set((activeRecords || []).filter(item => item?.id).map(item => item.id));
+  const ids = new Set([...deletedSet, ...restoredSet, ...deletedById.keys()]);
+  ids.forEach(id => {
+    const current = byId[id];
+    if (current && (Number(current.deletedAt || 0) > 0 || Number(current.restoredAt || 0) > 0)) return;
+    // Old vaults stored tombstone IDs without action times. Treat legacy restore
+    // markers as newer only when an active invoice copy is present.
+    const deletedAt = (deletedSet.has(id) || deletedById.has(id)) ? 1 : 0;
+    const restoredAt = restoredSet.has(id) && activeIds.has(id) ? 2 : 0;
+    byId[id] = { deletedAt, restoredAt };
+  });
+  result.invoices = byId;
+  return result;
+}
+
+function normalizeAppDate(value) {
+  if (!value) return '';
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  }
+  const text = String(value).trim();
+  let match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (match) return `${match[1]}-${match[2]}-${match[3]}`;
+  match = text.match(/^(\d{8})$/);
+  if (match) {
+    const compact = match[1];
+    const yearFirst = [Number(compact.slice(0, 4)), Number(compact.slice(4, 6)), Number(compact.slice(6, 8))];
+    const dayFirst = [Number(compact.slice(4, 8)), Number(compact.slice(2, 4)), Number(compact.slice(0, 2))];
+    const isValid = ([year, month, day]) => {
+      if (year < 1000 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+      const candidate = new Date(year, month - 1, day);
+      return candidate.getFullYear() === year && candidate.getMonth() === month - 1 && candidate.getDate() === day;
+    };
+    if (isValid(yearFirst)) return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`;
+    if (isValid(dayFirst)) return `${compact.slice(4, 8)}-${compact.slice(2, 4)}-${compact.slice(0, 2)}`;
+    return '';
+  }
+  match = text.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+  if (match) return `${match[3]}-${match[2]}-${match[1]}`;
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return '';
+  return `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}-${String(parsed.getDate()).padStart(2, '0')}`;
+}
+
+function parseAppDate(value) {
+  const iso = normalizeAppDate(value);
+  if (!iso) return new Date(NaN);
+  const [year, month, day] = iso.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
+function appDateKey(value) {
+  return normalizeAppDate(value).replace(/-/g, '') || '00000000';
+}
+
+function mergeRecordsById(local = [], remote = [], collection, actions = {}, deletedBin = false) {
+  const map = new Map();
+  const unkeyed = [];
+  const all = [...(Array.isArray(remote) ? remote : []), ...(Array.isArray(local) ? local : [])];
+  all.forEach(item => {
+    if (!item || !item.id) { if (item) unkeyed.push(item); return; }
+    if (isRecordDeleted(actions, collection, item.id) !== deletedBin) return;
+    const current = map.get(item.id);
+    const freshness = record => Date.parse(record.updatedAt || record.createdAt || record.deletedAt || 0) || 0;
+    if (!current || freshness(item) > freshness(current)) map.set(item.id, item);
+  });
+  return [...map.values(), ...unkeyed];
+}
+
+function mergeInvoicesById(local = [], remote = [], actions = {}) {
+  const map = new Map();
+  const unkeyed = [];
+  [...(Array.isArray(remote) ? remote : []), ...(Array.isArray(local) ? local : [])].forEach(invoice => {
+    if (!invoice) return;
+    if (invoice.id && isRecordDeleted(actions, 'invoices', invoice.id)) return;
+    const key = invoice.id ? `id:${invoice.id}` : (invoice.number ? `number:${String(invoice.number).trim().toUpperCase()}` : '');
+    if (!key) {
+      if (!unkeyed.some(item => JSON.stringify(item) === JSON.stringify(invoice))) unkeyed.push(invoice);
+      return;
+    }
+    const current = map.get(key);
+    const freshness = record => Date.parse(record.updatedAt || record.createdAt || 0) || 0;
+    if (!current || freshness(invoice) > freshness(current)) map.set(key, invoice);
+  });
+  return [...map.values(), ...unkeyed];
+}
+
+function mergeRestaurantsById(local = [], remote = [], deletedIds = []) {
+  const deleted = new Set(deletedIds || []);
+  const map = new Map();
+  [...(Array.isArray(remote) ? remote : []), ...(Array.isArray(local) ? local : [])].forEach(item => {
+    if (!item || !item.id || deleted.has(item.id)) return;
+    const current = map.get(item.id);
+    const freshness = restaurant => Date.parse(restaurant.updatedAt || restaurant.createdAt || 0) || 0;
+    if (!current || freshness(item) > freshness(current)) map.set(item.id, item);
+  });
+  return Array.from(map.values());
+}
+
+function mergeSettingsByTimestamp(local = {}, remote = {}) {
+  const localTime = Date.parse(local.updatedAt || 0) || 0;
+  const remoteTime = Date.parse(remote.updatedAt || 0) || 0;
+  return localTime > remoteTime ? { ...remote, ...local } : { ...local, ...remote };
+}
+
+function isMissingVaultRevisionColumn(error) {
+  const code = String(error?.code || '');
+  const details = `${error?.message || ''} ${error?.details || ''}`.toLowerCase();
+  return ['42703', 'PGRST204'].includes(code) && details.includes('revision');
+}
+
 const DB = {
   get restaurants() { return state.restaurants; },
   set restaurants(v) { state.restaurants = v; localStorage.setItem('ttg_restaurants', JSON.stringify(v)); this.syncToSupabase(); },
@@ -116,6 +270,12 @@ const DB = {
   set deletedRestaurantIds(v) { state.deletedRestaurantIds = Array.isArray(v) ? v : []; localStorage.setItem('ttg_deleted_restaurant_ids', JSON.stringify(state.deletedRestaurantIds)); this.syncToSupabase(); },
   get invoices() { return state.invoices; },
   set invoices(v) { state.invoices = v; localStorage.setItem('ttg_invoices', JSON.stringify(v)); this.syncToSupabase(); },
+  get deletedInvoiceIds() { return state.deletedInvoiceIds; },
+  set deletedInvoiceIds(v) { state.deletedInvoiceIds = Array.isArray(v) ? v : []; localStorage.setItem('ttg_deleted_invoice_ids', JSON.stringify(state.deletedInvoiceIds)); this.syncToSupabase(); },
+  get restoredInvoiceIds() { return state.restoredInvoiceIds; },
+  set restoredInvoiceIds(v) { state.restoredInvoiceIds = Array.isArray(v) ? v : []; localStorage.setItem('ttg_restored_invoice_ids', JSON.stringify(state.restoredInvoiceIds)); this.syncToSupabase(); },
+  get recordActions() { return state.recordActions; },
+  set recordActions(v) { state.recordActions = v && typeof v === 'object' ? v : {}; localStorage.setItem('ttg_record_actions', JSON.stringify(state.recordActions)); this.syncToSupabase(); },
   get expenses() { return state.expenses; },
   set expenses(v) { state.expenses = v; localStorage.setItem('ttg_expenses', JSON.stringify(v)); this.syncToSupabase(); },
   get deletedInvoices() { return state.deletedInvoices; },
@@ -152,57 +312,132 @@ const DB = {
   // Debounce timer for sync — prevents hammering Supabase on every keystroke
   _syncTimer: null,
   _syncVersion: 0,
+  _syncInFlight: null,
+  _syncRequestedAgain: false,
+  _remoteRevision: null,
+  _legacyVaultSyncNoticeShown: false,
+
+  markRecordDeleted(collection, id) {
+    if (!collection || !id) return;
+    const actions = { ...(state.recordActions || {}) };
+    const records = { ...(actions[collection] || {}) };
+    records[id] = { deletedAt: Date.now(), restoredAt: Number(records[id]?.restoredAt || 0) };
+    actions[collection] = records;
+    this.recordActions = actions;
+  },
+
+  markRecordRestored(collection, id) {
+    if (!collection || !id) return;
+    const actions = { ...(state.recordActions || {}) };
+    const records = { ...(actions[collection] || {}) };
+    records[id] = { deletedAt: Number(records[id]?.deletedAt || 0), restoredAt: Date.now() };
+    actions[collection] = records;
+    this.recordActions = actions;
+  },
 
   async syncToSupabase() {
     // Debounce: wait 3 seconds of inactivity before syncing
     if (this._syncTimer) clearTimeout(this._syncTimer);
-    this._syncTimer = setTimeout(() => this._doSync(), 3000);
+    this._syncTimer = setTimeout(() => {
+      this._syncTimer = null;
+      this._doSync();
+    }, 3000);
   },
 
   async _doSync() {
-    if (!supabaseClient) return;
+    if (this._syncInFlight) {
+      this._syncRequestedAgain = true;
+      return this._syncInFlight;
+    }
+    this._syncInFlight = (async () => {
+      let result;
+      do {
+        this._syncRequestedAgain = false;
+        result = await this._performSync();
+      } while (this._syncRequestedAgain);
+      return result;
+    })();
+    try {
+      return await this._syncInFlight;
+    } finally {
+      this._syncInFlight = null;
+    }
+  },
+
+  async _performSync() {
+    if (!supabaseClient) return false;
     const uid = getUserId();
-    if (!uid) return; // Not logged in, skip sync
+    if (!uid) return false; // Not logged in, skip sync
     
     const e2eKeyStr = localStorage.getItem('ttg_e2e_key');
     if (!e2eKeyStr) {
       console.warn("No E2EE key found. Sync skipped.");
-      return;
+      return false;
     }
 
     try {
       const jwkKey = JSON.parse(e2eKeyStr);
 
-      // SAFETY MERGE: Before overwriting remote vault, check if remote has records
-      // that are missing locally (e.g. if local state was started empty or partial).
-      try {
-        const { data: remoteRow } = await supabaseClient
+      // Revision compare-and-swap prevents two devices from overwriting each
+      // other's changes. Until the SQL migration is applied, retain the current
+      // read/merge/write path so the release can roll out without stopping sync.
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        let revisionSupport = true;
+        let { data: remoteRow, error: remoteReadError } = await supabaseClient
           .from('encrypted_vault')
-          .select('data')
+          .select('data, revision')
           .eq('user_id', uid)
           .maybeSingle();
+        if (isMissingVaultRevisionColumn(remoteReadError)) {
+          revisionSupport = false;
+          if (!this._legacyVaultSyncNoticeShown) {
+            console.warn('[Vault] Server revision migration is pending; using the existing merged sync path for now.');
+            this._legacyVaultSyncNoticeShown = true;
+          }
+          ({ data: remoteRow, error: remoteReadError } = await supabaseClient
+            .from('encrypted_vault')
+            .select('data')
+            .eq('user_id', uid)
+            .maybeSingle());
+        }
+        if (remoteReadError) throw remoteReadError;
+        const expectedRevision = revisionSupport ? Number(remoteRow?.revision ?? 0) : null;
+        if (revisionSupport && (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)) {
+          throw new Error('The server returned an invalid vault revision; sync was stopped to protect existing records.');
+        }
+        this._remoteRevision = revisionSupport ? expectedRevision : null;
 
         if (remoteRow && remoteRow.data) {
           const remoteVault = await Crypto.decrypt(remoteRow.data, jwkKey);
-          if (remoteVault) {
-            // Merge remote invoices that might be missing locally
-            if (Array.isArray(remoteVault.invoices) && remoteVault.invoices.length > 0) {
-              const localInvMap = new Map();
-              state.invoices.forEach(i => localInvMap.set(i.number || i.id, i));
-              let addedAny = false;
-              remoteVault.invoices.forEach(remInv => {
-                const key = remInv.number || remInv.id;
-                if (!localInvMap.has(key)) {
-                  localInvMap.set(key, remInv);
-                  addedAny = true;
-                }
-              });
-              if (addedAny) {
-                state.invoices = Array.from(localInvMap.values());
-                state.invoices.sort((a,b) => (b.date || '').localeCompare(a.date || ''));
-                localStorage.setItem('ttg_invoices', JSON.stringify(state.invoices));
-              }
-            }
+          if (!remoteVault || typeof remoteVault !== 'object') {
+            throw new Error('Could not decrypt the current vault; sync was stopped to protect existing records.');
+          }
+          {
+            state.recordActions = mergeRecordActions(state.recordActions, remoteVault.recordActions || {});
+            state.recordActions = includeLegacyInvoiceActions(
+              state.recordActions,
+              [...(state.deletedInvoiceIds || []), ...(remoteVault.deletedInvoiceIds || [])],
+              [...(state.restoredInvoiceIds || []), ...(remoteVault.restoredInvoiceIds || [])],
+              [...(state.deletedInvoices || []), ...(remoteVault.deletedInvoices || [])],
+              [...(state.invoices || []), ...(remoteVault.invoices || [])]
+            );
+            const invoiceActions = state.recordActions.invoices || {};
+            const deletedInvoiceIds = new Set(Object.keys(invoiceActions).filter(id => isRecordDeleted(state.recordActions, 'invoices', id)));
+            const restoredInvoiceIds = new Set(Object.keys(invoiceActions).filter(id => !isRecordDeleted(state.recordActions, 'invoices', id) && Number(invoiceActions[id].restoredAt || 0) > 0));
+            state.restoredInvoiceIds = Array.from(restoredInvoiceIds);
+            state.deletedInvoiceIds = Array.from(deletedInvoiceIds);
+
+            // Merge by immutable invoice ID, keep the newest edit, and honor
+            // delete/restore tombstones so stale snapshots cannot resurrect records.
+            state.invoices = mergeInvoicesById(state.invoices, remoteVault.invoices, state.recordActions).sort((a, b) =>
+              appDateKey(b.date).localeCompare(appDateKey(a.date))
+              || String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+            );
+            localStorage.setItem('ttg_invoices', JSON.stringify(state.invoices));
+            state.deletedInvoices = mergeRecordsById(state.deletedInvoices, remoteVault.deletedInvoices, 'invoices', state.recordActions, true);
+            localStorage.setItem('ttg_deleted_invoices', JSON.stringify(state.deletedInvoices));
+            localStorage.setItem('ttg_deleted_invoice_ids', JSON.stringify(state.deletedInvoiceIds));
+            localStorage.setItem('ttg_restored_invoice_ids', JSON.stringify(state.restoredInvoiceIds));
 
             // A deletion tombstone prevents intentional restaurant removals from
             // being resurrected by the safety merge from a stale remote snapshot.
@@ -212,38 +447,125 @@ const DB = {
             ]);
             state.deletedRestaurantIds = Array.from(deletedRestaurantIds);
             localStorage.setItem('ttg_deleted_restaurant_ids', JSON.stringify(state.deletedRestaurantIds));
-            state.restaurants = state.restaurants.filter(r => r && !deletedRestaurantIds.has(r.id));
+            state.restaurants = mergeRestaurantsById(state.restaurants, remoteVault.restaurants, deletedRestaurantIds);
             localStorage.setItem('ttg_restaurants', JSON.stringify(state.restaurants));
 
-            // Merge remote restaurants that might be missing locally, except those deleted.
-            if (Array.isArray(remoteVault.restaurants) && remoteVault.restaurants.length > 0) {
-              const localRestMap = new Map();
-              state.restaurants.forEach(r => localRestMap.set(r.name || r.id, r));
-              let addedAny = false;
-              remoteVault.restaurants.forEach(remRest => {
-                const key = remRest.name || remRest.id;
-                if (remRest && !deletedRestaurantIds.has(remRest.id) && !localRestMap.has(key)) {
-                  localRestMap.set(key, remRest);
-                  addedAny = true;
-                }
-              });
-              if (addedAny) {
-                state.restaurants = Array.from(localRestMap.values());
-                localStorage.setItem('ttg_restaurants', JSON.stringify(state.restaurants));
-              }
-            }
+            // Merge other records by ID before writing the single encrypted vault row.
+            // This preserves offline additions and prevents overlapping syncs from
+            // replacing unrelated collections with an older in-memory snapshot.
+            state.recordActions = includeLegacyDeleteBins(state.recordActions, 'staff', [...(state.deletedStaff || []), ...(remoteVault.deletedStaff || [])]);
+            state.recordActions = includeLegacyDeleteBins(state.recordActions, 'priceLists', [...(state.deletedPriceLists || []), ...(remoteVault.deletedPriceLists || [])]);
+            const genericCollections = ['expenses', 'staff', 'salaryPayments', 'recurringExpenses', 'priceLists', 'borrowings'];
+            genericCollections.forEach(collection => {
+              state[collection] = mergeRecordsById(state[collection], remoteVault[collection], collection, state.recordActions);
+            });
+            state.deletedStaff = mergeRecordsById(state.deletedStaff, remoteVault.deletedStaff, 'staff', state.recordActions, true);
+            state.deletedPriceLists = mergeRecordsById(state.deletedPriceLists, remoteVault.deletedPriceLists, 'priceLists', state.recordActions, true);
+            state.settings = mergeSettingsByTimestamp(state.settings, remoteVault.settings || {});
+            localStorage.setItem('ttg_record_actions', JSON.stringify(state.recordActions));
+            genericCollections.forEach(collection => localStorage.setItem(`ttg_${collection === 'salaryPayments' ? 'salary_payments' : collection === 'recurringExpenses' ? 'recurring_expenses' : collection}`, JSON.stringify(state[collection])));
+            localStorage.setItem('ttg_staff', JSON.stringify(state.staff));
+            localStorage.setItem('ttg_price_lists', JSON.stringify(state.priceLists));
+            localStorage.setItem('ttg_deleted_staff', JSON.stringify(state.deletedStaff));
+            localStorage.setItem('ttg_deleted_pricelists', JSON.stringify(state.deletedPriceLists));
+            localStorage.setItem('ttg_settings', JSON.stringify(state.settings));
           }
         }
-      } catch (mergeErr) {
-        console.warn('[Vault] Safety merge check skipped:', mergeErr);
-      }
+        this._syncVersion++;
+        const appState = {
+          _vaultVersion: this._syncVersion,
+          _lastSync: new Date().toISOString(),
+          invoices: state.invoices,
+          deletedInvoiceIds: state.deletedInvoiceIds,
+          restoredInvoiceIds: state.restoredInvoiceIds,
+          recordActions: state.recordActions,
+          expenses: state.expenses,
+          restaurants: state.restaurants,
+          deletedRestaurantIds: state.deletedRestaurantIds,
+          deletedInvoices: state.deletedInvoices,
+          staff: state.staff,
+          salaryPayments: state.salaryPayments,
+          recurringExpenses: state.recurringExpenses,
+          priceLists: state.priceLists,
+          deletedStaff: state.deletedStaff,
+          deletedPriceLists: state.deletedPriceLists,
+          borrowings: state.borrowings,
+          settings: state.settings
+        };
+        const encryptedPayload = await Crypto.encrypt(appState, jwkKey);
+        if (!revisionSupport) {
+          const { error: legacySaveError } = await supabaseClient
+            .from('encrypted_vault')
+            .upsert({ user_id: uid, data: encryptedPayload }, { onConflict: 'user_id' });
+          if (legacySaveError) throw legacySaveError;
+          return true;
+        }
 
-      this._syncVersion++;
-      // 1. Gather all local state with version tracking
+        const { data: saveResult, error: saveError } = await supabaseClient.rpc('save_encrypted_vault_cas', {
+          p_user_id: uid,
+          p_expected_revision: expectedRevision,
+          p_data: encryptedPayload
+        });
+        if (saveError) throw saveError;
+        const returnedRevision = Number(saveResult?.revision);
+        if (typeof saveResult?.saved !== 'boolean' || !Number.isSafeInteger(returnedRevision) || returnedRevision < 0) {
+          throw new Error('The server returned an invalid compare-and-swap result; sync was stopped.');
+        }
+
+        if (saveResult?.saved === true) {
+          if (returnedRevision !== expectedRevision + 1) {
+            throw new Error('The server returned an unexpected vault revision; sync was stopped.');
+          }
+          this._remoteRevision = returnedRevision;
+          console.log('Successfully synced encrypted vault (server revision ' + this._remoteRevision + ', ' + state.invoices.length + ' invoices)');
+          return true;
+        }
+
+        this._remoteRevision = returnedRevision;
+        if (attempt < 3) {
+          console.warn('[Vault] Another device saved first; refreshing and merging before retry', {
+            attemptedRevision: expectedRevision,
+            currentRevision: this._remoteRevision
+          });
+          continue;
+        }
+        const conflict = new Error('The vault kept changing on another device. Your local data is safe; sync needs another attempt.');
+        conflict.code = 'VAULT_REVISION_CONFLICT';
+        throw conflict;
+      }
+      return false;
+    } catch (e) {
+      console.error(`Error syncing vault to Supabase:`, e);
+      const now = Date.now();
+      if (!window.lastOfflineToast || now - window.lastOfflineToast > 5000) {
+        const message = e?.code === 'VAULT_REVISION_CONFLICT'
+          ? 'Sync paused because the vault is changing on another device. Your local data is saved; try syncing again shortly.'
+          : 'Offline mode: Data saved locally.';
+        if (typeof toast === 'function') toast(message, 'warning');
+        window.lastOfflineToast = now;
+      }
+      return false;
+    }
+  },
+
+  /** Force an immediate sync (bypasses debounce) */
+  async syncNow() {
+    if (this._syncTimer) clearTimeout(this._syncTimer);
+    this._syncTimer = null;
+    return await this._doSync();
+  },
+
+  /** Re-encrypt a vault after its old key was verified by loadFromSupabase(). */
+  async reencryptVault(jwkKey) {
+    if (!supabaseClient || !getUserId() || !jwkKey) return false;
+    try {
       const appState = {
-        _vaultVersion: this._syncVersion,
+        _vaultVersion: ++this._syncVersion,
         _lastSync: new Date().toISOString(),
         invoices: state.invoices,
+        deletedInvoiceIds: state.deletedInvoiceIds,
+        restoredInvoiceIds: state.restoredInvoiceIds,
+        recordActions: state.recordActions,
         expenses: state.expenses,
         restaurants: state.restaurants,
         deletedRestaurantIds: state.deletedRestaurantIds,
@@ -257,35 +579,36 @@ const DB = {
         borrowings: state.borrowings,
         settings: state.settings
       };
-
-      // 2. Encrypt it completely
       const encryptedPayload = await Crypto.encrypt(appState, jwkKey);
-
-      // 3. Save to the secure vault
-      const { error } = await supabaseClient
-        .from('encrypted_vault')
-        .upsert({ user_id: uid, data: encryptedPayload }, { onConflict: 'user_id' });
-
-      if (error) throw error;
-      console.log('Successfully synced encrypted vault (v' + this._syncVersion + ', ' + state.invoices.length + ' invoices)');
-    } catch (e) {
-      console.error(`Error syncing vault to Supabase:`, e);
-      const now = Date.now();
-      if (!window.lastOfflineToast || now - window.lastOfflineToast > 5000) {
-        if (typeof toast === 'function') toast(`Offline mode: Data saved locally.`, 'warning');
-        window.lastOfflineToast = now;
+      if (Number.isSafeInteger(this._remoteRevision) && this._remoteRevision >= 0) {
+        const { data: saveResult, error } = await supabaseClient.rpc('save_encrypted_vault_cas', {
+          p_user_id: getUserId(),
+          p_expected_revision: this._remoteRevision,
+          p_data: encryptedPayload
+        });
+        if (error) throw error;
+        if (saveResult?.saved !== true) throw new Error('Vault changed during key migration; no server data was overwritten.');
+        const returnedRevision = Number(saveResult.revision);
+        if (!Number.isSafeInteger(returnedRevision) || returnedRevision !== this._remoteRevision + 1) {
+          throw new Error('The server returned an unexpected vault revision during key migration.');
+        }
+        this._remoteRevision = returnedRevision;
+      } else {
+        const { error } = await supabaseClient
+          .from('encrypted_vault')
+          .upsert({ user_id: getUserId(), data: encryptedPayload }, { onConflict: 'user_id' });
+        if (error) throw error;
       }
+      return true;
+    } catch (error) {
+      console.error('[E2EE] Vault key migration write failed:', error);
+      return false;
     }
-  },
-
-  /** Force an immediate sync (bypasses debounce) */
-  async syncNow() {
-    if (this._syncTimer) clearTimeout(this._syncTimer);
-    await this._doSync();
   },
   
   async loadFromSupabase() {
     if (!supabaseClient) return false;
+    this._remoteRevision = null;
     const uid = getUserId();
     if (!uid) return false; // Not logged in
     
@@ -296,22 +619,76 @@ const DB = {
     }
 
     const localDeletedRestaurantIds = new Set(state.deletedRestaurantIds || []);
+    const localRestaurants = (state.restaurants || []).slice();
+    const localSettings = { ...(state.settings || {}) };
+    const localInvoices = (state.invoices || []).slice();
+    const localDeletedInvoices = (state.deletedInvoices || []).slice();
+    const localDeletedInvoiceIds = new Set(state.deletedInvoiceIds || []);
+    const localRestoredInvoiceIds = new Set(state.restoredInvoiceIds || []);
+    const localRecordActions = state.recordActions || {};
+    const localGenericCollections = ['expenses', 'staff', 'salaryPayments', 'recurringExpenses', 'priceLists', 'borrowings']
+      .reduce((acc, key) => (acc[key] = (state[key] || []).slice(), acc), {});
+    const localDeletedStaff = (state.deletedStaff || []).slice();
+    const localDeletedPriceLists = (state.deletedPriceLists || []).slice();
 
     try {
-      const { data, error } = await supabaseClient
+      let revisionSupport = true;
+      let { data, error } = await supabaseClient
         .from('encrypted_vault')
-        .select('data')
+        .select('data, revision')
         .eq('user_id', uid)
         .single();
+      if (isMissingVaultRevisionColumn(error)) {
+        revisionSupport = false;
+        ({ data, error } = await supabaseClient
+          .from('encrypted_vault')
+          .select('data')
+          .eq('user_id', uid)
+          .single());
+      }
 
       if (error && error.code !== 'PGRST116') throw error; // Ignore "no rows" error
 
       if (data && data.data) {
+        this._remoteRevision = revisionSupport ? Number(data.revision ?? 0) : null;
+        if (revisionSupport && (!Number.isSafeInteger(this._remoteRevision) || this._remoteRevision < 0)) {
+          throw new Error('The server returned an invalid vault revision.');
+        }
         // Decrypt the payload
         const jwkKey = JSON.parse(e2eKeyStr);
         const appState = await Crypto.decrypt(data.data, jwkKey);
         
         if (appState) {
+          state.recordActions = mergeRecordActions(localRecordActions, appState.recordActions || {});
+          state.recordActions = includeLegacyInvoiceActions(
+            state.recordActions,
+            [...localDeletedInvoiceIds, ...(appState.deletedInvoiceIds || [])],
+            [...localRestoredInvoiceIds, ...(appState.restoredInvoiceIds || [])],
+            [...localDeletedInvoices, ...(appState.deletedInvoices || [])],
+            [...localInvoices, ...(appState.invoices || [])]
+          );
+          state.recordActions = includeLegacyDeleteBins(state.recordActions, 'staff', [...localDeletedStaff, ...(appState.deletedStaff || [])]);
+          state.recordActions = includeLegacyDeleteBins(state.recordActions, 'priceLists', [...localDeletedPriceLists, ...(appState.deletedPriceLists || [])]);
+          const invoiceActions = state.recordActions.invoices || {};
+          const deletedInvoiceIds = new Set(Object.keys(invoiceActions).filter(id => isRecordDeleted(state.recordActions, 'invoices', id)));
+          const restoredInvoiceIds = new Set(Object.keys(invoiceActions).filter(id => !isRecordDeleted(state.recordActions, 'invoices', id) && Number(invoiceActions[id].restoredAt || 0) > 0));
+          const remoteInvoiceMap = new Map((appState.invoices || []).filter(Boolean).map(i => [i.id || (i.number ? `number:${String(i.number).trim().toUpperCase()}` : ''), i]));
+          const freshness = inv => Date.parse(inv.updatedAt || inv.createdAt || 0) || 0;
+          state.invoices = mergeInvoicesById(localInvoices, appState.invoices, state.recordActions).sort((a, b) =>
+            appDateKey(b.date).localeCompare(appDateKey(a.date))
+            || String(b.createdAt || '').localeCompare(String(a.createdAt || ''))
+          );
+          state.deletedInvoiceIds = Array.from(deletedInvoiceIds);
+          state.restoredInvoiceIds = Array.from(restoredInvoiceIds);
+          state.deletedInvoices = mergeRecordsById(localDeletedInvoices, appState.deletedInvoices, 'invoices', state.recordActions, true);
+          const hasUnsyncedLocalInvoice = localInvoices.some(inv => {
+            const key = inv?.id || (inv?.number ? `number:${String(inv.number).trim().toUpperCase()}` : '');
+            if (!key || (inv.id && deletedInvoiceIds.has(inv.id))) return false;
+            const remote = remoteInvoiceMap.get(key);
+            return !remote || freshness(inv) > freshness(remote);
+          }) || JSON.stringify(localRecordActions.invoices || {}) !== JSON.stringify((appState.recordActions || {}).invoices || {})
+            || [...deletedInvoiceIds].some(id => !(appState.deletedInvoiceIds || []).includes(id))
+            || [...restoredInvoiceIds].some(id => !(appState.restoredInvoiceIds || []).includes(id));
           const remoteDeletedRestaurantIds = new Set(appState.deletedRestaurantIds || []);
           const hasUnsyncedLocalRestaurantDeletion = [...localDeletedRestaurantIds]
             .some(id => !remoteDeletedRestaurantIds.has(id));
@@ -321,20 +698,19 @@ const DB = {
             ...(state.deletedRestaurantIds || []),
             ...(appState.deletedRestaurantIds || [])
           ]));
-          state.invoices = appState.invoices || [];
-          state.expenses = appState.expenses || [];
-          state.restaurants = (appState.restaurants || []).filter(r => r && !state.deletedRestaurantIds.includes(r.id));
-          state.deletedInvoices = appState.deletedInvoices || [];
-          state.staff = appState.staff || [];
-          state.salaryPayments = appState.salaryPayments || [];
-          state.recurringExpenses = appState.recurringExpenses || [];
-          state.priceLists = appState.priceLists || [];
-          state.deletedStaff = appState.deletedStaff || [];
-          state.deletedPriceLists = appState.deletedPriceLists || [];
-          state.borrowings = appState.borrowings || [];
-          state.settings = appState.settings || {};
+          const genericCollections = ['expenses', 'staff', 'salaryPayments', 'recurringExpenses', 'priceLists', 'borrowings'];
+          genericCollections.forEach(collection => {
+            state[collection] = mergeRecordsById(localGenericCollections[collection], appState[collection], collection, state.recordActions);
+          });
+          state.deletedStaff = mergeRecordsById(localDeletedStaff, appState.deletedStaff, 'staff', state.recordActions, true);
+          state.deletedPriceLists = mergeRecordsById(localDeletedPriceLists, appState.deletedPriceLists, 'priceLists', state.recordActions, true);
+          state.restaurants = mergeRestaurantsById(localRestaurants, appState.restaurants, state.deletedRestaurantIds);
+          state.settings = mergeSettingsByTimestamp(localSettings, appState.settings || {});
           
           localStorage.setItem('ttg_invoices', JSON.stringify(state.invoices));
+          localStorage.setItem('ttg_deleted_invoice_ids', JSON.stringify(state.deletedInvoiceIds));
+          localStorage.setItem('ttg_restored_invoice_ids', JSON.stringify(state.restoredInvoiceIds));
+          localStorage.setItem('ttg_record_actions', JSON.stringify(state.recordActions));
           localStorage.setItem('ttg_expenses', JSON.stringify(state.expenses));
           localStorage.setItem('ttg_restaurants', JSON.stringify(state.restaurants));
           localStorage.setItem('ttg_deleted_restaurant_ids', JSON.stringify(state.deletedRestaurantIds));
@@ -349,7 +725,13 @@ const DB = {
           localStorage.setItem('ttg_settings', JSON.stringify(state.settings));
 
           // Carry offline deletions back to the encrypted vault on reconnection.
-          if (hasUnsyncedLocalRestaurantDeletion) this.syncToSupabase();
+          const hasUnsyncedGenericActions = JSON.stringify(localRecordActions) !== JSON.stringify(appState.recordActions || {});
+          const hasUnsyncedGenericRecords = genericCollections.some(collection =>
+            JSON.stringify(state[collection]) !== JSON.stringify(appState[collection] || []));
+          const hasUnsyncedLocalRestaurantChanges = JSON.stringify(state.restaurants) !== JSON.stringify(appState.restaurants || [])
+            || hasUnsyncedLocalRestaurantDeletion;
+          const hasUnsyncedLocalSettings = JSON.stringify(state.settings) !== JSON.stringify(appState.settings || {});
+          if (hasUnsyncedLocalRestaurantChanges || hasUnsyncedLocalInvoice || hasUnsyncedGenericActions || hasUnsyncedGenericRecords || hasUnsyncedLocalSettings) this.syncToSupabase();
           
           console.log('Loaded and decrypted data from vault');
           return true;
@@ -358,6 +740,7 @@ const DB = {
           return false;
         }
       }
+      this._remoteRevision = revisionSupport ? 0 : null;
       return true; // No data yet
     } catch (e) {
       console.error('Error loading from vault:', e);
@@ -370,6 +753,9 @@ const DB = {
     state.restaurants = [];
     state.deletedRestaurantIds = [];
     state.invoices = [];
+    state.deletedInvoiceIds = [];
+    state.restoredInvoiceIds = [];
+    state.recordActions = {};
     state.expenses = [];
     state.deletedInvoices = [];
     state.staff = [];
@@ -380,7 +766,7 @@ const DB = {
     state.deletedPriceLists = [];
     state.borrowings = [];
     state.settings = {};
-    ['ttg_restaurants', 'ttg_deleted_restaurant_ids', 'ttg_invoices', 'ttg_expenses', 'ttg_deleted_invoices',
+    ['ttg_restaurants', 'ttg_deleted_restaurant_ids', 'ttg_invoices', 'ttg_deleted_invoice_ids', 'ttg_restored_invoice_ids', 'ttg_record_actions', 'ttg_expenses', 'ttg_deleted_invoices',
      'ttg_staff', 'ttg_salary_payments', 'ttg_recurring_expenses',
      'ttg_price_lists', 'ttg_deleted_staff', 'ttg_deleted_pricelists',
      'ttg_borrowings', 'ttg_settings'].forEach(k => localStorage.removeItem(k));
@@ -425,7 +811,13 @@ function findPotentialRestaurantMatches(name, restaurants = (typeof DB !== 'unde
 
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 function fmtMoney(n) { return Number(n || 0).toLocaleString('en-KE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
-function fmtDate(d) { if (!d) return '—'; return new Date(d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }); }
+function fmtDate(value) {
+  if (!value) return '—';
+  const date = parseAppDate(value);
+  if (!date || Number.isNaN(date.getTime())) return String(value);
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
+}
 
 /** Sanitize user input before inserting into innerHTML to prevent XSS */
 function escapeHtml(str) {
@@ -462,13 +854,21 @@ async function migrateE2EKey(password, userId) {
 
   const legacyLoaded = await DB.loadFromSupabase();
   if (legacyLoaded) {
-    // Legacy worked! Now migrate: re-encrypt with new key
+    // The old key successfully decrypted the current vault. Re-encrypt that
+    // loaded state explicitly; normal sync now refuses unreadable remote data.
     console.log('[E2EE] Legacy key worked. Migrating to per-user salt...');
-    localStorage.setItem('ttg_e2e_key', JSON.stringify(newKey));
-    localStorage.setItem('ttg_salt_version', '2');
-    await DB.syncNow(); // Immediate sync with new key
-    console.log('[E2EE] Migration complete — vault re-encrypted with per-user salt.');
-    return { key: newKey, migrated: true };
+    if (DB._syncTimer) { clearTimeout(DB._syncTimer); DB._syncTimer = null; }
+    if (DB._syncInFlight) await DB._syncInFlight;
+    const migrated = await DB.reencryptVault(newKey);
+    if (migrated) {
+      localStorage.setItem('ttg_e2e_key', JSON.stringify(newKey));
+      localStorage.setItem('ttg_salt_version', '2');
+      console.log('[E2EE] Migration complete — vault re-encrypted with per-user salt.');
+      return { key: newKey, migrated: true };
+    }
+    localStorage.setItem('ttg_e2e_key', JSON.stringify(legacyKey));
+    console.warn('[E2EE] Vault remains on the legacy key; retry migration after reconnecting.');
+    return { key: legacyKey, migrated: false };
   }
 
   // 4. Both failed — keep legacy key (safest option, probably a network error)
@@ -486,8 +886,8 @@ function exportToExcel(type, startDate = null, endDate = null) {
 
   const filterByDate = (itemDate) => {
     if (!itemDate) return false;
-    if (startDate && itemDate < startDate) return false;
-    if (endDate && itemDate > endDate) return false;
+    if (startDate && appDateKey(itemDate) < appDateKey(startDate)) return false;
+    if (endDate && appDateKey(itemDate) > appDateKey(endDate)) return false;
     return true;
   };
 
@@ -495,13 +895,13 @@ function exportToExcel(type, startDate = null, endDate = null) {
     filename = `TTG_Invoices${suffix}.csv`;
     csv = '"Invoice #","Restaurant","Date","Due Date","Items","Total Sell (KES)","Total Buy (KES)","Delivery Cost","Other Cost","Profit (KES)","Status"\n';
     DB.invoices.filter(i => i.status !== 'draft' && filterByDate(i.date)).forEach(i => {
-      csv += `"${i.number}","${(i.restaurantName || '').replace(/"/g, '""')}","${i.date}","${i.dueDate || ''}","${i.items.length}","${i.totalSell}","${i.totalBuy}","${i.deliveryCost || 0}","${i.otherCost || 0}","${i.profit}","${i.status}"\n`;
+      csv += `"${i.number}","${(i.restaurantName || '').replace(/"/g, '""')}","${fmtDate(i.date)}","${i.dueDate ? fmtDate(i.dueDate) : ''}","${(i.items || []).length}","${i.totalSell}","${i.totalBuy}","${i.deliveryCost || 0}","${i.otherCost || 0}","${i.profit}","${i.status}"\n`;
     });
   } else if (type === 'expenses') {
     filename = `TTG_Expenses${suffix}.csv`;
     csv = '"Date","Description","Category","Amount (KES)","Type"\n';
     DB.expenses.filter(e => filterByDate(e.date)).forEach(e => {
-      csv += `"${e.date}","${(e.desc || '').replace(/"/g, '""')}","${e.category}","${e.amount}","${e.type}"\n`;
+      csv += `"${fmtDate(e.date)}","${(e.desc || '').replace(/"/g, '""')}","${e.category}","${e.amount}","${e.type}"\n`;
     });
   } else if (type === 'staff') {
     filename = `TTG_Payroll${suffix}.csv`;
@@ -522,12 +922,12 @@ function exportToExcel(type, startDate = null, endDate = null) {
     csv = '"=== INVOICES ==="\n';
     csv += '"Invoice #","Restaurant","Date","Total Sell","Total Buy","Profit","Status"\n';
     DB.invoices.filter(i => i.status !== 'draft' && filterByDate(i.date)).forEach(i => {
-      csv += `"${i.number}","${(i.restaurantName || '').replace(/"/g, '""')}","${i.date}","${i.totalSell}","${i.totalBuy}","${i.profit}","${i.status}"\n`;
+      csv += `"${i.number}","${(i.restaurantName || '').replace(/"/g, '""')}","${fmtDate(i.date)}","${i.totalSell}","${i.totalBuy}","${i.profit}","${i.status}"\n`;
     });
     csv += '\n"=== EXPENSES ==="\n';
     csv += '"Date","Description","Category","Amount","Type"\n';
     DB.expenses.filter(e => filterByDate(e.date)).forEach(e => {
-      csv += `"${e.date}","${(e.desc || '').replace(/"/g, '""')}","${e.category}","${e.amount}","${e.type}"\n`;
+      csv += `"${fmtDate(e.date)}","${(e.desc || '').replace(/"/g, '""')}","${e.category}","${e.amount}","${e.type}"\n`;
     });
     csv += '\n"=== STAFF ==="\n';
     csv += '"Name","Role","Salary","Pay Day"\n';

@@ -15,8 +15,8 @@
   <!-- Scripts: Core data layer loaded first, heavy OCR loaded with defer -->
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="supabase-config.js"></script>
-  <script src="staging.js?v=1.2.6"></script>
-  <script src="duplicate-detector.js?v=1.0.0"></script>
+  <script src="staging.js?v=1.2.9"></script>
+  <script src="duplicate-detector.js?v=1.0.2"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js" defer></script>
   <script src="ocr-consensus.js?v=1.2.6" defer></script>
@@ -1084,7 +1084,7 @@
 
       document.getElementById('clerkDupModalExplanation').textContent = auditResult.explanation || 'Town Treasure Smart Audit matched this delivery with an existing docket.';
       document.getElementById('clerkDupModalClient').textContent = docketData.restaurant_name;
-      document.getElementById('clerkDupModalDate').textContent = docketData.invoice_date;
+      document.getElementById('clerkDupModalDate').textContent = formatDateDisplay(docketData.invoice_date);
       document.getElementById('clerkDupModalTotal').textContent = 'KES ' + Number(docketData.total_sell || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 });
 
       const matched = auditResult.matchedRecord || {};
@@ -1442,7 +1442,7 @@
           const amt = (item.total_sell || 0).toLocaleString('en-KE', { minimumFractionDigits: 2 });
           return `
             <tr>
-              <td><strong>${escapeHtml(item.invoice_date || '')}</strong></td>
+              <td><strong>${escapeHtml(formatDateDisplay(item.invoice_date))}</strong></td>
               <td><strong>${escapeHtml(item.restaurant_name || '')}</strong></td>
               <td>${(item.items_json || []).length} items</td>
               <td><strong>KES ${amt}</strong></td>
@@ -1466,6 +1466,30 @@
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;');
+    }
+
+    function formatDateDisplay(value) {
+      if (!value) return '';
+      const text = String(value).trim();
+      let match = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (!match) {
+        const compact = text.match(/^(\d{8})$/);
+        if (compact) {
+          const value = compact[1];
+          const yearFirst = [Number(value.slice(0, 4)), Number(value.slice(4, 6)), Number(value.slice(6, 8))];
+          const dayFirst = [Number(value.slice(4, 8)), Number(value.slice(2, 4)), Number(value.slice(0, 2))];
+          const valid = ([year, month, day]) => {
+            if (year < 1000 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+            const date = new Date(year, month - 1, day);
+            return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+          };
+          if (valid(yearFirst)) match = [value, value.slice(0, 4), value.slice(4, 6), value.slice(6, 8)];
+          else if (valid(dayFirst)) return `${value.slice(0, 2)}/${value.slice(2, 4)}/${value.slice(4, 8)}`;
+        }
+      }
+      if (match) return `${match[3]}/${match[2]}/${match[1]}`;
+      match = text.match(/^(\d{2})[/-](\d{2})[/-](\d{4})$/);
+      return match ? `${match[1]}/${match[2]}/${match[3]}` : text;
     }
 
     function toast(msg, type = 'info') {

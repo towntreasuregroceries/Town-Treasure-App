@@ -47,13 +47,13 @@ function buildStatementHTML(rest, month) {
   const allInvoices = DB.invoices.filter(i => i.restaurantId === rest.id && i.status !== 'draft');
 
   // Opening balance: sum of unpaid invoices BEFORE this month
-  const priorInvoices = allInvoices.filter(i => i.date < monthStart);
+  const priorInvoices = allInvoices.filter(i => appDateKey(i.date) < appDateKey(monthStart));
   const priorPaidTotal = priorInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.totalSell, 0);
   const priorInvoicedTotal = priorInvoices.reduce((s, i) => s + i.totalSell, 0);
   const openingBalance = priorInvoicedTotal - priorPaidTotal;
 
   // This month's transactions
-  const monthInvoices = allInvoices.filter(i => i.date >= monthStart && i.date <= monthEnd);
+  const monthInvoices = allInvoices.filter(i => appDateKey(i.date) >= appDateKey(monthStart) && appDateKey(i.date) <= appDateKey(monthEnd));
   const monthInvoicedTotal = monthInvoices.reduce((s, i) => s + i.totalSell, 0);
   const monthPaidInvoices = monthInvoices.filter(i => i.status === 'paid');
   const monthPaidTotal = monthPaidInvoices.reduce((s, i) => s + i.totalSell, 0);
@@ -63,7 +63,7 @@ function buildStatementHTML(rest, month) {
   const transactions = [];
 
   // Add invoices as debits (sorted by date)
-  monthInvoices.sort((a, b) => a.date.localeCompare(b.date)).forEach(inv => {
+  monthInvoices.sort((a, b) => appDateKey(a.date).localeCompare(appDateKey(b.date))).forEach(inv => {
     runningBalance += inv.totalSell;
     transactions.push({
       date: inv.date,
@@ -93,11 +93,11 @@ function buildStatementHTML(rest, month) {
   const closingBalance = runningBalance;
 
   // Age analysis
-  const unpaidInvoices = allInvoices.filter(i => i.status !== 'paid' && i.date <= monthEnd);
+  const unpaidInvoices = allInvoices.filter(i => i.status !== 'paid' && appDateKey(i.date) <= appDateKey(monthEnd));
   const now = new Date(yr, mo - 1, new Date().getDate());
   let current = 0, days30 = 0, days60 = 0, days90 = 0;
   unpaidInvoices.forEach(inv => {
-    const invDate = new Date(inv.date);
+    const invDate = parseAppDate(inv.date);
     const daysDiff = Math.floor((now - invDate) / (1000 * 60 * 60 * 24));
     if (daysDiff <= 30) current += inv.totalSell;
     else if (daysDiff <= 60) days30 += inv.totalSell;
@@ -138,7 +138,7 @@ function buildStatementHTML(rest, month) {
         <p style="font-weight:700;font-size:1rem;margin-bottom:8px;color:#2E7D32;">Town Treasure Limited</p>
         <div style="display: flex; flex-direction: column; gap: 6px;">
            <p style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#61b146" stroke-width="2.5"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"></path></svg> 0708567696</p>
-           <p style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#61b146" stroke-width="2.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg> towntreasuregroceries@gmail.com</p>
+           <p style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#61b146" stroke-width="2.5"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg> thetowntreasure25@gmail.com</p>
         </div>
       </div>
       <div style="text-align:right;padding-right:5px;">
@@ -380,26 +380,26 @@ async function downloadStatementPDF() {
     doc.text("0708567696", 55, startY + 34);
     
     if (emailIcon) doc.addImage(emailIcon, 'PNG', 40, startY + 41, 10, 10);
-    doc.text("towntreasuregroceries@gmail.com", 55, startY + 49);
+    doc.text("thetowntreasure25@gmail.com", 55, startY + 49);
 
     if (rest.address) doc.text(rest.address, 555, startY + 34, { align: "right" });
     if (rest.phone) doc.text(rest.phone, 555, startY + 49, { align: "right" });
 
     // --- Data Processing ---
     const allInvoices = DB.invoices.filter(i => i.restaurantId === rest.id && i.status !== 'draft');
-    const priorInvoices = allInvoices.filter(i => i.date < monthStart);
+    const priorInvoices = allInvoices.filter(i => appDateKey(i.date) < appDateKey(monthStart));
     const priorPaidTotal = priorInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.totalSell, 0);
     const priorInvoicedTotal = priorInvoices.reduce((s, i) => s + i.totalSell, 0);
     const openingBalance = priorInvoicedTotal - priorPaidTotal;
 
-    const monthInvoices = allInvoices.filter(i => i.date >= monthStart && i.date <= monthEnd);
+    const monthInvoices = allInvoices.filter(i => appDateKey(i.date) >= appDateKey(monthStart) && appDateKey(i.date) <= appDateKey(monthEnd));
     const monthInvoicedTotal = monthInvoices.reduce((s, i) => s + i.totalSell, 0);
     const monthPaidTotal = monthInvoices.filter(i => i.status === 'paid').reduce((s, i) => s + i.totalSell, 0);
 
     let runningBalance = openingBalance;
     const transactions = [];
 
-    monthInvoices.sort((a, b) => a.date.localeCompare(b.date)).forEach(inv => {
+    monthInvoices.sort((a, b) => appDateKey(a.date).localeCompare(appDateKey(b.date))).forEach(inv => {
       runningBalance += inv.totalSell;
       transactions.push([
         fmtDate(inv.date),
@@ -485,11 +485,11 @@ async function downloadStatementPDF() {
     doc.text(`KES ${fmtMoney(closingBalance)}`, a4Width - 40, finalY + 45, { align: "right" });
 
     if (closingBalance > 0) {
-      const unpaidInvoices = allInvoices.filter(i => i.status !== 'paid' && i.date <= monthEnd);
+      const unpaidInvoices = allInvoices.filter(i => i.status !== 'paid' && appDateKey(i.date) <= appDateKey(monthEnd));
       const now = new Date(yr, mo - 1, new Date().getDate());
       let current = 0, days30 = 0, days60 = 0, days90 = 0;
       unpaidInvoices.forEach(inv => {
-        const invDate = new Date(inv.date);
+        const invDate = parseAppDate(inv.date);
         const daysDiff = Math.floor((now - invDate) / (1000 * 60 * 60 * 24));
         if (daysDiff <= 30) current += inv.totalSell;
         else if (daysDiff <= 60) days30 += inv.totalSell;

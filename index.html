@@ -2436,16 +2436,16 @@
       }
     })();
   </script>
-  <script src="data.js?v=1.2.7"></script>
-  <script src="nav.js?v=1.2.7"></script>
-  <script src="invoices.js?v=1.2.3"></script>
-  <script src="views.js?v=1.2.3"></script>
-  <script src="dashboard.js?v=1.2.3"></script>
+  <script src="data.js?v=1.2.9"></script>
+  <script src="nav.js?v=1.2.9"></script>
+  <script src="invoices.js?v=1.2.9"></script>
+  <script src="views.js?v=1.2.9"></script>
+  <script src="dashboard.js?v=1.2.9"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="ocr-consensus.js?v=1.2.6"></script>
-  <script src="staging.js?v=1.2.7"></script>
-  <script src="duplicate-detector.js?v=1.0.0"></script>
-  <script src="clerk-approval.js?v=1.2.6"></script>
+  <script src="staging.js?v=1.2.9"></script>
+  <script src="duplicate-detector.js?v=1.0.2"></script>
+  <script src="clerk-approval.js?v=1.2.9"></script>
   <script src="invoice-scanner.js?v=1.2.7"></script>
   <script>
   /* ══ Signature Scanner — Inline ══ */
@@ -2721,15 +2721,16 @@
     var dataUrl = canvas.toDataURL('image/png');
     var settings = DB.settings || {};
     settings.signature = dataUrl;
+    settings.updatedAt = new Date().toISOString();
     DB.settings = settings;
     toast("Signature saved to vault!", "success");
     closeSignatureScanner();
   }
   </script>
-  <script src="payroll.js?v=1.2.0"></script>
-  <script src="pricelist.js?v=1.2.2"></script>
-  <script src="statements.js?v=1.2.0"></script>
-  <script src="insights.js?v=1.2.0"></script>
+  <script src="payroll.js?v=1.2.9"></script>
+  <script src="pricelist.js?v=1.2.9"></script>
+  <script src="statements.js?v=1.2.9"></script>
+  <script src="insights.js?v=1.2.9"></script>
   <script src="app.js?v=1.2.0"></script>
   <!-- ═══ CHANGE PASSWORD MODAL ═══ -->
   <div class="modal-overlay" id="changePasswordModal">

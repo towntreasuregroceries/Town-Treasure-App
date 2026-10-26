@@ -638,7 +638,7 @@ function smartImportItems() {
 
   // Extract unique items with latest prices
   const itemMap = {};
-  invoices.sort((a, b) => a.date.localeCompare(b.date)).forEach(inv => {
+  invoices.sort((a, b) => appDateKey(a.date).localeCompare(appDateKey(b.date))).forEach(inv => {
     inv.items.forEach(item => {
       const key = item.desc.toLowerCase().trim();
       if (key) {
@@ -734,6 +734,8 @@ function deletePriceList(id) {
       DB.deletedPriceLists = bin;
     }
     DB.priceLists = DB.priceLists.filter(x => x.id !== id);
+    DB.markRecordDeleted?.('priceLists', id);
+    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderPriceLists();
     toast('Price list moved to Recycle Bin');
   });
@@ -749,6 +751,8 @@ function restorePriceList(id) {
   list.push(restored);
   DB.priceLists = list;
   DB.deletedPriceLists = bin.filter(x => x.id !== id);
+  DB.markRecordRestored?.('priceLists', id);
+  if (typeof DB.syncNow === 'function') DB.syncNow();
   renderBin();
   toast('Price list restored');
 }
@@ -1089,7 +1093,7 @@ function sharePriceListWhatsApp() {
     text += '\n';
   });
 
-  text += `Orders: 0708567696\nEmail: towntreasuregroceries@gmail.com\nPrices subject to market changes`;
+  text += `Orders: 0708567696\nEmail: thetowntreasure25@gmail.com\nPrices subject to market changes`;
 
   // Download PDF first
   downloadPriceListPDF();
