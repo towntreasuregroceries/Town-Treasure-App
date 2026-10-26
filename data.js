@@ -773,7 +773,7 @@ const DB = {
   }
 };
 
-/** Normalize restaurant names for exact name and alias matching. */
+/** Normalize restaurant names for safe exact-name and alias matching. */
 function normalizeRestaurantName(name) {
   return String(name || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/&/g, ' and ')
@@ -781,32 +781,168 @@ function normalizeRestaurantName(name) {
     .replace(/[^a-z0-9]/g, '');
 }
 
-/** Resolve an OCR or clerk-entered name only when it exactly matches a known name/alias. */
-function findRestaurantByName(name, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
-  const key = normalizeRestaurantName(name);
-  if (!key) return null;
-  return (restaurants || []).find(r => r && [r.name, ...(Array.isArray(r.aliases) ? r.aliases : [])]
-    .some(value => normalizeRestaurantName(value) === key)) || null;
+function restaurantNameEditSimilarity(a, b) {
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  if (Math.min(a.length, b.length) < 4) return 0;
+  let previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let i = 1; i <= a.length; i++) {
+    const current = [i];
+    for (let j = 1; j <= b.length; j++) {
+      current[j] = Math.min(
+        current[j - 1] + 1,
+        previous[j] + 1,
+        previous[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)
+      );
+    }
+    previous = current;
+  }
+  return 1 - previous[b.length] / Math.max(a.length, b.length);
 }
 
-/** Identify possible near matches that need a human to register as an alias. */
-function findPotentialRestaurantMatches(name, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
-  const tokens = value => String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+function restaurantNameSimilarity(a, b) {
+  const left = normalizeRestaurantName(a);
+  const right = normalizeRestaurantName(b);
+  if (!left || !right) return 0;
+  const charScore = restaurantNameEditSimilarity(left, right);
+  const tokens = value => new Set(String(value || '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
     .toLowerCase().replace(/&/g, ' and ')
     .replace(/\b(the|hotel|hotels|restaurant|restaurants|suites|resort|club|inn|lodge|limited|ltd)\b/g, ' ')
-    .match(/[a-z0-9]+/g) || [];
-  const candidateTokens = new Set(tokens(name));
-  if (!candidateTokens.size) return [];
-  return (restaurants || []).map(r => {
-    if (!r) return null;
-    const variants = [r.name, ...(Array.isArray(r.aliases) ? r.aliases : [])];
-    const score = Math.max(...variants.map(value => {
-      const variantTokens = new Set(tokens(value));
-      const shared = [...candidateTokens].filter(token => variantTokens.has(token)).length;
-      return shared / Math.max(1, Math.min(candidateTokens.size, variantTokens.size));
-    }));
-    return score >= 0.5 ? { restaurant: r, score } : null;
-  }).filter(Boolean).sort((a, b) => b.score - a.score).map(match => match.restaurant);
+    .match(/[a-z0-9]+/g) || []);
+  const leftTokens = tokens(a);
+  const rightTokens = tokens(b);
+  const shared = [...leftTokens].filter(token => rightTokens.has(token)).length;
+  const tokenScore = (2 * shared) / Math.max(1, leftTokens.size + rightTokens.size);
+  // Shared distinctive words help with OCR word splits (for example,
+  // "Thrive Kitchen" vs "Thrive Craft"), but the score is only a suggestion.
+  // It never attaches an invoice without an exact alias or human confirmation.
+  return Math.max(charScore, tokenScore);
+}
+
+/**
+ * Resolve a supplied name conservatively. Exact unique names and aliases can be
+ * used automatically; fuzzy matches are suggestions and require a person to
+ * confirm them before the alias is learned.
+ */
+function resolveRestaurantName(name, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
+  const key = normalizeRestaurantName(name);
+  const records = (restaurants || []).filter(r => r && r.id && r.name);
+  if (!key) return { status: 'empty', restaurant: null, candidates: [] };
+
+  const exact = records.filter(r => [r.name, ...(Array.isArray(r.aliases) ? r.aliases : [])]
+    .some(value => normalizeRestaurantName(value) === key));
+  if (exact.length === 1) {
+    const restaurant = exact[0];
+    const method = normalizeRestaurantName(restaurant.name) === key ? 'name' : 'alias';
+    return { status: 'matched', restaurant, method, score: 1, candidates: [{ restaurant, score: 1 }] };
+  }
+  if (exact.length > 1) {
+    return { status: 'ambiguous', restaurant: null, candidates: exact.map(restaurant => ({ restaurant, score: 1 })) };
+  }
+  if (key.length < 3) return { status: 'unmatched', restaurant: null, candidates: [] };
+
+  const ranked = records.map(restaurant => {
+    const variants = [restaurant.name, ...(Array.isArray(restaurant.aliases) ? restaurant.aliases : [])];
+    const score = Math.max(0, ...variants.map(variant => restaurantNameSimilarity(name, variant)));
+    return { restaurant, score };
+  }).filter(candidate => candidate.score >= 0.50)
+    .sort((a, b) => b.score - a.score || String(a.restaurant.name).localeCompare(String(b.restaurant.name)));
+  const first = ranked[0];
+  const second = ranked[1];
+  if (!first) return { status: 'unmatched', restaurant: null, candidates: [] };
+  const margin = first.score - (second?.score ?? 0);
+  if (first.score >= 0.64 && margin >= 0.12) {
+    return { status: 'suggested', restaurant: first.restaurant, score: first.score, candidates: ranked.slice(0, 3) };
+  }
+  if (first.score >= 0.62 && margin < 0.12) {
+    return { status: 'ambiguous', restaurant: null, candidates: ranked.filter(item => first.score - item.score < 0.12).slice(0, 3) };
+  }
+  return { status: 'possible', restaurant: null, score: first.score, candidates: ranked.slice(0, 3) };
+}
+
+/** Return only an unambiguous exact name or alias match. */
+function findRestaurantByName(name, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
+  const result = resolveRestaurantName(name, restaurants);
+  return result.status === 'matched' ? result.restaurant : null;
+}
+
+/** Legacy helper: return near-match candidates, never treat them as matches. */
+function findPotentialRestaurantMatches(name, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
+  return resolveRestaurantName(name, restaurants).candidates.map(candidate => candidate.restaurant);
+}
+
+/** Resolve legacy invoices by ID first, then by a unique exact name/alias. */
+function resolveInvoiceRestaurant(invoice, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
+  if (!invoice) return { status: 'unmatched', restaurant: null, method: null };
+  const records = restaurants || [];
+  const byId = invoice.restaurantId && records.find(r => r && r.id === invoice.restaurantId);
+  if (byId) return { status: 'matched', restaurant: byId, method: 'id' };
+  const byName = resolveRestaurantName(invoice.restaurantName, records);
+  return byName.status === 'matched'
+    ? { ...byName, method: 'legacy-name' }
+    : byName;
+}
+
+function invoiceBelongsToRestaurant(invoice, restaurant, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
+  const resolved = resolveInvoiceRestaurant(invoice, restaurants);
+  return resolved.status === 'matched' && resolved.restaurant.id === restaurant?.id;
+}
+
+function invoiceRestaurantDisplayName(invoice, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
+  const resolved = resolveInvoiceRestaurant(invoice, restaurants);
+  return resolved.status === 'matched' ? resolved.restaurant.name : (invoice?.restaurantName || 'Unknown');
+}
+
+function restaurantNameVariants(restaurant) {
+  return [restaurant?.name, ...(Array.isArray(restaurant?.aliases) ? restaurant.aliases : [])]
+    .map(value => String(value || '').trim())
+    .filter(Boolean);
+}
+
+/** Find non-exact name overlaps for review; these are never auto-merged. */
+function findSimilarRestaurantRecords(restaurant, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
+  if (!restaurant) return [];
+  const variants = restaurantNameVariants(restaurant);
+  return (restaurants || []).filter(other => other && other.id !== restaurant.id).map(other => ({
+    restaurant: other,
+    score: Math.max(0, ...variants.flatMap(a => restaurantNameVariants(other).map(b => restaurantNameSimilarity(a, b))))
+  })).filter(candidate => candidate.score >= 0.50)
+    .sort((a, b) => b.score - a.score || String(a.restaurant.name).localeCompare(String(b.restaurant.name)));
+}
+
+function restaurantOptionLabel(restaurant, restaurants = (typeof DB !== 'undefined' ? DB.restaurants : [])) {
+  if (!restaurant) return '';
+  const variants = new Set(restaurantNameVariants(restaurant).map(normalizeRestaurantName).filter(Boolean));
+  const conflicts = (restaurants || []).filter(other => other && other.id !== restaurant.id
+    && restaurantNameVariants(other).some(name => variants.has(normalizeRestaurantName(name))));
+  const similar = findSimilarRestaurantRecords(restaurant, restaurants).filter(candidate => !conflicts.some(item => item.id === candidate.restaurant.id));
+  const detail = [restaurant.address, restaurant.phone, restaurant.contact].filter(Boolean).join(' | ');
+  const recordId = String(restaurant.id || '').slice(-6);
+  if (conflicts.length) return `${restaurant.name} (${detail ? `${detail} | ` : ''}record ${recordId})`;
+  if (similar.length) return `${restaurant.name} (possible duplicate: ${similar.slice(0, 2).map(item => item.restaurant.name).join(', ')})`;
+  return restaurant.name || '';
+}
+/** Register a confirmed OCR spelling, refusing aliases already claimed elsewhere. */
+function registerRestaurantAlias(restaurantId, alias) {
+  const name = String(alias || '').trim();
+  const key = normalizeRestaurantName(name);
+  const records = (typeof DB !== 'undefined' && Array.isArray(DB.restaurants)) ? DB.restaurants : [];
+  const target = records.find(r => r.id === restaurantId);
+  if (!target || !key) return { ok: false, reason: 'invalid' };
+  const conflicts = records.filter(r => r.id !== restaurantId
+    && [r.name, ...(Array.isArray(r.aliases) ? r.aliases : [])].some(value => normalizeRestaurantName(value) === key));
+  if (conflicts.length) return { ok: false, reason: 'conflict', conflicts };
+
+  const aliases = Array.isArray(target.aliases) ? target.aliases.slice() : [];
+  if ([target.name, ...aliases].some(value => normalizeRestaurantName(value) === key)) {
+    return { ok: true, restaurant: target, changed: false };
+  }
+  aliases.push(name);
+  const updated = { ...target, aliases, updatedAt: new Date().toISOString() };
+  DB.restaurants = records.map(r => r.id === restaurantId ? updated : r);
+  if (typeof DB.syncNow === 'function') DB.syncNow();
+  if (typeof renderRestaurants === 'function') renderRestaurants();
+  return { ok: true, restaurant: updated, changed: true };
 }
 
 function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
@@ -895,7 +1031,7 @@ function exportToExcel(type, startDate = null, endDate = null) {
     filename = `TTG_Invoices${suffix}.csv`;
     csv = '"Invoice #","Restaurant","Date","Due Date","Items","Total Sell (KES)","Total Buy (KES)","Delivery Cost","Other Cost","Profit (KES)","Status"\n';
     DB.invoices.filter(i => i.status !== 'draft' && filterByDate(i.date)).forEach(i => {
-      csv += `"${i.number}","${(i.restaurantName || '').replace(/"/g, '""')}","${fmtDate(i.date)}","${i.dueDate ? fmtDate(i.dueDate) : ''}","${(i.items || []).length}","${i.totalSell}","${i.totalBuy}","${i.deliveryCost || 0}","${i.otherCost || 0}","${i.profit}","${i.status}"\n`;
+      csv += `"${i.number}","${invoiceRestaurantDisplayName(i).replace(/"/g, '""')}","${fmtDate(i.date)}","${i.dueDate ? fmtDate(i.dueDate) : ''}","${(i.items || []).length}","${i.totalSell}","${i.totalBuy}","${i.deliveryCost || 0}","${i.otherCost || 0}","${i.profit}","${i.status}"\n`;
     });
   } else if (type === 'expenses') {
     filename = `TTG_Expenses${suffix}.csv`;
@@ -913,7 +1049,7 @@ function exportToExcel(type, startDate = null, endDate = null) {
     filename = `TTG_Restaurants${suffix}.csv`;
     csv = '"Name","Contact","Phone","Address","Total Sales (KES)"\n';
     DB.restaurants.forEach(r => {
-      const total = DB.invoices.filter(i => i.restaurantId === r.id && i.status !== 'draft' && filterByDate(i.date)).reduce((s, i) => s + (i.totalSell || 0), 0);
+      const total = DB.invoices.filter(i => invoiceBelongsToRestaurant(i, r) && i.status !== 'draft' && filterByDate(i.date)).reduce((s, i) => s + (i.totalSell || 0), 0);
       csv += `"${(r.name || '').replace(/"/g, '""')}","${r.contact || ''}","${r.phone || ''}","${r.address || ''}","${total}"\n`;
     });
   } else if (type === 'all') {
@@ -922,7 +1058,7 @@ function exportToExcel(type, startDate = null, endDate = null) {
     csv = '"=== INVOICES ==="\n';
     csv += '"Invoice #","Restaurant","Date","Total Sell","Total Buy","Profit","Status"\n';
     DB.invoices.filter(i => i.status !== 'draft' && filterByDate(i.date)).forEach(i => {
-      csv += `"${i.number}","${(i.restaurantName || '').replace(/"/g, '""')}","${fmtDate(i.date)}","${i.totalSell}","${i.totalBuy}","${i.profit}","${i.status}"\n`;
+      csv += `"${i.number}","${invoiceRestaurantDisplayName(i).replace(/"/g, '""')}","${fmtDate(i.date)}","${i.totalSell}","${i.totalBuy}","${i.profit}","${i.status}"\n`;
     });
     csv += '\n"=== EXPENSES ==="\n';
     csv += '"Date","Description","Category","Amount","Type"\n';

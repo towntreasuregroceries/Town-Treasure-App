@@ -3,7 +3,8 @@ function viewInvoice(id) {
   const inv = DB.invoices.find(i => i.id === id);
   if (!inv) return;
   currentViewInvoiceId = id;
-  const rest = DB.restaurants.find(r => r.id === inv.restaurantId) || {};
+  const rest = resolveInvoiceRestaurant(inv).restaurant || { name: invoiceRestaurantDisplayName(inv) };
+  const clientName = invoiceRestaurantDisplayName(inv);
   const container = document.getElementById('invoiceViewContainer');
   
   // Build items rows
@@ -56,7 +57,7 @@ function viewInvoice(id) {
       </div>
       <div style="text-align: right; padding-right: 5px;">
         <h4 style="margin-bottom: 12px; color: #424242;">BILLED TO:</h4>
-         <p style="font-weight: 700; font-size: 1rem; margin-bottom: 8px; color: #424242;">${escapeHtml(inv.restaurantName)}</p>
+         <p style="font-weight: 700; font-size: 1rem; margin-bottom: 8px; color: #424242;">${escapeHtml(clientName)}</p>
          <p style="font-size: 0.85rem; margin-bottom: 4px;">${escapeHtml(rest.address || '')}</p>
          <p style="font-size: 0.85rem;">${escapeHtml(rest.phone || '')}</p>
       </div>
@@ -107,7 +108,7 @@ function viewInvoice(id) {
 
       <div class="invoice-footer-shape">
          <div style="position: absolute; bottom: 20px; left: 0; right: 0; display: flex; justify-content: space-between; padding: 0 50px; color: white; z-index: 5;">
-            <div style="font-style: italic; font-size: 0.9rem;">Thank you, ${inv.restaurantName}, for Shopping with us</div>
+            <div style="font-style: italic; font-size: 0.9rem;">Thank you, ${escapeHtml(clientName)}, for Shopping with us</div>
             <div style="font-size: 0.8rem;"></div>
          </div>
       </div>
@@ -148,7 +149,7 @@ function shareWhatsApp() {
   if (!currentViewInvoiceId) return;
   const inv = DB.invoices.find(i => i.id === currentViewInvoiceId);
   if (!inv) return;
-  const rest = DB.restaurants.find(r => r.id === inv.restaurantId);
+  const rest = resolveInvoiceRestaurant(inv).restaurant || { name: invoiceRestaurantDisplayName(inv), contact: '', phone: '' };
   if (!rest) return;
 
   let phone = rest.phone ? rest.phone.replace(/[^\d+]/g, '') : '';
@@ -181,7 +182,8 @@ Feel free to reach out for any queries. We appreciate your business!`;
 async function generateInvoicePDF(id) {
   const inv = DB.invoices.find(i => i.id === id);
   if (!inv) return;
-  const rest = DB.restaurants.find(r => r.id === inv.restaurantId) || {};
+  const rest = resolveInvoiceRestaurant(inv).restaurant || { name: invoiceRestaurantDisplayName(inv) };
+  const clientName = invoiceRestaurantDisplayName(inv);
   
   if (!window.jspdf) {
     toast('PDF generator is still loading. Please try again.', 'warning');
@@ -323,7 +325,7 @@ async function generateInvoicePDF(id) {
     doc.text("Town Treasure Limited", 40, 223);
     
     doc.setTextColor(textColor);
-    doc.text(inv.restaurantName, 555, 223, { align: "right" });
+    doc.text(clientName, 555, 223, { align: "right" });
 
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
@@ -490,10 +492,10 @@ async function generateInvoicePDF(id) {
       doc.setFont("helvetica", "italic");
       doc.setFontSize(9);
       doc.setTextColor('#ffffff');
-      doc.text(`Thank you, ${inv.restaurantName}, for Shopping with us`, 40, a4Height - 15);
+      doc.text(`Thank you, ${clientName}, for Shopping with us`, 40, a4Height - 15);
     }
 
-    const filename = `Invoice_${inv.number}_${inv.restaurantName.replace(/\s+/g, '_')}.pdf`;
+    const filename = `Invoice_${inv.number}_${clientName.replace(/\s+/g, '_')}.pdf`;
     doc.save(filename);
 
   } catch (error) {

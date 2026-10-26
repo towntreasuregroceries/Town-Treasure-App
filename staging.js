@@ -605,32 +605,15 @@ const StagingDB = {
 
     let restName = (adjustedData.restaurantName || item.restaurant_name || 'General Wholesale').trim();
 
-    // Check if restaurant exists in Veronica's restaurant book
-    let restId = null;
-    if (typeof DB !== 'undefined' && DB.restaurants) {
-      const match = findRestaurantByName(restName, DB.restaurants);
-      if (match) {
-        restId = match.id;
-        restName = match.name; // Keep reports and invoices under the canonical account name.
-      } else {
-        const possibleMatches = findPotentialRestaurantMatches(restName, DB.restaurants);
-        if (possibleMatches.length) {
-          throw new Error(`“${restName}” may be ${possibleMatches[0].name}. Add it as an alias to the correct restaurant, then approve again.`);
-        }
-        // Auto-create restaurant record if not present
-        restId = typeof genId === 'function' ? genId() : 'rst_' + Date.now();
-        const rList = DB.restaurants;
-        rList.push({
-          id: restId,
-          name: restName,
-          contact: 'Auto-added from Clerk Docket',
-          phone: '',
-          address: ''
-        });
-        DB.restaurants = rList;
-      }
+    // The approval UI resolves fuzzy names explicitly. Keep this storage layer
+    // strict so an unresolved spelling can never silently create a duplicate.
+    const restaurantResolution = resolveRestaurantName(restName, DB.restaurants || []);
+    if (restaurantResolution.status !== 'matched') {
+      throw new Error('This restaurant name is not uniquely registered. Confirm an existing match or create the restaurant before approving.');
     }
-
+    const matchedRestaurant = restaurantResolution.restaurant;
+    const restId = matchedRestaurant.id;
+    restName = matchedRestaurant.name;
     const invDate = adjustedData.date || item.invoice_date || new Date().toISOString().slice(0, 10);
     const invNumber = typeof generateSecureInvoiceNumber === 'function'
       ? generateSecureInvoiceNumber(invDate)

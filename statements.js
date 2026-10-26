@@ -6,16 +6,7 @@
  * Ambiguous names are excluded so a statement never combines two customers.
  */
 function statementInvoiceBelongsToRestaurant(invoice, restaurant) {
-  if (!invoice || !restaurant) return false;
-  if (invoice.restaurantId === restaurant.id) return true;
-
-  const invoiceName = normalizeRestaurantName(invoice.restaurantName || '');
-  if (!invoiceName) return false;
-  const matches = (DB.restaurants || []).filter(candidate =>
-    [candidate.name, ...(Array.isArray(candidate.aliases) ? candidate.aliases : [])]
-      .some(name => normalizeRestaurantName(name) === invoiceName)
-  );
-  return matches.length === 1 && matches[0].id === restaurant.id;
+  return invoiceBelongsToRestaurant(invoice, restaurant, DB.restaurants || []);
 }
 
 function getStatementInvoices(restaurant) {
@@ -34,7 +25,7 @@ function renderStatementsPage() {
   if (restSelect) {
     const rests = DB.restaurants;
     restSelect.innerHTML = '<option value="">Select restaurant…</option><option value="__all__">All Restaurants (Consolidated)</option>' +
-      rests.map(r => `<option value="${r.id}">${r.name}</option>`).join('');
+      rests.map(r => `<option value="${r.id}">${escapeHtml(restaurantOptionLabel(r, rests))}</option>`).join('');
   }
   const monthInput = document.getElementById('stmtMonth');
   if (monthInput && !monthInput.value) {

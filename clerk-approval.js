@@ -508,8 +508,66 @@ async function executeClerkApproval() {
     return toast('Confirm this intentional repeat dispatch before approving.', 'warning');
   }
 
-  const restName = document.getElementById('crmRestaurantName').value.trim();
+  let restName = document.getElementById('crmRestaurantName').value.trim();
   if (!restName) return toast('Restaurant Name is required', 'error');
+
+  const restaurantResolution = resolveRestaurantName(restName, DB.restaurants || []);
+  if (restaurantResolution.status === 'empty') {
+    return toast('Enter a specific restaurant name; generic words alone are not enough.', 'error');
+  }
+  if (restaurantResolution.status === 'matched') {
+    restName = restaurantResolution.restaurant.name;
+    document.getElementById('crmRestaurantName').value = restName;
+  } else if (restaurantResolution.status === 'suggested'
+    || (restaurantResolution.status === 'possible' && restaurantResolution.candidates.length === 1)) {
+    const suggested = restaurantResolution.restaurant || restaurantResolution.candidates[0].restaurant;
+    const detail = [suggested.address, suggested.phone, suggested.contact].filter(Boolean).join(', ');
+    return customConfirm(
+      `The docket says "${restName}". It ${restaurantResolution.status === 'suggested' ? 'looks similar' : 'may refer'} to "${suggested.name}"${detail ? ` (${detail})` : ''} (${Math.round(restaurantResolution.score * 100)}% name similarity). If they are the same customer, confirm to save this spelling as an alias.`,
+      'Confirm Restaurant Match', 'Link & Continue', false, () => {
+        const aliasResult = registerRestaurantAlias(suggested.id, restName);
+        if (!aliasResult.ok) {
+          const conflicts = (aliasResult.conflicts || []).map(record => record.name).join(', ');
+          return toast(`That spelling is already assigned to ${conflicts || 'another restaurant'}. Merge duplicate records first.`, 'error');
+        }
+        document.getElementById('crmRestaurantName').value = suggested.name;
+        executeClerkApproval();
+      }
+    );
+  } else if (restaurantResolution.status === 'ambiguous') {
+    const names = restaurantResolution.candidates.map(item => item.restaurant.name).join(', ');
+    return toast(`"${restName}" matches multiple restaurant records (${names}). Merge the duplicates or clarify the restaurant name before approving.`, 'error');
+  } else {
+    const candidates = restaurantResolution.candidates.map(item => item.restaurant.name).join(', ');
+    const similarText = candidates ? ` Similar registered names: ${candidates}.` : '';
+    return customConfirm(
+      `No exact restaurant or alias matches "${restName}".${similarText} Create a separate restaurant record? If this is an existing customer, cancel and add the spelling as an alias instead.`,
+      'Restaurant Not Registered', 'Create Separate Restaurant', false, () => {
+        const latest = resolveRestaurantName(restName, DB.restaurants || []);
+        if (latest.status === 'matched') {
+          document.getElementById('crmRestaurantName').value = latest.restaurant.name;
+          return executeClerkApproval();
+        }
+        if (latest.status === 'ambiguous') {
+          return toast('The restaurant list is ambiguous. Merge duplicate records before approving.', 'error');
+        }
+        if (latest.status === 'empty') {
+          return toast('Enter a specific restaurant name before creating a new record.', 'error');
+        }
+        const now = new Date().toISOString();
+        const newRestaurant = {
+          id: genId(), name: restName, aliases: [], contact: 'Added from clerk approval',
+          phone: '', address: '', createdAt: now, updatedAt: now
+        };
+        DB.restaurants = [...(DB.restaurants || []), newRestaurant];
+        if (typeof populateRestaurantDropdowns === 'function') populateRestaurantDropdowns();
+        if (typeof renderRestaurants === 'function') renderRestaurants();
+        if (typeof DB.syncNow === 'function') DB.syncNow();
+        document.getElementById('crmRestaurantName').value = newRestaurant.name;
+        executeClerkApproval();
+      }
+    );
+  }
 
   const items = [];
   let valid = true;

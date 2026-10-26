@@ -242,14 +242,37 @@ function applyExtractedItemsToInvoice() {
   try {
     if (data.restaurantName && typeof DB !== 'undefined') {
       const rawCand = (data.restaurantName || '').trim();
-      const matched = findRestaurantByName(rawCand, DB.restaurants || []);
-      if (matched) {
-        const invRest = document.getElementById('invRestaurant');
-        if (invRest) invRest.value = matched.id;
+      const resolution = resolveRestaurantName(rawCand, DB.restaurants || []);
+      const invRest = document.getElementById('invRestaurant');
+      if (resolution.status === 'matched') {
+        if (invRest) invRest.value = resolution.restaurant.id;
       } else {
-        const possibleMatches = findPotentialRestaurantMatches(rawCand, DB.restaurants || []);
-        if (possibleMatches.length && typeof toast === 'function') {
-          toast(`OCR read “${rawCand}”. Check whether it is ${possibleMatches[0].name}; add the OCR spelling as an alias to link them.`, 'warning');
+        // Never carry the previous invoice's restaurant selection into a docket
+        // whose OCR client name is unknown or ambiguous.
+        if (invRest) invRest.value = '';
+        const candidates = resolution.candidates.map(item => item.restaurant.name).join(', ');
+        if (resolution.status === 'suggested'
+          || (resolution.status === 'possible' && resolution.candidates.length === 1)) {
+          const candidate = resolution.restaurant || resolution.candidates[0].restaurant;
+          const detail = [candidate.address, candidate.phone, candidate.contact].filter(Boolean).join(', ');
+          customConfirm(
+            `OCR read "${rawCand}". ${resolution.status === 'suggested' ? 'The closest registered restaurant is' : 'A possible match is'} "${candidate.name}"${detail ? ` (${detail})` : ''}. If this is the same customer, confirm to save "${rawCand}" as an alias; future invoices with this spelling will match automatically.`,
+            'Confirm Restaurant Match', 'Link as Alias', false, () => {
+              const result = registerRestaurantAlias(candidate.id, rawCand);
+              if (!result.ok) {
+                const conflicts = (result.conflicts || []).map(record => record.name).join(', ');
+                return toast(`That spelling is already attached to ${conflicts || 'another restaurant'}. Merge duplicate records first.`, 'error');
+              }
+              if (invRest) invRest.value = candidate.id;
+              toast(`Linked "${rawCand}" to ${candidate.name}.`, 'success');
+            }
+          );
+        } else if (resolution.status === 'ambiguous') {
+          toast(`OCR read "${rawCand}" and it matches multiple restaurants: ${candidates}. Merge duplicates or choose manually.`, 'warning');
+        } else if (resolution.status === 'possible') {
+          toast(`OCR read "${rawCand}". Possible matches: ${candidates}. Choose manually or add the spelling as an alias.`, 'warning');
+        } else {
+          toast(`OCR read "${rawCand}", which is not registered. Choose a restaurant or add it in Restaurants before saving.`, 'warning');
         }
       }
     }

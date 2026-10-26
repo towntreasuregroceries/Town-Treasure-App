@@ -55,9 +55,10 @@ function generateInsights() {
   activeInvoices.filter(i => i.status !== 'paid').forEach(inv => {
     const days = Math.floor((now - parseAppDate(inv.date)) / (1000 * 60 * 60 * 24));
     if (days > 30) {
-      if (!restDebts[inv.restaurantName]) restDebts[inv.restaurantName] = { total: 0, days: 0 };
-      restDebts[inv.restaurantName].total += inv.totalSell;
-      restDebts[inv.restaurantName].days = Math.max(restDebts[inv.restaurantName].days, days);
+      const name = invoiceRestaurantDisplayName(inv);
+      if (!restDebts[name]) restDebts[name] = { total: 0, days: 0 };
+      restDebts[name].total += inv.totalSell;
+      restDebts[name].days = Math.max(restDebts[name].days, days);
     }
   });
   Object.entries(restDebts).forEach(([name, data]) => {
@@ -117,10 +118,13 @@ function generateInsights() {
   // GOOD NEWS: Top customer this month
   if (thisMonthInvs.length > 0) {
     const byRest = {};
-    thisMonthInvs.forEach(i => { byRest[i.restaurantName] = (byRest[i.restaurantName] || 0) + i.totalSell; });
+    thisMonthInvs.forEach(i => {
+      const name = invoiceRestaurantDisplayName(i);
+      byRest[name] = (byRest[name] || 0) + i.totalSell;
+    });
     const top = Object.entries(byRest).sort((a, b) => b[1] - a[1])[0];
     if (top) {
-      insights.good.push(`Top customer: <strong>${top[0]}</strong> — KES ${fmtMoney(top[1])} this month`);
+      insights.good.push(`Top customer: <strong>${escapeHtml(top[0])}</strong> — KES ${fmtMoney(top[1])} this month`);
     }
   }
 

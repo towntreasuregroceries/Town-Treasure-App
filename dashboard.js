@@ -41,7 +41,10 @@ function refreshDashboard() {
   }
   // Top restaurants chart (This Month)
   const restTotals = {};
-  thisMonth.forEach(i => { restTotals[i.restaurantName] = (restTotals[i.restaurantName] || 0) + i.totalSell; });
+  thisMonth.forEach(i => {
+    const name = invoiceRestaurantDisplayName(i);
+    restTotals[name] = (restTotals[name] || 0) + i.totalSell;
+  });
   const sorted = Object.entries(restTotals).sort((a, b) => b[1] - a[1]).slice(0, 5);
   if (topRestChartInst) topRestChartInst.destroy();
   const ctx2 = document.getElementById('topRestaurantsChart');
@@ -63,7 +66,7 @@ function refreshDashboard() {
   if (!recent.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><h3>No invoices yet this month</h3><p>Create an invoice to see data here.</p></td></tr>'; return; }
   tbody.innerHTML = recent.map(i => {
     const bc = i.status === 'paid' ? 'badge-success' : i.status === 'overdue' ? 'badge-danger' : 'badge-warning';
-    return `<tr style="cursor:pointer" onclick="viewInvoice('${i.id}')"><td><strong>${i.number}</strong></td><td>${i.restaurantName}</td><td>${fmtDate(i.date)}</td><td>KES ${fmtMoney(i.totalSell)}</td><td style="color:var(--green-700)">KES ${fmtMoney(i.profit)}</td><td><span class="badge ${bc}">${i.status}</span></td></tr>`;
+    return `<tr style="cursor:pointer" onclick="viewInvoice('${i.id}')"><td><strong>${i.number}</strong></td><td>${escapeHtml(invoiceRestaurantDisplayName(i))}</td><td>${fmtDate(i.date)}</td><td>KES ${fmtMoney(i.totalSell)}</td><td style="color:var(--green-700)">KES ${fmtMoney(i.profit)}</td><td><span class="badge ${bc}">${i.status}</span></td></tr>`;
   }).join('');
 }
 
@@ -135,12 +138,13 @@ function generateReport() {
     const byUnit = {};
     
     invs.forEach(inv => {
+      const restaurantName = invoiceRestaurantDisplayName(inv);
       inv.items.forEach(item => {
         if (item.desc.toLowerCase().trim().includes(productName)) {
           const unit = item.unit || 'kgs';
           matches.push({
             invoiceNum: escapeHtml(inv.number),
-            restaurant: escapeHtml(inv.restaurantName),
+            restaurant: escapeHtml(restaurantName),
             date: inv.date,
             qty: item.qty,
             unit: unit,
@@ -155,11 +159,11 @@ function generateReport() {
           totalBuy += item.qty * item.buyPrice;
           
           // Group by restaurant
-          if (!byRestaurant[inv.restaurantName]) byRestaurant[inv.restaurantName] = { qty: 0, sell: 0, buy: 0, count: 0 };
-          byRestaurant[inv.restaurantName].qty += item.qty;
-          byRestaurant[inv.restaurantName].sell += item.total;
-          byRestaurant[inv.restaurantName].buy += item.qty * item.buyPrice;
-          byRestaurant[inv.restaurantName].count++;
+          if (!byRestaurant[restaurantName]) byRestaurant[restaurantName] = { qty: 0, sell: 0, buy: 0, count: 0 };
+          byRestaurant[restaurantName].qty += item.qty;
+          byRestaurant[restaurantName].sell += item.total;
+          byRestaurant[restaurantName].buy += item.qty * item.buyPrice;
+          byRestaurant[restaurantName].count++;
           
           // Group by unit
           if (!byUnit[unit]) byUnit[unit] = 0;
@@ -252,7 +256,10 @@ function generateReport() {
     return; // Exit early — product report is done
   }
   
-  if (type === 'restaurant' && restId) invs = invs.filter(i => i.restaurantId === restId);
+  if (type === 'restaurant' && restId) {
+    const selectedRestaurant = DB.restaurants.find(restaurant => restaurant.id === restId);
+    invs = selectedRestaurant ? invs.filter(invoice => invoiceBelongsToRestaurant(invoice, selectedRestaurant)) : [];
+  }
   const totalSell = invs.reduce((s, i) => s + i.totalSell, 0);
   const totalBuy = invs.reduce((s, i) => s + i.totalBuy, 0);
   const totalProfit = invs.reduce((s, i) => s + i.profit, 0);
@@ -288,11 +295,12 @@ function generateReport() {
   // Group invoices by restaurant
   const byRest = {};
   invs.forEach(i => {
-    if (!byRest[i.restaurantName]) byRest[i.restaurantName] = { sell: 0, buy: 0, profit: 0, count: 0 };
-    byRest[i.restaurantName].sell += i.totalSell;
-    byRest[i.restaurantName].buy += i.totalBuy;
-    byRest[i.restaurantName].profit += i.profit;
-    byRest[i.restaurantName].count++;
+    const name = invoiceRestaurantDisplayName(i);
+    if (!byRest[name]) byRest[name] = { sell: 0, buy: 0, profit: 0, count: 0 };
+    byRest[name].sell += i.totalSell;
+    byRest[name].buy += i.totalBuy;
+    byRest[name].profit += i.profit;
+    byRest[name].count++;
   });
 
   const output = document.getElementById('reportOutput');
@@ -403,7 +411,7 @@ function generateReport() {
        <h3 style="font-size:0.95rem;margin-bottom:10px;color: #424242;">All Invoices</h3>
        <table class="receipt-table">
           <thead><tr><th>#</th><th>Restaurant</th><th>Date</th><th style="text-align: right;">Amount</th><th style="text-align: right;">Profit</th><th style="text-align: center;">Status</th></tr></thead>
-          <tbody>${invs.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(i=>`<tr><td>${escapeHtml(i.number)}</td><td>${escapeHtml(i.restaurantName)}</td><td>${fmtDate(i.date)}</td><td style="text-align: right;">KES ${fmtMoney(i.totalSell)}</td><td style="text-align: right;">KES ${fmtMoney(i.profit)}</td><td style="text-align: center;"><span class="badge ${i.status==='paid'?'badge-success':'badge-warning'}">${i.status}</span></td></tr>`).join('')}</tbody>
+          <tbody>${invs.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(i=>`<tr><td>${escapeHtml(i.number)}</td><td>${escapeHtml(invoiceRestaurantDisplayName(i))}</td><td>${fmtDate(i.date)}</td><td style="text-align: right;">KES ${fmtMoney(i.totalSell)}</td><td style="text-align: right;">KES ${fmtMoney(i.profit)}</td><td style="text-align: center;"><span class="badge ${i.status==='paid'?'badge-success':'badge-warning'}">${escapeHtml(i.status)}</span></td></tr>`).join('')}</tbody>
        </table>
     </div>
 
@@ -536,13 +544,14 @@ async function downloadReportPDF() {
     const matches = []; let totalQty = 0, totalSell = 0, totalBuy = 0;
     const byRest = {}, byUnit = {};
     invs.forEach(inv => {
+      const restaurantName = invoiceRestaurantDisplayName(inv);
       inv.items.forEach(item => {
         if (item.desc.toLowerCase().trim().includes(productName)) {
           const unit = item.unit || 'kgs';
-          matches.push([inv.number, inv.restaurantName, fmtDate(inv.date), item.qty.toString(), unit, `KES ${fmtMoney(item.sellPrice)}`, `KES ${fmtMoney(item.total)}`, `KES ${fmtMoney(item.total - (item.qty*item.buyPrice))}`]);
+          matches.push([inv.number, restaurantName, fmtDate(inv.date), item.qty.toString(), unit, `KES ${fmtMoney(item.sellPrice)}`, `KES ${fmtMoney(item.total)}`, `KES ${fmtMoney(item.total - (item.qty*item.buyPrice))}`]);
           totalQty += item.qty; totalSell += item.total; totalBuy += item.qty * item.buyPrice;
-          if (!byRest[inv.restaurantName]) byRest[inv.restaurantName] = { qty:0, sell:0, buy:0, count:0 };
-          byRest[inv.restaurantName].qty += item.qty; byRest[inv.restaurantName].sell += item.total; byRest[inv.restaurantName].buy += item.qty * item.buyPrice; byRest[inv.restaurantName].count++;
+          if (!byRest[restaurantName]) byRest[restaurantName] = { qty:0, sell:0, buy:0, count:0 };
+          byRest[restaurantName].qty += item.qty; byRest[restaurantName].sell += item.total; byRest[restaurantName].buy += item.qty * item.buyPrice; byRest[restaurantName].count++;
           if (!byUnit[unit]) byUnit[unit] = 0; byUnit[unit] += item.qty;
         }
       });
@@ -573,7 +582,10 @@ async function downloadReportPDF() {
 
   } else {
     // Financial Report
-    if (type === 'restaurant' && restId) invs = invs.filter(i => i.restaurantId === restId);
+    if (type === 'restaurant' && restId) {
+      const selectedRestaurant = DB.restaurants.find(restaurant => restaurant.id === restId);
+      invs = selectedRestaurant ? invs.filter(invoice => invoiceBelongsToRestaurant(invoice, selectedRestaurant)) : [];
+    }
     const restName = type === 'restaurant' ? (DB.restaurants.find(r => r.id === restId)?.name || 'Unknown') : 'All Restaurants';
     // Show "For:" below the title, not in the header
     doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor('#616161');
@@ -626,7 +638,7 @@ async function downloadReportPDF() {
 
     const tableMargins = { left: 40, right: 40, top: 130, bottom: 60 };
 
-    const byRest = {}; invs.forEach(i => { if (!byRest[i.restaurantName]) byRest[i.restaurantName] = { sell:0, buy:0, prof:0, cnt:0 }; byRest[i.restaurantName].sell += i.totalSell; byRest[i.restaurantName].buy += i.totalBuy; byRest[i.restaurantName].prof += i.profit; byRest[i.restaurantName].cnt++; });
+    const byRest = {}; invs.forEach(i => { const name = invoiceRestaurantDisplayName(i); if (!byRest[name]) byRest[name] = { sell:0, buy:0, prof:0, cnt:0 }; byRest[name].sell += i.totalSell; byRest[name].buy += i.totalBuy; byRest[name].prof += i.profit; byRest[name].cnt++; });
     const restData = Object.entries(byRest).sort((a,b)=>b[1].sell-a[1].sell).map(([n, d]) => [n, d.cnt.toString(), `KES ${fmtMoney(d.sell)}`, `KES ${fmtMoney(d.buy)}`, `KES ${fmtMoney(d.prof)}`, d.sell>0?((d.prof/d.sell)*100).toFixed(1)+'%':'—']);
     if (restData.length) {
       doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("Sales by Restaurant", 40, currentY);
@@ -652,7 +664,7 @@ async function downloadReportPDF() {
       }
     }
 
-    const invData = invs.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(i => [i.number, i.restaurantName, fmtDate(i.date), `KES ${fmtMoney(i.totalSell)}`, `KES ${fmtMoney(i.profit)}`, i.status]);
+    const invData = invs.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(i => [i.number, invoiceRestaurantDisplayName(i), fmtDate(i.date), `KES ${fmtMoney(i.totalSell)}`, `KES ${fmtMoney(i.profit)}`, i.status]);
     if (invData.length) {
       doc.setFontSize(12); doc.setTextColor('#424242'); doc.setFont("helvetica", "bold"); doc.text("All Invoices", 40, currentY);
       doc.autoTable({ startY: currentY + 10, head: [["#", "Restaurant", "Date", "Amount", "Profit", "Status"]], body: invData, theme: 'plain', styles: { fontSize: 9 }, headStyles: { fillColor: '#f1f5f9', textColor: '#424242' }, margin: tableMargins, didDrawPage: (data) => { if (data.pageNumber > 1) drawHeaderShapes(false); } });

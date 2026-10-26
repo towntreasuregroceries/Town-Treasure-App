@@ -419,14 +419,21 @@ function renderInvoicesList() {
   let invs = DB.invoices.filter(i => i.status !== 'draft').slice()
     .sort((a, b) => dateKey(b.date).localeCompare(dateKey(a.date))
       || String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
-  if (search) invs = invs.filter(i => i.number.toLowerCase().includes(search) || i.restaurantName.toLowerCase().includes(search));
-  if (filterRest) invs = invs.filter(i => i.restaurantId === filterRest);
+  if (search) invs = invs.filter(i =>
+    String(i.number || '').toLowerCase().includes(search)
+      || String(invoiceRestaurantDisplayName(i) || '').toLowerCase().includes(search)
+      || String(i.restaurantName || '').toLowerCase().includes(search)
+  );
+  if (filterRest) {
+    const selectedRestaurant = DB.restaurants.find(restaurant => restaurant.id === filterRest);
+    invs = selectedRestaurant ? invs.filter(invoice => invoiceBelongsToRestaurant(invoice, selectedRestaurant)) : [];
+  }
   if (filterStatus) invs = invs.filter(i => i.status === filterStatus);
   const body = document.getElementById('invoicesListBody');
   if (!invs.length) { body.innerHTML = '<tr><td colspan="8" class="empty-state"><h3>No invoices found</h3></td></tr>'; return; }
   body.innerHTML = invs.map(i => {
     const badgeCls = i.status === 'paid' ? 'badge-success' : i.status === 'overdue' ? 'badge-danger' : 'badge-warning';
-    return `<tr><td><strong>${escapeHtml(i.number)}</strong></td><td>${escapeHtml(i.restaurantName)}</td><td>${fmtDate(i.date)}</td><td>${i.items.length}</td><td>KES ${fmtMoney(i.totalSell)}</td><td style="color:var(--green-700)">KES ${fmtMoney(i.profit)}</td><td><span class="badge ${badgeCls}">${i.status}</span></td><td><button class="btn btn-sm btn-secondary" onclick="viewInvoice('${i.id}')">View</button> <button class="btn btn-sm btn-primary" onclick="editInvoice('${i.id}')">Edit</button> <button class="btn btn-sm btn-danger" onclick="deleteInvoice('${i.id}')">Del</button></td></tr>`;
+    return `<tr><td><strong>${escapeHtml(i.number)}</strong></td><td>${escapeHtml(invoiceRestaurantDisplayName(i))}</td><td>${fmtDate(i.date)}</td><td>${(i.items || []).length}</td><td>KES ${fmtMoney(i.totalSell)}</td><td style="color:var(--green-700)">KES ${fmtMoney(i.profit)}</td><td><span class="badge ${badgeCls}">${escapeHtml(i.status)}</span></td><td><button class="btn btn-sm btn-secondary" onclick="viewInvoice('${i.id}')">View</button> <button class="btn btn-sm btn-primary" onclick="editInvoice('${i.id}')">Edit</button> <button class="btn btn-sm btn-danger" onclick="deleteInvoice('${i.id}')">Del</button></td></tr>`;
   }).join('');
 }
 function deleteInvoice(id) {
