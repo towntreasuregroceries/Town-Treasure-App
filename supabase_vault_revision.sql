@@ -1,5 +1,5 @@
 -- Town Treasure Groceries — encrypted vault revisions and compare-and-swap writes
--- Apply this in Supabase SQL Editor before deploying the client changes in data.js.
+-- Apply this in Supabase SQL Editor after deploying the client changes in data.js.
 -- Existing encrypted_vault.data values are left intact. Existing rows begin at
 -- revision 0 and are copied into the private history table as a recovery point.
 
@@ -15,6 +15,12 @@ CREATE TABLE IF NOT EXISTS public.encrypted_vault_history (
 );
 
 ALTER TABLE public.encrypted_vault_history ENABLE ROW LEVEL SECURITY;
+
+-- Keep the SECURITY DEFINER implementation outside the API-exposed public
+-- schema. Do not add ttg_private to Supabase's exposed schemas.
+CREATE SCHEMA IF NOT EXISTS ttg_private;
+REVOKE ALL PRIVILEGES ON SCHEMA ttg_private FROM PUBLIC, anon, authenticated;
+GRANT USAGE ON SCHEMA ttg_private TO authenticated;
 
 -- Keep a private baseline of every vault currently present before any app write.
 INSERT INTO public.encrypted_vault_history (user_id, revision, data)
@@ -35,7 +41,7 @@ REVOKE ALL PRIVILEGES ON TABLE public.encrypted_vault FROM PUBLIC, anon, authent
 GRANT SELECT ON TABLE public.encrypted_vault TO authenticated;
 REVOKE ALL PRIVILEGES ON TABLE public.encrypted_vault_history FROM PUBLIC, anon, authenticated;
 
-CREATE OR REPLACE FUNCTION public.save_encrypted_vault_cas(
+CREATE OR REPLACE FUNCTION ttg_private.save_encrypted_vault_cas_internal(
   p_user_id UUID,
   p_expected_revision BIGINT,
   p_data TEXT
@@ -135,6 +141,24 @@ BEGIN
   RETURN pg_catalog.jsonb_build_object('saved', TRUE, 'revision', v_next_revision);
 END;
 $function$;
+
+REVOKE ALL PRIVILEGES ON FUNCTION ttg_private.save_encrypted_vault_cas_internal(UUID, BIGINT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION ttg_private.save_encrypted_vault_cas_internal(UUID, BIGINT, TEXT) TO authenticated;
+
+-- PostgREST exposes only this invoker wrapper. The trusted implementation
+-- runs with its owner's privileges and independently checks auth.uid().
+CREATE OR REPLACE FUNCTION public.save_encrypted_vault_cas(
+  p_user_id UUID,
+  p_expected_revision BIGINT,
+  p_data TEXT
+)
+RETURNS JSONB
+LANGUAGE SQL
+SECURITY INVOKER
+SET search_path = ''
+AS $wrapper$
+  SELECT ttg_private.save_encrypted_vault_cas_internal($1, $2, $3);
+$wrapper$;
 
 REVOKE ALL PRIVILEGES ON FUNCTION public.save_encrypted_vault_cas(UUID, BIGINT, TEXT) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.save_encrypted_vault_cas(UUID, BIGINT, TEXT) TO authenticated;
