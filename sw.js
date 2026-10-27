@@ -1,6 +1,6 @@
 // Town Treasure Groceries — Service Worker
 // Version-based caching: bump this to push updates to all phones
-const CACHE_VERSION = 'ttg-v1.2.31';
+const CACHE_VERSION = 'ttg-v1.2.32';
 const CACHE_NAME = CACHE_VERSION;
 
 // Files to cache for offline use
@@ -41,11 +41,10 @@ self.addEventListener('install', event => {
   event.waitUntil(
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(ASSETS_TO_CACHE))
-      .then(() => self.skipWaiting()) // Activate immediately
   );
 });
 
-// Activate: delete old caches AND force all tabs to reload with fresh code
+// Activate only after existing app tabs close or the user accepts an update.
 self.addEventListener('activate', event => {
   console.log('[SW] Activating version:', CACHE_VERSION);
   event.waitUntil(
@@ -57,15 +56,12 @@ self.addEventListener('activate', event => {
               return caches.delete(key);
             })
       )
-    ).then(() => self.clients.claim())
-     .then(() => {
-       // Force all open tabs to reload with fresh code
-       return self.clients.matchAll({ type: 'window' });
-     })
-     .then(clients => {
-       clients.forEach(client => client.navigate(client.url));
-     })
+    )
   );
+});
+
+self.addEventListener('message', event => {
+  if (event.data && event.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 // Fetch: Network-first strategy for HTML/JS/CSS (always get latest)

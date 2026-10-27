@@ -1146,14 +1146,11 @@ async function handleChangePassword() {
 
 /* ══ Logout ══ */
 async function handleLogout() {
-  customConfirm('Are you sure you want to sign out?', 'Sign Out', 'Yes, Sign Out', false, async () => {
-    const synced = typeof DB.syncNow === 'function' && await DB.syncNow();
-    if (!synced) {
-      toast('Sign out was canceled because the latest data could not be confirmed in the cloud. Reconnect and try again; this device still has your local data.', 'warning');
-      return;
-    }
+  customConfirm('Are you sure you want to sign out?', 'Sign Out', 'Yes, Sign Out', false, () => runWithActionProgress('Signing out…', 'Syncing your latest data before signing out.', async () => {
     const signedOut = await signOut();
-    if (!signedOut) return;
+    if (!signedOut) {
+      return { status: 'warning', title: 'Still signed in', message: 'The account did not confirm sign out. Your local data has been kept; check the connection and try again.' };
+    }
     DB.clearLocalData();
     localStorage.removeItem('ttg_e2e_key'); // Clear encryption key from memory
     document.getElementById('appShell').style.display = 'none';
@@ -1165,7 +1162,8 @@ async function handleLogout() {
     } else {
       showAuthPanel('authPasswordLogin');
     }
-  });
+    return { status: 'success', title: 'Signed out', message: 'Your data was synced and this account has been signed out.' };
+  }));
 }
 
 function toggleUserDropdown() {
