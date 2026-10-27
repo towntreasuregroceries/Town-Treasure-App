@@ -122,6 +122,7 @@ function saveRestaurant() {
   commitWithExactMerge();
 }
 async function saveRestaurantRecord(r, isNew, duplicates = []) {
+  return runWithActionProgress('Saving restaurant…', `Saving ${r.name} and confirming the account sync.`, async () => {
   const duplicateIds = new Set(duplicates.map(x => x.id));
   const now = new Date().toISOString();
   const mergedNames = new Set([...restaurantNameVariants(r), ...duplicates.flatMap(restaurantNameVariants)]
@@ -165,7 +166,10 @@ async function saveRestaurantRecord(r, isNew, duplicates = []) {
     ? `Restaurant saved; merged ${duplicates.length} duplicate restaurant record${duplicates.length === 1 ? '' : 's'}.`
     : (isNew ? 'Restaurant added' : 'Restaurant updated');
   const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
-  toast(synced ? `${message} Changes synced.` : `${message} on this device, but cloud sync was not confirmed.`, synced ? 'success' : 'warning');
+  return synced
+    ? { status: 'success', title: 'Restaurant saved', message: `${message}. Changes synced to the account.` }
+    : { status: 'warning', title: 'Restaurant saved on this phone', message: `${message} on this device, but cloud sync was not confirmed. Retry sync before switching devices.` };
+  });
 }
 function editRestaurant(id) {
   const r = DB.restaurants.find(x => x.id === id);

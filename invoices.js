@@ -75,10 +75,17 @@ async function saveInvoice(bypassDuplicateCheck = false) {
   // ══ Town Treasure Smart Audit — Ledger Collision Guard ══
   if ((!invId || existingEditRecord?.status === 'draft') && !bypassDuplicateCheck && typeof TTGAudit !== 'undefined' && typeof DB !== 'undefined' && Array.isArray(DB.invoices)) {
     try {
-      const syncConfirmed = typeof DB.syncNow === 'function' && await DB.syncNow();
-      const remoteSnapshot = syncConfirmed && typeof DB.getRemoteInvoiceSnapshot === 'function'
-        ? await DB.getRemoteInvoiceSnapshot()
-        : null;
+      const { syncConfirmed, remoteSnapshot } = await runWithProgressOverlay(
+        'Checking invoices…',
+        'Refreshing the account invoice list before the duplicate check.',
+        async () => {
+          const syncConfirmed = typeof DB.syncNow === 'function' && await DB.syncNow();
+          const remoteSnapshot = syncConfirmed && typeof DB.getRemoteInvoiceSnapshot === 'function'
+            ? await DB.getRemoteInvoiceSnapshot()
+            : null;
+          return { syncConfirmed, remoteSnapshot };
+        }
+      );
       if (!remoteSnapshot?.ok) {
         customConfirm(
           'The current server invoice list could not be verified, so the duplicate check is unavailable. Saving now may create a repeat invoice if this delivery was already entered on another device. You can keep working on this device, but confirm the invoice first.',
@@ -224,31 +231,33 @@ async function saveInvoice(bypassDuplicateCheck = false) {
       paidDate: originalInvoice?.paidDate,
       createdAt, updatedAt: new Date().toISOString()
     };
-  const list = DB.invoices; 
-  const idx = list.findIndex(i => i.id === invId);
-  if (idx >= 0) list[idx] = inv; else list.push(inv);
-  DB.invoices = list;
-  
-  // Create or update associated expenses
-  const replacedExpenses = DB.expenses.filter(e => e.invId === invId);
-  replacedExpenses.forEach(expense => DB.markRecordDeleted?.('expenses', expense.id));
-  let expList = DB.expenses.filter(e => e.invId !== invId); // Replace auto-generated linked costs
-  if (deliveryCost > 0) {
-    expList.push({ id: genId(), invId, type: 'expense', date: invDateVal, desc: `Delivery: ${inv.number} (${inv.restaurantName})`, category: 'transport', amount: deliveryCost });
-  }
-  if (otherCost > 0) {
-    expList.push({ id: genId(), invId, type: 'expense', date: invDateVal, desc: `Ops Cost: ${inv.number} (${inv.restaurantName})`, category: 'other', amount: otherCost });
-  }
-  DB.expenses = expList;
-  const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
-  toast(synced
-    ? `Invoice ${inv.number} saved and synced.`
-    : `Invoice ${inv.number} is saved on this device, but cloud sync was not confirmed. Keep this device's data; retry sync before switching devices.`,
-    synced ? 'success' : 'warning');
-  document.getElementById('editInvoiceId').value = '';
-  if(typeof checkInvoiceDraft === 'function') checkInvoiceDraft();
-  resetInvoiceForm();
-  viewInvoice(inv.id);
+  clearTimeout(autoSaveTimer);
+  return runWithActionProgress('Saving invoice…', `Saving invoice ${inv.number} and confirming the account sync.`, async () => {
+    const list = DB.invoices;
+    const idx = list.findIndex(i => i.id === invId);
+    if (idx >= 0) list[idx] = inv; else list.push(inv);
+    DB.invoices = list;
+
+    // Create or update associated expenses
+    const replacedExpenses = DB.expenses.filter(e => e.invId === invId);
+    replacedExpenses.forEach(expense => DB.markRecordDeleted?.('expenses', expense.id));
+    let expList = DB.expenses.filter(e => e.invId !== invId); // Replace auto-generated linked costs
+    if (deliveryCost > 0) {
+      expList.push({ id: genId(), invId, type: 'expense', date: invDateVal, desc: `Delivery: ${inv.number} (${inv.restaurantName})`, category: 'transport', amount: deliveryCost });
+    }
+    if (otherCost > 0) {
+      expList.push({ id: genId(), invId, type: 'expense', date: invDateVal, desc: `Ops Cost: ${inv.number} (${inv.restaurantName})`, category: 'other', amount: otherCost });
+    }
+    DB.expenses = expList;
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+    document.getElementById('editInvoiceId').value = '';
+    if (typeof checkInvoiceDraft === 'function') checkInvoiceDraft();
+    resetInvoiceForm();
+    viewInvoice(inv.id);
+    return synced
+      ? { status: 'success', title: 'Invoice saved', message: `Invoice ${inv.number} was saved and synced to the account.` }
+      : { status: 'warning', title: 'Invoice saved on this phone', message: `Invoice ${inv.number} is saved on this device, but cloud sync was not confirmed. Keep this device's data and retry sync before switching devices.` };
+  });
 }
 function resetInvoiceForm() {
   document.getElementById('editInvoiceId').value = '';
@@ -264,7 +273,7 @@ function resetInvoiceForm() {
   calcInvoiceTotals();
 }
 
-function saveInvoiceDraft(silent = false) {
+async function saveInvoiceDraft(silent = false) {
   const restId = document.getElementById('invRestaurant').value;
   const items = [];
   document.querySelectorAll('#lineItemsBody tr').forEach(row => {
@@ -313,14 +322,28 @@ function saveInvoiceDraft(silent = false) {
     updatedAt: new Date().toISOString()
   };
 
-  const list = DB.invoices;
-  const idx = list.findIndex(i => i.id === invId);
-  if (idx >= 0) list[idx] = draft; else list.push(draft);
-  DB.invoices = list;
+  const persistDraft = () => {
+    const list = DB.invoices;
+    const idx = list.findIndex(i => i.id === invId);
+    if (idx >= 0) list[idx] = draft; else list.push(draft);
+    DB.invoices = list;
+    document.getElementById('editInvoiceId').value = draft.id;
+    checkInvoiceDraft();
+  };
 
-  document.getElementById('editInvoiceId').value = draft.id;
-  if (!silent) toast('Draft saved to database!');
-  checkInvoiceDraft();
+  if (silent) {
+    persistDraft();
+    return;
+  }
+
+  clearTimeout(autoSaveTimer);
+  return runWithActionProgress('Saving draft…', 'Saving this draft and confirming the account sync.', async () => {
+    persistDraft();
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+    return synced
+      ? { status: 'success', title: 'Draft saved', message: 'The invoice draft was saved and synced to the account.' }
+      : { status: 'warning', title: 'Draft saved on this phone', message: 'The draft is saved on this device, but cloud sync was not confirmed. Retry sync before switching devices.' };
+  });
 }
 
 function loadInvoiceDraft(id) {

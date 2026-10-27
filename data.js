@@ -1175,6 +1175,22 @@ async function runWithActionProgress(progressTitle, progressMessage, action) {
   return outcome;
 }
 
+async function runWithProgressOverlay(progressTitle, progressMessage, action) {
+  const startedAt = Date.now();
+  setActionStatus(progressTitle, progressMessage, 'progress');
+  await new Promise(resolve => {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(resolve));
+    else setTimeout(resolve, 40);
+  });
+  try {
+    return await action();
+  } finally {
+    const remaining = Math.max(0, 350 - (Date.now() - startedAt));
+    if (remaining) await new Promise(resolve => setTimeout(resolve, remaining));
+    closeModal('actionStatusModal');
+  }
+}
+
 let confirmCallback = null;
 function customConfirm(message, title, btnText, isDanger, callback) {
   document.getElementById('confirmMessage').innerText = message;

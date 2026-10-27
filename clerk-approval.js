@@ -633,16 +633,18 @@ async function executeClerkApproval() {
       items: items
     };
 
-    const newInvoice = await StagingDB.approveSubmission(activeReviewSubmissionId, adjustedData);
+    await runWithActionProgress('Saving clerk invoice…', 'Encrypting the invoice and confirming it was saved to the account.', async () => {
+      const newInvoice = await StagingDB.approveSubmission(activeReviewSubmissionId, adjustedData);
 
-    closeModal('clerkReviewModal');
-    toast(`Invoice ${newInvoice.number} approved and encrypted into your private vault!`, 'success');
+      closeModal('clerkReviewModal');
 
-    // Re-render UI
-    if (typeof renderInvoicesList === 'function') renderInvoicesList();
-    if (typeof refreshDashboard === 'function') refreshDashboard();
-    if (typeof renderClerkSubmissionsPage === 'function') renderClerkSubmissionsPage();
-    if (typeof populateRestaurantDropdowns === 'function') populateRestaurantDropdowns();
+      // Re-render UI
+      if (typeof renderInvoicesList === 'function') renderInvoicesList();
+      if (typeof refreshDashboard === 'function') refreshDashboard();
+      if (typeof renderClerkSubmissionsPage === 'function') renderClerkSubmissionsPage();
+      if (typeof populateRestaurantDropdowns === 'function') populateRestaurantDropdowns();
+      return { status: 'success', title: 'Clerk invoice approved', message: `Invoice ${newInvoice.number} was approved, encrypted, and saved to the private vault.` };
+    });
 
   } catch (err) {
     console.error('Approval failed:', err);
