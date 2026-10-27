@@ -682,14 +682,13 @@ async function executeClerkDeleteFromModal() {
   const ok = confirm('Are you sure you want to delete this docket? It will be removed permanently from your queue.');
   if (!ok) return;
 
-  try {
+  const outcome = await runWithActionProgress('Deleting docket…', 'Removing this docket from the review queue and waiting for the server to confirm.', async () => {
     await StagingDB.deleteSubmission(activeReviewSubmissionId);
     closeModal('clerkReviewModal');
-    toast('Docket deleted successfully.', 'success');
     renderClerkSubmissionsPage();
-  } catch (err) {
-    toast('Error deleting docket: ' + err.message, 'error');
-  }
+    return { status: 'success', title: 'Docket deleted', message: 'The docket was removed from the review queue.' };
+  });
+  return outcome;
 }
 
 /** Confirm and delete docket from the Submissions table */
@@ -697,13 +696,12 @@ async function confirmDeleteSubmission(id, restName) {
   const ok = confirm(`Are you sure you want to delete the docket for "${restName || 'this client'}"? This cannot be undone.`);
   if (!ok) return;
 
-  try {
+  const outcome = await runWithActionProgress('Deleting docket…', 'Removing this docket from the review queue and waiting for the server to confirm.', async () => {
     await StagingDB.deleteSubmission(id);
-    toast('Docket deleted successfully.', 'success');
     renderClerkSubmissionsPage();
-  } catch (err) {
-    toast('Error deleting docket: ' + err.message, 'error');
-  }
+    return { status: 'success', title: 'Docket deleted', message: 'The docket was removed from the review queue.' };
+  });
+  return outcome;
 }
 
 /** Helper to build a personalized, targeted Clerk Portal URL for the active account */

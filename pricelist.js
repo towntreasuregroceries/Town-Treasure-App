@@ -725,7 +725,7 @@ function duplicatePriceList(id) {
 }
 
 function deletePriceList(id) {
-  customConfirm('This price list will be moved to the Recycle Bin.', 'Delete Price List', 'Yes, Delete', true, () => {
+  customConfirm('This price list will be moved to the Recycle Bin.', 'Delete Price List', 'Yes, Delete', true, () => runWithActionProgress('Deleting price list…', 'Moving this price list to the Recycle Bin and syncing the change.', async () => {
     const pl = DB.priceLists.find(x => x.id === id);
     if (pl) {
       const deleted = { ...pl, deletedAt: new Date().toISOString() };
@@ -735,10 +735,12 @@ function deletePriceList(id) {
     }
     DB.priceLists = DB.priceLists.filter(x => x.id !== id);
     DB.markRecordDeleted?.('priceLists', id);
-    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderPriceLists();
-    toast('Price list moved to Recycle Bin');
-  });
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+    return synced
+      ? { status: 'success', title: 'Price list deleted', message: 'The price list was moved to the Recycle Bin and synced.' }
+      : { status: 'warning', title: 'Price list deleted on this phone', message: 'The price list is in this device’s Recycle Bin, but cloud sync was not confirmed. Retry sync before switching devices.' };
+  }));
 }
 
 function restorePriceList(id) {

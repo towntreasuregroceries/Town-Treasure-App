@@ -1118,6 +1118,63 @@ function toast(msg, type = 'success') {
 function openModal(id) { document.getElementById(id).classList.add('active'); }
 function closeModal(id) { document.getElementById(id).classList.remove('active'); }
 
+function setActionStatus(title, message, status = 'progress') {
+  const titleEl = document.getElementById('actionStatusTitle');
+  const messageEl = document.getElementById('actionStatusMessage');
+  const icon = document.getElementById('actionStatusIcon');
+  const footer = document.getElementById('actionStatusFooter');
+  if (!titleEl || !messageEl || !icon || !footer) return;
+
+  titleEl.textContent = title;
+  messageEl.textContent = message;
+  if (status === 'progress') {
+    icon.style.background = 'var(--info-lt)';
+    icon.style.color = 'var(--info)';
+    icon.innerHTML = '<span class="auth-spinner" style="width:22px;height:22px;border:2.5px solid var(--border);border-top-color:var(--primary);"></span>';
+    footer.style.display = 'none';
+  } else {
+    const icons = {
+      success: { background: 'var(--green-100, #dcfce7)', color: 'var(--green-700, #15803d)', svg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>' },
+      warning: { background: 'var(--warning-lt, #fef3c7)', color: 'var(--warning, #b45309)', svg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>' },
+      error: { background: 'var(--danger-lt, #fee2e2)', color: 'var(--danger, #dc2626)', svg: '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>' }
+    };
+    const appearance = icons[status] || icons.success;
+    icon.style.background = appearance.background;
+    icon.style.color = appearance.color;
+    icon.innerHTML = appearance.svg;
+    footer.style.display = 'flex';
+  }
+  openModal('actionStatusModal');
+}
+
+async function runWithActionProgress(progressTitle, progressMessage, action) {
+  const startedAt = Date.now();
+  setActionStatus(progressTitle, progressMessage, 'progress');
+  await new Promise(resolve => {
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(resolve));
+    else setTimeout(resolve, 40);
+  });
+
+  let result;
+  try {
+    result = await action();
+  } catch (error) {
+    const remaining = Math.max(0, 350 - (Date.now() - startedAt));
+    if (remaining) await new Promise(resolve => setTimeout(resolve, remaining));
+    setActionStatus('Action failed', error?.message || 'The action could not be completed. Please retry.', 'error');
+    return { status: 'error', error };
+  }
+
+  const remaining = Math.max(0, 350 - (Date.now() - startedAt));
+  if (remaining) await new Promise(resolve => setTimeout(resolve, remaining));
+  const outcome = result && typeof result === 'object'
+    ? result
+    : { status: result === false ? 'warning' : 'success', title: result === false ? 'Needs attention' : 'Complete', message: '' };
+  const status = ['success', 'warning', 'error'].includes(outcome.status) ? outcome.status : 'success';
+  setActionStatus(outcome.title || (status === 'success' ? 'Complete' : status === 'warning' ? 'Needs attention' : 'Action failed'), outcome.message || 'The action is complete.', status);
+  return outcome;
+}
+
 let confirmCallback = null;
 function customConfirm(message, title, btnText, isDanger, callback) {
   document.getElementById('confirmMessage').innerText = message;

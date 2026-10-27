@@ -187,13 +187,15 @@ function deleteRestaurant(id) {
   if (references) {
     return toast(`Cannot delete ${restaurant.name}: ${references} active or recycled invoice(s) are linked to it. Edit the restaurant and merge aliases into the correct record instead.`, 'error');
   }
-  customConfirm('Are you sure you want to delete this restaurant? All associated invoices will remain but show as Unknown.', 'Delete Restaurant', 'Yes, Delete', true, async () => {
+  customConfirm('Are you sure you want to delete this restaurant? All associated invoices will remain but show as Unknown.', 'Delete Restaurant', 'Yes, Delete', true, () => runWithActionProgress('Deleting restaurant…', 'Removing this restaurant record and confirming the change with your account.', async () => {
     DB.deletedRestaurantIds = Array.from(new Set([...(DB.deletedRestaurantIds || []), id]));
     DB.restaurants = DB.restaurants.filter(x => x.id !== id);
     renderRestaurants();
     const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
-    toast(synced ? 'Restaurant deleted and synced.' : 'Restaurant deleted on this device, but cloud sync was not confirmed.', synced ? 'success' : 'warning');
-  });
+    return synced
+      ? { status: 'success', title: 'Restaurant deleted', message: 'The restaurant was deleted and the change synced to your account.' }
+      : { status: 'warning', title: 'Restaurant deleted on this phone', message: 'The restaurant is removed on this device, but cloud sync was not confirmed. Keep this device data and retry sync before switching devices.' };
+  }));
 }
 function renderRestaurants() {
   const body = document.getElementById('restaurantsBody');

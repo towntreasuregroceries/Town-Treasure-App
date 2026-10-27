@@ -57,7 +57,7 @@ function saveStaff() {
 }
 
 function deleteStaff(id) {
-  customConfirm('This staff member will be moved to the Recycle Bin.', 'Remove Staff', 'Yes, Remove', true, () => {
+  customConfirm('This staff member will be moved to the Recycle Bin.', 'Remove Staff', 'Yes, Remove', true, () => runWithActionProgress('Removing staff member…', 'Moving this staff record to the Recycle Bin and syncing the change.', async () => {
     const s = DB.staff.find(x => x.id === id);
     if (s) {
       const deleted = { ...s, deletedAt: new Date().toISOString() };
@@ -67,10 +67,12 @@ function deleteStaff(id) {
     }
     DB.staff = DB.staff.filter(x => x.id !== id);
     DB.markRecordDeleted?.('staff', id);
-    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderPayrollTab();
-    toast('Staff moved to Recycle Bin');
-  });
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+    return synced
+      ? { status: 'success', title: 'Staff member removed', message: 'The staff member was moved to the Recycle Bin and synced.' }
+      : { status: 'warning', title: 'Removed on this phone', message: 'The staff member is in this device’s Recycle Bin, but cloud sync was not confirmed. Retry sync before switching devices.' };
+  }));
 }
 
 function restoreStaff(id) {
@@ -149,17 +151,19 @@ function undoSalaryPayment(staffId) {
   const payment = getSalaryPayment(staffId, month);
   if (!payment) return;
 
-  customConfirm(`Undo salary payment for this month? This will also remove the expense entry.`, 'Undo Payment', 'Yes, Undo', true, () => {
+  customConfirm(`Undo salary payment for this month? This will also remove the expense entry.`, 'Undo Payment', 'Yes, Undo', true, () => runWithActionProgress('Undoing salary payment…', 'Removing the payment and its linked expense, then syncing the change.', async () => {
     DB.markRecordDeleted?.('salaryPayments', payment.id);
     DB.salaryPayments = DB.salaryPayments.filter(p => p.id !== payment.id);
     // Remove matching expense
     DB.expenses.filter(e => e.category === 'salaries' && e.desc.includes(payment.staffName) && e.date === payment.datePaid && e.amount === payment.amount)
       .forEach(expense => DB.markRecordDeleted?.('expenses', expense.id));
     DB.expenses = DB.expenses.filter(e => !(e.category === 'salaries' && e.desc.includes(payment.staffName) && e.date === payment.datePaid && e.amount === payment.amount));
-    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderPayrollTab();
-    toast('Payment undone');
-  });
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+    return synced
+      ? { status: 'success', title: 'Salary payment undone', message: 'The payment and linked expense were removed and synced.' }
+      : { status: 'warning', title: 'Payment undone on this phone', message: 'The payment is removed locally, but cloud sync was not confirmed. Retry sync before switching devices.' };
+  }));
 }
 
 /* ── Recurring Expenses ── */
@@ -205,13 +209,15 @@ function saveRecurring() {
 }
 
 function deleteRecurring(id) {
-  customConfirm('Delete this recurring expense?', 'Delete', 'Yes, Delete', true, () => {
+  customConfirm('Delete this recurring expense?', 'Delete', 'Yes, Delete', true, () => runWithActionProgress('Deleting recurring expense…', 'Removing this recurring expense and syncing the change.', async () => {
     DB.markRecordDeleted?.('recurringExpenses', id);
     DB.recurringExpenses = DB.recurringExpenses.filter(x => x.id !== id);
-    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderRecurringTab();
-    toast('Deleted');
-  });
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+    return synced
+      ? { status: 'success', title: 'Recurring expense deleted', message: 'The recurring expense was deleted and synced.' }
+      : { status: 'warning', title: 'Deleted on this phone', message: 'It is removed on this device, but cloud sync was not confirmed. Retry sync before switching devices.' };
+  }));
 }
 
 function isRecurringPaid(recurringId, month) {
@@ -494,7 +500,7 @@ function saveBorrowing() {
 }
 
 function deleteBorrowing(id) {
-  customConfirm('Delete this loan and all its partial repayments?', 'Delete Loan', 'Yes, Delete', true, () => {
+  customConfirm('Delete this loan and all its partial repayments?', 'Delete Loan', 'Yes, Delete', true, () => runWithActionProgress('Deleting loan…', 'Removing the loan, repayments, and linked expenses, then syncing the change.', async () => {
     const loan = DB.borrowings.find(x => x.id === id);
     if(loan) {
       deleteLinkedExpense(loan.id, 'borrow');
@@ -502,10 +508,12 @@ function deleteBorrowing(id) {
     }
     DB.markRecordDeleted?.('borrowings', id);
     DB.borrowings = DB.borrowings.filter(x => x.id !== id);
-    if (typeof DB.syncNow === 'function') DB.syncNow();
     renderBorrowingsTab();
-    toast('Loan deleted');
-  });
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+    return synced
+      ? { status: 'success', title: 'Loan deleted', message: 'The loan, repayments, and linked expenses were deleted and synced.' }
+      : { status: 'warning', title: 'Loan deleted on this phone', message: 'The loan and linked records are removed on this device, but cloud sync was not confirmed. Retry sync before switching devices.' };
+  }));
 }
 
 function openRepayModal(loanId) {
@@ -557,7 +565,7 @@ function viewRepayments(loanId) {
 }
 
 function deleteRepayment(loanId, repayId) {
-  customConfirm('Delete this repayment?', 'Delete Repayment', 'Yes, Delete', true, () => {
+  customConfirm('Delete this repayment?', 'Delete Repayment', 'Yes, Delete', true, () => runWithActionProgress('Deleting repayment…', 'Removing this repayment and its linked expense, then syncing the change.', async () => {
     const list = DB.borrowings;
     const loan = list.find(x => x.id === loanId);
     if(loan && loan.repayments) {
@@ -567,10 +575,14 @@ function deleteRepayment(loanId, repayId) {
       DB.borrowings = list;
       viewRepayments(loanId);
       renderBorrowingsTab();
-      toast('Repayment deleted');
       if(!loan.repayments.length) closeModal('repaymentsHistoryModal');
+      const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+      return synced
+        ? { status: 'success', title: 'Repayment deleted', message: 'The repayment and linked expense were deleted and synced.' }
+        : { status: 'warning', title: 'Repayment deleted on this phone', message: 'The repayment is removed locally, but cloud sync was not confirmed. Retry sync before switching devices.' };
     }
-  });
+    return { status: 'warning', title: 'Repayment not found', message: 'No repayment was changed. Refresh the loan history and try again.' };
+  }));
 }
 
 function createLinkedExpense(refId, amount, date, desc, type) {

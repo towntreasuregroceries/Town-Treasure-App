@@ -417,7 +417,7 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 function deleteDraft(id) {
-  customConfirm('Are you sure you want to delete this draft?', 'Delete Draft', 'Yes, Delete', true, async () => {
+  customConfirm('Are you sure you want to delete this draft?', 'Delete Draft', 'Yes, Delete', true, () => runWithActionProgress('Deleting draft…', 'Removing this draft and confirming the change with your account.', async () => {
     clearTimeout(autoSaveTimer);
     const draft = DB.invoices.find(i => i.id === id);
     if (draft) {
@@ -432,8 +432,10 @@ function deleteDraft(id) {
     if (document.getElementById('editInvoiceId').value === id) resetInvoiceForm();
     checkInvoiceDraft();
     const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
-    toast(synced ? 'Draft deleted and synced.' : 'Draft deleted on this device, but cloud sync was not confirmed.', synced ? 'success' : 'warning');
-  });
+    return synced
+      ? { status: 'success', title: 'Draft deleted', message: 'The draft was deleted and the change synced to your account.' }
+      : { status: 'warning', title: 'Draft deleted on this phone', message: 'The draft is removed on this device, but cloud sync was not confirmed. Keep this device data and retry sync before switching devices.' };
+  }));
 }
 
 /* ══ Invoices List ══ */
@@ -464,7 +466,7 @@ function renderInvoicesList() {
   }).join('');
 }
 function deleteInvoice(id) {
-  customConfirm('This invoice will be moved to the Recycle Bin. You can restore it later.', 'Delete Invoice', 'Yes, Delete', true, async () => {
+  customConfirm('This invoice will be moved to the Recycle Bin. You can restore it later.', 'Delete Invoice', 'Yes, Delete', true, () => runWithActionProgress('Deleting invoice…', 'Moving this invoice to the Recycle Bin and confirming the change with your account.', async () => {
     clearTimeout(autoSaveTimer);
     const inv = DB.invoices.find(i => i.id === id);
     if (inv) {
@@ -483,8 +485,10 @@ function deleteInvoice(id) {
     if (document.getElementById('editInvoiceId').value === id) resetInvoiceForm();
     renderInvoicesList();
     const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
-    toast(synced ? 'Invoice moved to Recycle Bin and synced.' : 'Invoice moved to this device’s Recycle Bin, but cloud sync was not confirmed.', synced ? 'success' : 'warning');
-  });
+    return synced
+      ? { status: 'success', title: 'Invoice deleted', message: 'The invoice was moved to the Recycle Bin and the change synced to your account.' }
+      : { status: 'warning', title: 'Invoice deleted on this phone', message: 'The invoice is in this device’s Recycle Bin, but cloud sync was not confirmed. Keep this device data and retry sync before switching devices.' };
+  }));
 }
 
 /* ══ Recycle Bin ══ */

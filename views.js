@@ -528,12 +528,15 @@ function saveExpense() {
   renderExpenses(); toast('Entry saved');
 }
 function deleteExpense(id) {
-  customConfirm('Are you sure you want to delete this entry?', 'Delete Entry', 'Yes, Delete', true, () => {
+  customConfirm('Are you sure you want to delete this entry?', 'Delete Entry', 'Yes, Delete', true, () => runWithActionProgress('Deleting entry…', 'Removing this entry and syncing the change.', async () => {
     DB.markRecordDeleted?.('expenses', id);
     DB.expenses = DB.expenses.filter(e => e.id !== id);
-    if (typeof DB.syncNow === 'function') DB.syncNow();
-    renderExpenses(); toast('Deleted');
-  });
+    renderExpenses();
+    const synced = typeof DB.syncNow === 'function' ? await DB.syncNow() : false;
+    return synced
+      ? { status: 'success', title: 'Entry deleted', message: 'The entry was deleted and synced.' }
+      : { status: 'warning', title: 'Entry deleted on this phone', message: 'The entry is removed on this device, but cloud sync was not confirmed. Retry sync before switching devices.' };
+  }));
 }
 function renderExpenses() {
   const all = DB.expenses.slice().reverse();

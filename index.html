@@ -1718,6 +1718,25 @@
     </div>
   </div>
 
+  <div class="modal-overlay" id="actionStatusModal" style="z-index: 11000;" role="dialog" aria-modal="true" aria-labelledby="actionStatusTitle">
+    <div class="modal" style="max-width: 390px;">
+      <div class="modal-header" style="border-bottom:none; padding-bottom:0;">
+        <div style="display:flex; align-items:center; gap:12px;">
+          <div id="actionStatusIcon" style="width:40px; height:40px; border-radius:50%; display:flex; align-items:center; justify-content:center; background:var(--info-lt); color:var(--info); flex:0 0 auto;">
+            <span class="auth-spinner" style="width:22px; height:22px; border:2.5px solid var(--border); border-top-color:var(--primary);"></span>
+          </div>
+          <h2 id="actionStatusTitle" style="color:var(--text);">Working…</h2>
+        </div>
+      </div>
+      <div class="modal-body" style="padding-top:14px; padding-bottom:10px;">
+        <p id="actionStatusMessage" role="status" aria-live="polite" style="font-size:.95rem; color:var(--text-2); line-height:1.5;">Please wait while this action completes.</p>
+      </div>
+      <div class="modal-footer" id="actionStatusFooter" style="display:none; border-top:none; padding-top:0;">
+        <button class="btn btn-primary" type="button" onclick="closeModal('actionStatusModal')">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Invoice Duplicate Collision Hazard Modal -->
   <div class="modal-overlay" id="invoiceDuplicateModal" style="z-index: 10000;">
     <div class="modal" style="max-width: 540px; border-top: 6px solid #dc2626; box-shadow: 0 16px 48px rgba(220, 38, 38, 0.28);">
@@ -2436,16 +2455,16 @@
       }
     })();
   </script>
-  <script src="data.js?v=1.3.1"></script>
-  <script src="nav.js?v=1.3.1"></script>
-  <script src="invoices.js?v=1.3.1"></script>
-  <script src="views.js?v=1.3.0"></script>
+  <script src="data.js?v=1.3.2"></script>
+  <script src="nav.js?v=1.3.2"></script>
+  <script src="invoices.js?v=1.3.2"></script>
+  <script src="views.js?v=1.3.1"></script>
   <script src="dashboard.js?v=1.3.1"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="ocr-consensus.js?v=1.2.6"></script>
   <script src="staging.js?v=1.3.2"></script>
   <script src="duplicate-detector.js?v=1.0.3"></script>
-  <script src="clerk-approval.js?v=1.3.2"></script>
+  <script src="clerk-approval.js?v=1.3.3"></script>
   <script src="invoice-scanner.js?v=1.2.8"></script>
   <script>
   /* ══ Signature Scanner — Inline ══ */
@@ -2727,8 +2746,8 @@
     closeSignatureScanner();
   }
   </script>
-  <script src="payroll.js?v=1.2.9"></script>
-  <script src="pricelist.js?v=1.2.9"></script>
+  <script src="payroll.js?v=1.3.0"></script>
+  <script src="pricelist.js?v=1.3.0"></script>
   <script src="statements.js?v=1.2.11"></script>
   <script src="insights.js?v=1.3.0"></script>
   <script src="app.js?v=1.2.0"></script>
