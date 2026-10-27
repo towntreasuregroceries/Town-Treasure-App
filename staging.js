@@ -330,7 +330,7 @@ const StagingDB = {
       throw new Error('This clerk page needs a valid invite link. Ask the account owner for a new one.');
     }
 
-    if (typeof getCurrentUser === 'function' && (!currentUser || !currentUser.id)) {
+    if (typeof getCurrentUser === 'function' && !(typeof currentUser !== 'undefined' && currentUser?.id)) {
       try { await getCurrentUser(); } catch(e) {}
     }
 
@@ -429,8 +429,35 @@ const StagingDB = {
 
   /** Fetch only pending submissions */
   async getPendingSubmissions() {
-    const all = await this.getAllSubmissions(true);
-    return all.filter(s => s.status === 'pending');
+    // The badge needs counts and ownership fields only. Do not download receipt
+    // photos here: they can be multi-megabyte base64 values on every poll.
+    if (this.isClerkPortalPage()) return [];
+
+    if (typeof getCurrentUser === 'function' && !(typeof currentUser !== 'undefined' && currentUser?.id)) {
+      try { await getCurrentUser(); } catch (e) {}
+    }
+
+    const userIdent = this.getCurrentUserIdentifier();
+    const deletedIds = new Set(this.getDeletedQueueIds());
+    const localPending = this.getLocalQueue().filter(item =>
+      item && item.status === 'pending' && item.id && !deletedIds.has(item.id)
+      && this.isSubmissionForUser(item, userIdent)
+    );
+
+    if (await this.checkSupabase()) {
+      try {
+        const { data, error } = await supabaseClient.from('staged_invoices')
+          .select('id, owner_user_id, target_user_id, target_user_email, notes, status')
+          .eq('status', 'pending');
+        if (error) throw error;
+        return (data || []).filter(item => item && item.id && !deletedIds.has(item.id)
+          && this.isSubmissionForUser(item, userIdent));
+      } catch (error) {
+        console.warn('[Staging] Pending-count query failed; using local queue:', error);
+      }
+    }
+
+    return localPending;
   },
 
   /** Submit or update a docket (called by Clerk portal) */
@@ -780,6 +807,9 @@ const StagingDB = {
 
   /** Update sidebar badge and dashboard pending alert */
   async updatePendingCountBadge() {
+    // The clerk portal has no owner-side pending badge. Its old 30-second poll
+    // called clerk-api/list, downloading every receipt image each time.
+    if (this.isClerkPortalPage()) return;
     try {
       const pending = await this.getPendingSubmissions();
       const count = pending.length;
@@ -841,9 +871,12 @@ const StagingDB = {
   }
 };
 
-// Periodically check for new clerk submissions every 30 seconds
-setInterval(() => {
-  if (typeof StagingDB !== 'undefined' && typeof StagingDB.updatePendingCountBadge === 'function') {
-    StagingDB.updatePendingCountBadge();
-  }
-}, 30000);
+// Refresh the small metadata-only badge while the owner app is visible.
+function refreshPendingDocketBadge() {
+  if (document.visibilityState !== 'visible' || !StagingDB || StagingDB.isClerkPortalPage()) return;
+  StagingDB.updatePendingCountBadge();
+}
+setInterval(refreshPendingDocketBadge, 120000);
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') refreshPendingDocketBadge();
+});
