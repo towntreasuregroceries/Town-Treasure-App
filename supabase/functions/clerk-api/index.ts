@@ -171,11 +171,18 @@ Deno.serve(async request => {
     if (!invite) return reply(401, { error: 'This clerk link is invalid or expired. Ask the account owner for a new link.' });
 
     if (body.action === 'list') {
-      const { data, error } = await admin.from('staged_invoices')
-        .select('*')
+      const summaryColumns = 'id,owner_user_id,submitted_by_invite_id,submission_key,clerk_name,restaurant_name,invoice_date,items_json,delivery_cost,other_cost,total_sell,total_buy,notes,status,rejection_reason,target_user_id,target_user_email,target_user_name,created_at,updated_at';
+      let query = admin.from('staged_invoices')
+        // Preserve the original response for old clients during rollout.
+        .select(body.include_photos === false ? summaryColumns : '*')
         .eq('owner_user_id', invite.owner_user_id)
-        .eq('submitted_by_invite_id', invite.id)
-        .order('created_at', { ascending: false });
+        .eq('submitted_by_invite_id', invite.id);
+      if (body.submission_id !== undefined) {
+        const id = cleanText(body.submission_id, 160, true);
+        if (!id) return reply(400, { error: 'A valid docket ID is required.' });
+        query = query.eq('id', id);
+      }
+      const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
       return reply(200, {
         owner: { name: invite.owner_name, email: invite.owner_email },

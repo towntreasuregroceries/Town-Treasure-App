@@ -1,0 +1,24 @@
+Subject: Request to review egress restriction after application traffic fixes
+
+Our Town Treasure Groceries project INVOICE SYSTEM (bulptzqaoddnptiwfrce) is on
+the Free plan and app sign-in is now blocked with exceed_egress_quota.
+
+We cannot afford a paid subscription at present. We found an application bug
+that repeatedly downloaded staged dockets with embedded receipt photos. A
+read-only audit measured 9,758,726 bytes for the full list versus 40,044 bytes
+without receipt fields. The old badge check ran every 30 seconds, even when
+there were no pending dockets.
+
+We reduced and scoped badge polling. Our follow-up release requests metadata
+for lists, fetches receipt photos only when opening a docket, and checks the
+server revision before re-downloading the encrypted account vault. It preserves
+our guarded writes and user/invite access rules. We have also made a private
+recovery backup through administrative access.
+
+Please review whether service can be restored without a paid upgrade after
+these fixes, and confirm the actual quota reset date and the requirements for
+remaining on the Free plan. We understand fixes cannot erase past usage and
+will monitor future daily egress.
+
+We can supply deployment details and aggregate measurements. This request
+contains no customer invoices, credentials, or backup contents.

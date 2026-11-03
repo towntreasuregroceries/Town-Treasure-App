@@ -12,3 +12,6 @@ assets/PC Equalizer Free*
 .vscode/
 scratch/
 recovered_*.json
+
+# Private recovery exports must never be published with the app.
+/backups/

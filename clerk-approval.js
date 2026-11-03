@@ -97,17 +97,7 @@ async function renderClerkSubmissionsPage() {
           </span>`;
       }
 
-      const photos = Array.isArray(item.receipt_photos) && item.receipt_photos.length 
-        ? item.receipt_photos 
-        : (item.receipt_photo ? [item.receipt_photo] : []);
-      const pageCount = photos.length;
-
-      const photoThumb = photos[0] 
-        ? `<div style="position:relative; display:inline-block;">
-             <img src="${photos[0]}" style="width:48px; height:48px; object-fit:cover; border-radius:6px; border:1px solid var(--border); cursor:pointer;" onclick="openPhotoZoom('${item.id}')" title="Click to view full docket note">
-             ${pageCount > 1 ? `<span style="position:absolute; bottom:-3px; right:-3px; background:var(--primary); color:#fff; font-size:9px; font-weight:700; border-radius:10px; padding:1px 5px; line-height:1.2; box-shadow:0 1px 3px rgba(0,0,0,0.3);">${pageCount}P</span>` : ''}
-           </div>`
-        : `<span style="display:inline-flex; align-items:center; justify-content:center; width:48px; height:48px; background:var(--gray-100); border-radius:6px; color:var(--text-3);"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline></svg></span>`;
+      const photoThumb = `<button type="button" class="btn btn-sm btn-secondary" onclick="openPhotoZoom('${item.id}')">Open receipt</button>`;
 
       const actionBtns = `
         <div style="display:flex; align-items:center; gap:6px;">
@@ -189,9 +179,15 @@ function openImportDocketModal() {
 async function openClerkReviewModal(id) {
   activeReviewSubmissionId = id;
   activeReviewAudit = { id, state: 'checking' };
-  const all = await StagingDB.getAllSubmissions();
+  let item;
+  try {
+    item = await StagingDB.getSubmission(id);
+  } catch (error) {
+    if (activeReviewSubmissionId !== id) return;
+    activeReviewAudit = { id, state: 'error' };
+    return toast('Could not load the docket: ' + error.message, 'error');
+  }
   if (activeReviewSubmissionId !== id) return;
-  const item = all.find(x => x.id === id);
   if (!item) return toast('Submission not found', 'error');
 
   // Fill in basic details
@@ -526,10 +522,7 @@ function togglePhotoZoom(img) {
 
 /** Quick photo zoom modal popup */
 async function openPhotoZoom(id) {
-  const all = await StagingDB.getAllSubmissions();
-  const item = all.find(x => x.id === id);
-  if (!item || (!item.receipt_photo && (!item.receipt_photos || !item.receipt_photos.length))) return;
-  openClerkReviewModal(id);
+  return openClerkReviewModal(id);
 }
 
 /** Execute Approval: Commit to Veronica's encrypted vault! */

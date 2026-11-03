@@ -6,6 +6,7 @@
 const StagingDB = {
   _supabaseAvailable: null,
   _clerkInviteOwner: null,
+  _summaryColumns: 'id,owner_user_id,submitted_by_invite_id,submission_key,clerk_name,restaurant_name,invoice_date,items_json,delivery_cost,other_cost,total_sell,total_buy,notes,status,rejection_reason,target_user_id,target_user_email,target_user_name,created_at,updated_at',
 
   getClerkInviteToken() {
     try {
@@ -322,7 +323,7 @@ const StagingDB = {
   async getAllSubmissions(filterForCurrentUser = true) {
     const inviteToken = this.getClerkInviteToken();
     if (inviteToken) {
-      const result = await this.callClerkApi({ action: 'list', invite_token: inviteToken });
+      const result = await this.callClerkApi({ action: 'list', invite_token: inviteToken, include_photos: false });
       this._clerkInviteOwner = result.owner || null;
       return Array.isArray(result.submissions) ? result.submissions : [];
     }
@@ -335,6 +336,7 @@ const StagingDB = {
     }
 
     const userIdent = this.getCurrentUserIdentifier();
+    if (!userIdent.uid) return [];
     const deletedIds = new Set(this.getDeletedQueueIds());
     const local = this.getLocalQueue().filter(item => {
       if (deletedIds.has(item.id)) return false;
@@ -350,7 +352,8 @@ const StagingDB = {
       try {
         const { data, error } = await supabaseClient
           .from('staged_invoices')
-          .select('*')
+          .select(this._summaryColumns)
+          .eq('owner_user_id', userIdent.uid)
           .order('created_at', { ascending: false });
 
         if (error) throw error;
@@ -379,8 +382,6 @@ const StagingDB = {
             other_cost: parseFloat(item.other_cost) || 0,
             total_sell: parseFloat(item.total_sell) || 0,
             total_buy: parseFloat(item.total_buy) || 0,
-            receipt_photo: item.receipt_photo || null,
-            receipt_photos: Array.isArray(item.receipt_photos) ? item.receipt_photos : (item.receipt_photo ? [item.receipt_photo] : []),
             notes: item.notes || '',
             status: item.status || 'pending',
             rejection_reason: item.rejection_reason || '',
@@ -425,6 +426,28 @@ const StagingDB = {
     if (!filterForCurrentUser) return combined;
 
     return combined.filter(item => this.isSubmissionForUser(item, userIdent));
+  },
+
+  /** Fetch one full docket only when its receipt is opened or corrected. */
+  async getSubmission(id) {
+    if (!id) throw new Error('A docket ID is required.');
+    const inviteToken = this.getClerkInviteToken();
+    if (inviteToken) {
+      // Older clerk-api deployments ignore the optional ID and return their
+      // existing list. Finding the requested ID keeps rollout compatible.
+      const result = await this.callClerkApi({
+        action: 'list', invite_token: inviteToken, submission_id: id, include_photos: true
+      });
+      this._clerkInviteOwner = result.owner || null;
+      return (result.submissions || []).find(item => item.id === id) || null;
+    }
+    if (this.isClerkPortalPage()) throw new Error('A valid clerk invite link is required.');
+    const { uid } = this.getCurrentUserIdentifier();
+    if (!uid || !supabaseClient) throw new Error('Sign in to view this docket.');
+    const { data, error } = await supabaseClient.from('staged_invoices')
+      .select('*').eq('owner_user_id', uid).eq('id', id).maybeSingle();
+    if (error) throw error;
+    return data;
   },
 
   /** Fetch only pending submissions */

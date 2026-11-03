@@ -315,6 +315,43 @@ const DB = {
   _syncInFlight: null,
   _syncRequestedAgain: false,
   _remoteRevision: null,
+  // Only ciphertext actually read from, or accepted by, the server is cached.
+  // This is deliberately separate from state and _remoteRevision (which can
+  // also describe a rejected write). Browser data is never a remote snapshot.
+  _remoteVaultCache: null,
+
+  async _readRemoteVault(uid) {
+    const metadata = await supabaseClient.from('encrypted_vault')
+      .select('revision').eq('user_id', uid).maybeSingle();
+    if (metadata.error) return metadata;
+    if (!metadata.data) {
+      this._remoteVaultCache = null;
+      return { data: null, error: null };
+    }
+    const revision = Number(metadata.data.revision);
+    if (metadata.data.revision == null || !Number.isSafeInteger(revision) || revision < 0) {
+      throw new Error('The server returned an invalid vault revision; sync was stopped.');
+    }
+    const cached = this._remoteVaultCache;
+    if (cached && cached.userId === uid && cached.revision === revision) {
+      return { data: { data: cached.data, revision }, error: null };
+    }
+    // The vault may change between these two reads. Use the payload's own
+    // revision; the existing CAS write still rejects a later concurrent edit.
+    const result = await supabaseClient.from('encrypted_vault')
+      .select('data, revision').eq('user_id', uid).maybeSingle();
+    if (result.error) return result;
+    if (!result.data) {
+      this._remoteVaultCache = null;
+      return result;
+    }
+    const payloadRevision = Number(result.data.revision);
+    if (result.data.revision == null || !Number.isSafeInteger(payloadRevision) || payloadRevision < 0) {
+      throw new Error('The server returned an invalid vault revision; sync was stopped.');
+    }
+    this._remoteVaultCache = { userId: uid, revision: payloadRevision, data: result.data.data };
+    return result;
+  },
 
   markRecordDeleted(collection, id) {
     if (!collection || !id) return;
@@ -380,11 +417,7 @@ const DB = {
       // Revision compare-and-swap prevents two devices from overwriting each
       // other's changes. Never fall back to an unguarded vault write.
       for (let attempt = 1; attempt <= 3; attempt++) {
-        let { data: remoteRow, error: remoteReadError } = await supabaseClient
-          .from('encrypted_vault')
-          .select('data, revision')
-          .eq('user_id', uid)
-          .maybeSingle();
+        const { data: remoteRow, error: remoteReadError } = await this._readRemoteVault(uid);
         if (isMissingVaultRevisionColumn(remoteReadError)) {
           const migrationError = new Error('Server revision protection is not available. Cloud sync was stopped to protect existing records; apply supabase_vault_revision.sql and retry.');
           migrationError.code = 'VAULT_REVISION_MIGRATION_MISSING';
@@ -499,6 +532,7 @@ const DB = {
             throw new Error('The server returned an unexpected vault revision; sync was stopped.');
           }
           this._remoteRevision = returnedRevision;
+          this._remoteVaultCache = { userId: uid, revision: returnedRevision, data: encryptedPayload };
           console.log('Successfully synced encrypted vault (server revision ' + this._remoteRevision + ', ' + state.invoices.length + ' invoices)');
           return true;
         }
@@ -546,11 +580,7 @@ const DB = {
     if (!keyString) return { ok: false, invoices: [] };
 
     try {
-      let { data, error } = await supabaseClient
-        .from('encrypted_vault')
-        .select('data, revision')
-        .eq('user_id', getUserId())
-        .maybeSingle();
+      let { data, error } = await this._readRemoteVault(getUserId());
       if (isMissingVaultRevisionColumn(error)) {
         ({ data, error } = await supabaseClient
           .from('encrypted_vault')
@@ -617,6 +647,7 @@ const DB = {
           throw new Error('The server returned an unexpected vault revision during key migration.');
         }
         this._remoteRevision = returnedRevision;
+        this._remoteVaultCache = { userId: getUserId(), revision: returnedRevision, data: encryptedPayload };
       } else {
         throw new Error('Server revision protection is not available; key migration write was stopped.');
       }
@@ -654,11 +685,7 @@ const DB = {
 
     try {
       let revisionSupport = true;
-      let { data, error } = await supabaseClient
-        .from('encrypted_vault')
-        .select('data, revision')
-        .eq('user_id', uid)
-        .single();
+      let { data, error } = await this._readRemoteVault(uid);
       if (isMissingVaultRevisionColumn(error)) {
         revisionSupport = false;
         ({ data, error } = await supabaseClient
@@ -771,6 +798,7 @@ const DB = {
   },
 
   clearLocalData() {
+    this._remoteVaultCache = null;
     state.restaurants = [];
     state.deletedRestaurantIds = [];
     state.invoices = [];
