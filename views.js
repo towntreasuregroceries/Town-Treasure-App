@@ -136,6 +136,31 @@ function viewInvoice(id) {
     btn.setAttribute('onclick', `generateInvoicePDF('${inv.id}')`);
   }
 
+  // Update Paid/Unpaid button toggle state
+  const btnTogglePaid = document.getElementById('btnTogglePaid');
+  if (btnTogglePaid) {
+    if (inv.status === 'paid') {
+      btnTogglePaid.className = 'btn btn-secondary';
+      btnTogglePaid.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#e53935" stroke-width="2.5" style="vertical-align:middle; margin-right:4px;">
+          <polyline points="1 4 1 10 7 10"></polyline>
+          <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
+        </svg>
+        Mark as Unpaid
+      `;
+      btnTogglePaid.title = 'Click to undo payment and return invoice to pending';
+    } else {
+      btnTogglePaid.className = 'btn btn-secondary';
+      btnTogglePaid.innerHTML = `
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2.5" style="vertical-align:middle; margin-right:4px;">
+          <polyline points="20 6 9 17 4 12"></polyline>
+        </svg>
+        Mark as Paid
+      `;
+      btnTogglePaid.title = 'Mark this invoice as paid';
+    }
+  }
+
   // Auto-paginate immediately so the user sees the true A4 layout
   setTimeout(() => {
     const doc = document.getElementById('invoice-view-doc');

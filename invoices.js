@@ -672,6 +672,16 @@ function updateBinSelection() {
     bar.style.display = 'none';
   }
 }
+function togglePaidStatus(id) {
+  const inv = DB.invoices.find(i => i.id === id);
+  if (!inv) return;
+  if (inv.status === 'paid') {
+    markAsUnpaid(id);
+  } else {
+    markAsPaid(id);
+  }
+}
+
 function markAsPaid(id) {
   const list = DB.invoices;
   const inv = list.find(i => i.id === id);
@@ -680,8 +690,39 @@ function markAsPaid(id) {
     inv.paidDate = new Date().toISOString().slice(0, 10);
     inv.updatedAt = new Date().toISOString();
     DB.invoices = list;
-    toast('Marked as paid');
+    toast(`Invoice ${inv.number} marked as paid`);
     viewInvoice(id);
+    if (typeof renderInvoicesList === 'function') renderInvoicesList();
+    if (typeof renderDashboard === 'function') renderDashboard();
+  }
+}
+
+function markAsUnpaid(id) {
+  const list = DB.invoices;
+  const inv = list.find(i => i.id === id);
+  if (inv) {
+    const revert = () => {
+      inv.status = 'pending';
+      delete inv.paidDate;
+      inv.updatedAt = new Date().toISOString();
+      DB.invoices = list;
+      toast(`Invoice ${inv.number} marked as unpaid (pending)`);
+      viewInvoice(id);
+      if (typeof renderInvoicesList === 'function') renderInvoicesList();
+      if (typeof renderDashboard === 'function') renderDashboard();
+    };
+
+    if (typeof customConfirm === 'function') {
+      customConfirm(
+        `Are you sure you want to mark Invoice ${inv.number} as UNPAID? This will return it to pending status.`,
+        'Undo Paid Status',
+        'Yes, Mark Unpaid',
+        false,
+        revert
+      );
+    } else {
+      if (confirm(`Mark Invoice ${inv.number} as UNPAID?`)) revert();
+    }
   }
 }
 
