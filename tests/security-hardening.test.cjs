@@ -125,3 +125,13 @@ test('clerk-api strips wholesale buy costs from list responses and enforces hour
   }));
   assert.equal(rateRes.status, 429);
 });
+
+test('signUp fails closed when public registration is disabled', async () => {
+  const ctx = vm.createContext({
+    window: {},
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    console: quiet
+  });
+  vm.runInContext(source('supabase-config.js') + '\nglobalThis.signUp = signUp;', ctx);
+  await assert.rejects(() => ctx.signUp('stranger@example.com', 'secret123'), /Public sign-up is disabled/i);
+});

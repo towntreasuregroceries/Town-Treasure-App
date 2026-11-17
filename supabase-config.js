@@ -22,16 +22,8 @@ function getUserId() {
   return currentUser?.id || localStorage.getItem('ttg_user_id') || null;
 }
 
-async function signUp(email, password) {
-  if (!supabaseClient) throw new Error('Supabase not available');
-  const { data, error } = await supabaseClient.auth.signUp({ email, password });
-  if (error) throw error;
-  currentUser = data.user;
-  if (currentUser) {
-    if (currentUser.id) localStorage.setItem('ttg_user_id', currentUser.id);
-    if (currentUser.email) localStorage.setItem('ttg_user_email', currentUser.email.toLowerCase().trim());
-  }
-  return data;
+async function signUp() {
+  throw new Error('Public sign-up is disabled. Ask the administrator for an invite.');
 }
 
 async function verifyOtp(email, token) {

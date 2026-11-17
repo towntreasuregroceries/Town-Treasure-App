@@ -725,13 +725,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         await enterApp(user);
       }
     }
-  } else if (localStorage.getItem('ttg_has_account')) {
-    // Had account before (formatted phone / new browser) — show password login
-    showAuthPanel('authPasswordLogin');
   } else {
-    // First time ever — show onboarding wizard
-    showAuthPanel('authWizard');
-    document.getElementById('wizStep1').style.display = 'block';
+    // Invite-only app: always show password login instead of public sign-up.
+    showAuthPanel('authPasswordLogin');
   }
 });
 
@@ -1022,8 +1018,7 @@ function showPasswordLogin() {
 }
 
 function showAuthWizard() {
-  showAuthPanel('authWizard');
-  wizardNext(1);
+  showAuthPanel('authPasswordLogin');
 }
 
 /* ══ Password Login (Returning User) ══ */

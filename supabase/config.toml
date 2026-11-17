@@ -1,2 +1,5 @@
+[auth]
+enable_signup = false
+
 [functions.clerk-api]
 verify_jwt = false
