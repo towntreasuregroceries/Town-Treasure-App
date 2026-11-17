@@ -58,6 +58,7 @@ function viewInvoice(id) {
       <div style="text-align: right; padding-right: 5px;">
         <h4 style="margin-bottom: 12px; color: #424242;">BILLED TO:</h4>
          <p style="font-weight: 700; font-size: 1rem; margin-bottom: 8px; color: #424242;">${escapeHtml(clientName)}</p>
+         ${rest.kraPin ? `<p style="font-size: 0.85rem; font-weight: 600; color: #313a43; margin-bottom: 4px;">KRA PIN: ${escapeHtml(rest.kraPin)}</p>` : ''}
          <p style="font-size: 0.85rem; margin-bottom: 4px;">${escapeHtml(rest.address || '')}</p>
          <p style="font-size: 0.85rem;">${escapeHtml(rest.phone || '')}</p>
       </div>
@@ -366,8 +367,20 @@ async function generateInvoicePDF(id) {
     doc.addImage(webIcon, 'PNG', 40, 263, 10, 10);
     doc.text("towntreasuregroceries.com", 55, 272);
 
-    if (rest.address) doc.text(rest.address, 555, 242, { align: "right" });
-    if (rest.phone) doc.text(rest.phone, 555, 257, { align: "right" });
+    let rightY = 242;
+    if (rest.kraPin) {
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(textColor);
+      doc.text(`KRA PIN: ${rest.kraPin}`, 555, rightY, { align: "right" });
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(lightText);
+      rightY += 14;
+    }
+    if (rest.address) {
+      doc.text(rest.address, 555, rightY, { align: "right" });
+      rightY += 14;
+    }
+    if (rest.phone) doc.text(rest.phone, 555, rightY, { align: "right" });
 
     // --- 5. Line Items ---
     const tableColumn = ["SL\nNO.", "ITEM DESCRIPTION", "UNIT PRICE", "QUANTITY", "TOTAL"];

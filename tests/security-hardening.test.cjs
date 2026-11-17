@@ -135,3 +135,18 @@ test('signUp fails closed when public registration is disabled', async () => {
   vm.runInContext(source('supabase-config.js') + '\nglobalThis.signUp = signUp;', ctx);
   await assert.rejects(() => ctx.signUp('stranger@example.com', 'secret123'), /Public sign-up is disabled/i);
 });
+
+test('KRA PIN helpers validate 11-character Kenyan PINs and reject malformed input', () => {
+  const ctx = vm.createContext({
+    console: quiet,
+    document: { querySelectorAll: () => [] }
+  });
+  vm.runInContext(source('nav.js') + '\nglobalThis.normalizeKraPin = normalizeKraPin; globalThis.isValidKraPin = isValidKraPin;', ctx);
+
+  assert.equal(ctx.normalizeKraPin(' p051234567x '), 'P051234567X');
+  assert.equal(ctx.isValidKraPin('P051234567X'), true);
+  assert.equal(ctx.isValidKraPin('A012345678Z'), true);
+  assert.equal(ctx.isValidKraPin('X051234567X'), false);
+  assert.equal(ctx.isValidKraPin('P0512345'), false);
+  assert.equal(ctx.isValidKraPin('P051234567<'), false);
+});

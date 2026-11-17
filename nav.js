@@ -30,9 +30,20 @@ document.querySelectorAll('.nav-item[data-page]').forEach(n => {
 });
 
 /* ══ Restaurants ══ */
+function normalizeKraPin(pin) {
+  return String(pin || '').trim().toUpperCase().replace(/\s+/g, '');
+}
+
+function isValidKraPin(pin) {
+  return /^[PA][0-9]{9}[A-Z]$/.test(normalizeKraPin(pin));
+}
+
 function openNewRestaurantModal() {
   document.getElementById('editRestaurantId').value = '';
-  ['restName','restAliases','restContact','restPhone','restAddress'].forEach(f => document.getElementById(f).value = '');
+  ['restName','restAliases','restKraPin','restContact','restPhone','restAddress'].forEach(f => {
+    const el = document.getElementById(f);
+    if (el) el.value = '';
+  });
   document.getElementById('restaurantModalTitle').textContent = 'Add Restaurant';
   openModal('restaurantModal');
 }
@@ -65,7 +76,11 @@ function saveRestaurant() {
     aliasSeen.add(key);
     return true;
   });
-  const r = { id: id || genId(), name: document.getElementById('restName').value.trim(), aliases, contact: document.getElementById('restContact').value.trim(), phone: document.getElementById('restPhone').value.trim(), address: document.getElementById('restAddress').value.trim(), updatedAt: new Date().toISOString() };
+  const kraPin = normalizeKraPin(document.getElementById('restKraPin')?.value || '');
+  if (kraPin && !isValidKraPin(kraPin)) {
+    return toast('Enter a valid 11-character KRA PIN (e.g. P051234567X) or leave blank.', 'error');
+  }
+  const r = { id: id || genId(), name: document.getElementById('restName').value.trim(), kraPin, aliases, contact: document.getElementById('restContact').value.trim(), phone: document.getElementById('restPhone').value.trim(), address: document.getElementById('restAddress').value.trim(), updatedAt: new Date().toISOString() };
   if (!r.name) return toast('Name is required', 'error');
   if (!normalizeRestaurantName(r.name)) return toast('Enter a specific restaurant name; generic words alone are not enough.', 'error');
   const canonicalKey = normalizeRestaurantName(r.name);
@@ -135,7 +150,8 @@ async function saveRestaurantRecord(r, isNew, duplicates = []) {
     aliasKeys.add(key);
     mergedAliases.push(alias);
   });
-  r = { ...r, aliases: mergedAliases };
+  const fallbackPin = normalizeKraPin(duplicates.find(x => x && x.kraPin)?.kraPin || '');
+  r = { ...r, kraPin: r.kraPin || fallbackPin, aliases: mergedAliases };
 
   if (duplicateIds.size) {
     const activeIds = new Set(DB.restaurants.map(restaurant => restaurant.id));
@@ -155,7 +171,7 @@ async function saveRestaurantRecord(r, isNew, duplicates = []) {
   DB.restaurants = list;
   closeModal('restaurantModal');
   document.getElementById('editRestaurantId').value = '';
-  ['restName','restAliases','restContact','restPhone','restAddress'].forEach(f => document.getElementById(f).value = '');
+  ['restName','restAliases','restKraPin','restContact','restPhone','restAddress'].forEach(f => { const el = document.getElementById(f); if (el) el.value = ''; });
   renderRestaurants();
   populateRestaurantDropdowns();
   if (isNew) {
@@ -177,6 +193,8 @@ function editRestaurant(id) {
   document.getElementById('editRestaurantId').value = r.id;
   document.getElementById('restName').value = r.name;
   document.getElementById('restAliases').value = Array.isArray(r.aliases) ? r.aliases.join('\n') : '';
+  const pinEl = document.getElementById('restKraPin');
+  if (pinEl) pinEl.value = r.kraPin || '';
   document.getElementById('restContact').value = r.contact || '';
   document.getElementById('restPhone').value = r.phone || '';
   document.getElementById('restAddress').value = r.address || '';
@@ -205,7 +223,7 @@ function renderRestaurants() {
   const body = document.getElementById('restaurantsBody');
   const rests = DB.restaurants;
   const invs = DB.invoices;
-  if (!rests.length) { body.innerHTML = '<tr><td colspan="6" class="empty-state"><h3>No restaurants yet</h3><p>Add your first restaurant client to get started.</p></td></tr>'; return; }
+  if (!rests.length) { body.innerHTML = '<tr><td colspan="7" class="empty-state"><h3>No restaurants yet</h3><p>Add your first restaurant client to get started.</p></td></tr>'; return; }
   body.innerHTML = rests.map(r => {
     const total = invs.filter(i => invoiceBelongsToRestaurant(i, r, rests)).reduce((s, i) => s + (i.totalSell || 0), 0);
     const aliases = (r.aliases || []).filter(Boolean);
@@ -214,7 +232,8 @@ function renderRestaurants() {
     const duplicateNote = duplicateNames.length
       ? `<br><small style="color:var(--warning)">Review possible duplicates: ${escapeHtml(duplicateNames.join(', '))}. Merge only if they are the same customer.</small>`
       : '';
-    return `<tr><td><strong>${escapeHtml(r.name)}</strong>${aliases.length ? `<br><small style="color:var(--text-muted)">Also known as: ${escapeHtml(aliases.join(', '))}</small>` : ''}${duplicateNote}</td><td>${escapeHtml(r.contact||'—')}</td><td>${escapeHtml(r.phone||'—')}</td><td>${escapeHtml(r.address||'—')}</td><td><strong>KES ${fmtMoney(total)}</strong></td><td><button class="btn btn-sm btn-secondary" onclick="editRestaurant('${r.id}')">Edit</button> <button class="btn btn-sm btn-primary" onclick="quickStatement('${r.id}')" style="display:inline-flex;align-items:center;gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2-2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>Statement</button> <button class="btn btn-sm btn-danger" onclick="deleteRestaurant('${r.id}')">Del</button></td></tr>`;
+    const pinCell = r.kraPin ? `<code style="font-size:0.82rem;background:var(--bg);padding:2px 6px;border-radius:4px;border:1px solid var(--border);">${escapeHtml(r.kraPin)}</code>` : '<span style="color:var(--text-3)">—</span>';
+    return `<tr><td><strong>${escapeHtml(r.name)}</strong>${aliases.length ? `<br><small style="color:var(--text-muted)">Also known as: ${escapeHtml(aliases.join(', '))}</small>` : ''}${duplicateNote}</td><td>${pinCell}</td><td>${escapeHtml(r.contact||'—')}</td><td>${escapeHtml(r.phone||'—')}</td><td>${escapeHtml(r.address||'—')}</td><td><strong>KES ${fmtMoney(total)}</strong></td><td><button class="btn btn-sm btn-secondary" onclick="editRestaurant('${r.id}')">Edit</button> <button class="btn btn-sm btn-primary" onclick="quickStatement('${r.id}')" style="display:inline-flex;align-items:center;gap:4px;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2-2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>Statement</button> <button class="btn btn-sm btn-danger" onclick="deleteRestaurant('${r.id}')">Del</button></td></tr>`;
   }).join('');
 }
 

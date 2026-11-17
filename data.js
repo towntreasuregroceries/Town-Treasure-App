@@ -1107,10 +1107,10 @@ function exportToExcel(type, startDate = null, endDate = null) {
     });
   } else if (type === 'restaurants') {
     filename = `TTG_Restaurants${suffix}.csv`;
-    csv = '"Name","Contact","Phone","Address","Total Sales (KES)"\n';
+    csv = '"Name","KRA PIN","Contact","Phone","Address","Total Sales (KES)"\n';
     DB.restaurants.forEach(r => {
       const total = DB.invoices.filter(i => invoiceBelongsToRestaurant(i, r) && i.status !== 'draft' && filterByDate(i.date)).reduce((s, i) => s + (i.totalSell || 0), 0);
-      csv += `"${(r.name || '').replace(/"/g, '""')}","${r.contact || ''}","${r.phone || ''}","${r.address || ''}","${total}"\n`;
+      csv += `"${(r.name || '').replace(/"/g, '""')}","${(r.kraPin || '').replace(/"/g, '""')}","${r.contact || ''}","${r.phone || ''}","${r.address || ''}","${total}"\n`;
     });
   } else if (type === 'all') {
     // Full financial summary
