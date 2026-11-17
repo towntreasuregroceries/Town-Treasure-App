@@ -13,5 +13,7 @@ assets/PC Equalizer Free*
 scratch/
 recovered_*.json
 
-# Private recovery exports must never be published with the app.
+# Private recovery exports and local tokens must never be published with the app.
 /backups/
+.env
+.env.*
