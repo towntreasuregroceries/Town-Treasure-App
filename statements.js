@@ -128,8 +128,8 @@ function buildStatementHTML(rest, month) {
   const txRows = transactions.map(tx => `
     <tr style="${tx.type === 'payment' ? 'background:#f0fdf4;' : ''}">
       <td style="font-size:0.85rem;">${fmtDate(tx.date)}</td>
-      <td>${tx.desc}</td>
-      <td style="font-size:0.82rem;color:#616161;">${tx.items}</td>
+      <td>${escapeHtml(tx.desc)}</td>
+      <td style="font-size:0.82rem;color:#616161;">${escapeHtml(tx.items)}</td>
       <td style="text-align:right;color:${tx.debit ? '#dc2626' : 'transparent'};">${tx.debit ? 'KES ' + fmtMoney(tx.debit) : ''}</td>
       <td style="text-align:right;color:${tx.credit ? '#2E7D32' : 'transparent'};">${tx.credit ? 'KES ' + fmtMoney(tx.credit) : ''}</td>
       <td style="text-align:right;font-weight:600;">KES ${fmtMoney(tx.balance)}</td>
@@ -229,7 +229,7 @@ function buildStatementHTML(rest, month) {
       <img src="assets/stamp.png" style="max-width: 140px; max-height: 50px; object-fit: contain; filter: grayscale(100%); mix-blend-mode: multiply; margin-bottom: 5px;">
       <div style="font-size:1.1rem; font-weight:900; color:#000000; letter-spacing:1px; margin-bottom:5px;">ACCOUNT VERIFIED</div>
       <div style="font-size:0.7rem; color:#dc2626; font-family:monospace;">DATE: ${fmtDate(new Date().toISOString().slice(0,10))}</div>
-      ${(DB.settings && DB.settings.signature) ? `<img src="${DB.settings.signature}" style="max-width:180px; height:auto; max-height:70px; margin-top:5px; display:inline-block; object-fit:contain; mix-blend-mode:multiply;">` : `<div style="height:40px; margin-top:5px; border-bottom:1px solid #000000; width:80%; margin:5px auto 0 auto; line-height:50px; font-size:0.6rem; color:#000000;">Sign Here</div>`}
+      ${(DB.settings && DB.settings.signature && sanitizeImageDataUrl(DB.settings.signature)) ? `<img src="${sanitizeImageDataUrl(DB.settings.signature)}" style="max-width:180px; height:auto; max-height:70px; margin-top:5px; display:inline-block; object-fit:contain; mix-blend-mode:multiply;">` : `<div style="height:40px; margin-top:5px; border-bottom:1px solid #000000; width:80%; margin:5px auto 0 auto; line-height:50px; font-size:0.6rem; color:#000000;">Sign Here</div>`}
     </div>
   </div>`;
 }

@@ -1148,7 +1148,7 @@ function buildPriceListPreview(pl) {
 
   let sectionsHtml = sections.map(sec => {
     const headerBanner = sec.header 
-      ? `<div style="background:linear-gradient(135deg,#61b146,#4a9e36);color:white;font-weight:700;font-size:15px;letter-spacing:0.5px;text-transform:uppercase;padding:10px 14px;margin-top:24px;border-radius:4px 4px 0 0;">${sec.header}</div>` 
+      ? `<div style="background:linear-gradient(135deg,#61b146,#4a9e36);color:white;font-weight:700;font-size:15px;letter-spacing:0.5px;text-transform:uppercase;padding:10px 14px;margin-top:24px;border-radius:4px 4px 0 0;">${escapeHtml(sec.header)}</div>` 
       : '';
     
     if (!sec.items.length) return headerBanner;
@@ -1157,8 +1157,8 @@ function buildPriceListPreview(pl) {
       let unitLabel = unitMap[(it.unit || 'kgs').toLowerCase()] || (it.unit.charAt(0).toUpperCase() + it.unit.slice(1));
       if (it.unit === 'pieces') unitLabel = 'Each';
       return `<tr>
-        <td style="padding:12px;border:1px solid #d1d5db;border-left:none;">${it.name}</td>
-        <td style="padding:12px;border:1px solid #d1d5db;color:#6b7280;">${unitLabel}</td>
+        <td style="padding:12px;border:1px solid #d1d5db;border-left:none;">${escapeHtml(it.name)}</td>
+        <td style="padding:12px;border:1px solid #d1d5db;color:#6b7280;">${escapeHtml(unitLabel)}</td>
         <td style="padding:12px;border:1px solid #d1d5db;border-right:none;text-align:right;font-weight:700;color:#2e7d32;">${fmtMoney(it.price)}</td>
       </tr>`;
     }).join('');
@@ -1189,7 +1189,7 @@ function buildPriceListPreview(pl) {
     <div style="position:relative;z-index:1;padding:40px 60px 240px;">
       <div style="text-align:center;margin-top:20px;">
         <img src="assets/61367-removebg-preview.png" style="height:110px;object-fit:contain;display:block;margin:0 auto;" alt="Logo">
-        <h2 style="font-size:18px;color:#313a43;margin:20px 0 5px;">${subtitle}</h2>
+        <h2 style="font-size:18px;color:#313a43;margin:20px 0 5px;">${escapeHtml(subtitle)}</h2>
         <p style="font-size:14px;color:#313a43;font-weight:600;margin:0;">Email: thetowntreasure25@gmail.com | TEL: 0708567696</p>
         <hr style="border:none;border-top:1px solid #e0e0e0;margin:20px 20px;">
         <h1 style="font-size:28px;color:#61b146;margin:30px 0;">Price List</h1>
@@ -1202,7 +1202,7 @@ function buildPriceListPreview(pl) {
         <img src="assets/stamp.png" style="max-width: 140px; max-height: 50px; object-fit: contain; filter: grayscale(100%); mix-blend-mode: multiply; margin-bottom: 5px;">
         <div style="font-size:1.1rem; font-weight:900; color:#000000; letter-spacing:1px; margin-bottom:5px;">APPROVED PRICING</div>
         <div style="font-size:0.7rem; color:#dc2626; font-family:monospace;">DATE: ${fmtDate(new Date().toISOString().slice(0,10))}</div>
-        ${(DB.settings && DB.settings.signature) ? `<img src="${DB.settings.signature}" style="max-width:180px; height:auto; max-height:70px; margin-top:5px; display:inline-block; object-fit:contain; mix-blend-mode:multiply;">` : `<div style="height:40px; margin-top:5px; border-bottom:1px solid #000000; width:80%; margin:5px auto 0 auto; line-height:50px; font-size:0.6rem; color:#000000;">Sign Here</div>`}
+        ${(DB.settings && DB.settings.signature && sanitizeImageDataUrl(DB.settings.signature)) ? `<img src="${sanitizeImageDataUrl(DB.settings.signature)}" style="max-width:180px; height:auto; max-height:70px; margin-top:5px; display:inline-block; object-fit:contain; mix-blend-mode:multiply;">` : `<div style="height:40px; margin-top:5px; border-bottom:1px solid #000000; width:80%; margin:5px auto 0 auto; line-height:50px; font-size:0.6rem; color:#000000;">Sign Here</div>`}
       </div>
     </div>
 

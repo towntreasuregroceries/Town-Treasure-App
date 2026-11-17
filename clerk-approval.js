@@ -97,12 +97,12 @@ async function renderClerkSubmissionsPage() {
           </span>`;
       }
 
-      const photoThumb = `<button type="button" class="btn btn-sm btn-secondary" onclick="openPhotoZoom('${item.id}')">Open receipt</button>`;
+      const photoThumb = `<button type="button" class="btn btn-sm btn-secondary" data-submission-id="${escapeHtml(item.id)}" onclick="openPhotoZoom(this.dataset.submissionId)">Open receipt</button>`;
 
       const actionBtns = `
         <div style="display:flex; align-items:center; gap:6px;">
           ${item.status === 'pending' ? `
-            <button class="btn btn-sm btn-primary" onclick="openClerkReviewModal('${item.id}')" style="font-weight:600; display:inline-flex; align-items:center; gap:5px;">
+            <button class="btn btn-sm btn-primary" data-submission-id="${escapeHtml(item.id)}" onclick="openClerkReviewModal(this.dataset.submissionId)" style="font-weight:600; display:inline-flex; align-items:center; gap:5px;">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
                 <circle cx="12" cy="12" r="3"></circle>
@@ -110,12 +110,12 @@ async function renderClerkSubmissionsPage() {
               Review &amp; Approve
             </button>
           ` : `
-            <button class="btn btn-sm btn-secondary" onclick="openClerkReviewModal('${item.id}')" style="display:inline-flex; align-items:center; gap:4px;">
+            <button class="btn btn-sm btn-secondary" data-submission-id="${escapeHtml(item.id)}" onclick="openClerkReviewModal(this.dataset.submissionId)" style="display:inline-flex; align-items:center; gap:4px;">
               View Details
             </button>
           `}
           ${item.status !== 'approved' ? `
-            <button class="btn btn-sm" onclick="confirmDeleteSubmission('${item.id}', '${escapeHtml(item.restaurant_name)}')" title="Delete this docket" style="background:#fff; border:1px solid #fecaca; color:#dc2626; padding:5px 8px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center;">
+            <button class="btn btn-sm" data-submission-id="${escapeHtml(item.id)}" data-restaurant-name="${escapeHtml(item.restaurant_name || '')}" onclick="confirmDeleteSubmission(this.dataset.submissionId, this.dataset.restaurantName)" title="Delete this docket" style="background:#fff; border:1px solid #fecaca; color:#dc2626; padding:5px 8px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center;">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="3 6 5 6 21 6"></polyline>
                 <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -141,7 +141,7 @@ async function renderClerkSubmissionsPage() {
 
   } catch (err) {
     console.error('Error rendering clerk submissions:', err);
-    tbody.innerHTML = `<tr><td colspan="8" class="empty-state" style="color:var(--danger)">Error loading submissions: ${err.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="8" class="empty-state" style="color:var(--danger)">Error loading submissions: ${escapeHtml(err.message)}</td></tr>`;
   }
 }
 
@@ -226,7 +226,7 @@ async function openClerkReviewModal(id) {
       photoContainer.innerHTML = `
         ${tabsHtml}
         <div style="position:relative; width:100%; display:flex; justify-content:center;">
-          <img id="crmZoomablePhoto" src="${photos[activeIdx]}" style="max-width:100%; max-height:480px; object-fit:contain; border-radius:8px; border:1px solid var(--border); box-shadow:0 2px 8px rgba(0,0,0,0.1); cursor:zoom-in;" onclick="togglePhotoZoom(this)" title="Click to zoom">
+          <img id="crmZoomablePhoto" src="${typeof sanitizeImageDataUrl === 'function' ? sanitizeImageDataUrl(photos[activeIdx]) : ''}" style="max-width:100%; max-height:480px; object-fit:contain; border-radius:8px; border:1px solid var(--border); box-shadow:0 2px 8px rgba(0,0,0,0.1); cursor:zoom-in;" onclick="togglePhotoZoom(this)" title="Click to zoom">
         </div>
         <div style="margin-top:8px; font-size:0.75rem; color:var(--text-3); text-align:center;">
           ${photos.length > 1 ? `Showing Page ${activeIdx + 1} of ${photos.length}. ` : ''}Click docket image to toggle zoom
@@ -373,8 +373,8 @@ async function openClerkReviewModal(id) {
               </div>
               <div style="display:flex; gap:8px; align-items:center;">
                 ${matched.id ? `
-                  <button type="button" class="btn btn-sm" onclick="viewInvoice('${matched.id}')" style="background:#dc2626; color:#fff; border:none; font-size:0.8rem; padding:6px 12px; font-weight:700; box-shadow:0 2px 6px rgba(220,38,38,0.3);">
-                    Inspect Vault Invoice ${matchedNum}
+                  <button type="button" class="btn btn-sm" data-invoice-id="${escapeHtml(matched.id)}" onclick="viewInvoice(this.dataset.invoiceId)" style="background:#dc2626; color:#fff; border:none; font-size:0.8rem; padding:6px 12px; font-weight:700; box-shadow:0 2px 6px rgba(220,38,38,0.3);">
+                    Inspect Vault Invoice ${escapeHtml(matchedNum)}
                   </button>
                 ` : ''}
               </div>

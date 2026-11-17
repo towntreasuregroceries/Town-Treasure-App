@@ -36,7 +36,7 @@ function viewInvoice(id) {
        <table class="invoice-meta-grid" style="border-collapse: collapse; background: transparent; font-size: 0.85rem;">
           <tr>
             <td class="meta-label" style="font-weight: 700; color: #424242; text-align: right; padding: 0 15px 5px 0; border: none;">Receipt No:</td>
-            <td class="meta-value" style="color: #616161; text-align: right; padding: 0 0 5px 0; border: none;">${inv.number}</td>
+            <td class="meta-value" style="color: #616161; text-align: right; padding: 0 0 5px 0; border: none;">${escapeHtml(inv.number)}</td>
           </tr>
           <tr>
             <td class="meta-label" style="font-weight: 700; color: #424242; text-align: right; padding: 0 15px 0 0; border: none;">Order Date:</td>
@@ -118,7 +118,7 @@ function viewInvoice(id) {
         <img src="assets/stamp.png" style="max-width: 140px; max-height: 50px; object-fit: contain; filter: grayscale(100%); mix-blend-mode: multiply; margin-bottom: 5px;">
         <div style="font-size:1.1rem; font-weight:900; color:#000000; letter-spacing:1px; margin-bottom:5px;">${inv.status === 'paid' ? 'PAID & PROCESSED' : 'AUTHORIZED'}</div>
         <div style="font-size:0.7rem; color:#dc2626; font-family:monospace;">DATE: ${fmtDate(new Date().toISOString().slice(0,10))}</div>
-        ${(DB.settings && DB.settings.signature) ? `<img src="${DB.settings.signature}" style="max-width:180px; height:auto; max-height:70px; margin-top:5px; display:inline-block; object-fit:contain; mix-blend-mode:multiply;">` : `<div style="height:40px; margin-top:5px; border-bottom:1px solid #000000; width:80%; margin:5px auto 0 auto; line-height:50px; font-size:0.6rem; color:#000000;">Sign Here</div>`}
+        ${(DB.settings && DB.settings.signature && sanitizeImageDataUrl(DB.settings.signature)) ? `<img src="${sanitizeImageDataUrl(DB.settings.signature)}" style="max-width:180px; height:auto; max-height:70px; margin-top:5px; display:inline-block; object-fit:contain; mix-blend-mode:multiply;">` : `<div style="height:40px; margin-top:5px; border-bottom:1px solid #000000; width:80%; margin:5px auto 0 auto; line-height:50px; font-size:0.6rem; color:#000000;">Sign Here</div>`}
       </div>
       
     </div>

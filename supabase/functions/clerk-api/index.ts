@@ -170,11 +170,23 @@ Deno.serve(async request => {
     const invite = await resolveInvite(body.invite_token);
     if (!invite) return reply(401, { error: 'This clerk link is invalid or expired. Ask the account owner for a new link.' });
 
+    const sanitizeForClerk = (row: Record<string, unknown>) => {
+      const { total_buy: _tb, ...rest } = row;
+      if (Array.isArray(rest.items_json)) {
+        rest.items_json = rest.items_json.map(item => {
+          if (!item || typeof item !== 'object') return item;
+          const { buyPrice: _bp, buy: _b, ...publicItem } = item as Record<string, unknown>;
+          return publicItem;
+        });
+      }
+      return rest;
+    };
+
     if (body.action === 'list') {
-      const summaryColumns = 'id,owner_user_id,submitted_by_invite_id,submission_key,clerk_name,restaurant_name,invoice_date,items_json,delivery_cost,other_cost,total_sell,total_buy,notes,status,rejection_reason,target_user_id,target_user_email,target_user_name,created_at,updated_at';
+      const summaryColumns = 'id,owner_user_id,submitted_by_invite_id,submission_key,clerk_name,restaurant_name,invoice_date,items_json,delivery_cost,other_cost,total_sell,notes,status,rejection_reason,target_user_id,target_user_email,target_user_name,created_at,updated_at';
+      const detailColumns = summaryColumns + ',receipt_photo,receipt_photos';
       let query = admin.from('staged_invoices')
-        // Preserve the original response for old clients during rollout.
-        .select(body.include_photos === false ? summaryColumns : '*')
+        .select(body.include_photos === false ? summaryColumns : detailColumns)
         .eq('owner_user_id', invite.owner_user_id)
         .eq('submitted_by_invite_id', invite.id);
       if (body.submission_id !== undefined) {
@@ -186,7 +198,7 @@ Deno.serve(async request => {
       if (error) throw error;
       return reply(200, {
         owner: { name: invite.owner_name, email: invite.owner_email },
-        submissions: data ?? [],
+        submissions: (data ?? []).slice(0, 100).map(row => sanitizeForClerk(row as Record<string, unknown>)),
       });
     }
 
@@ -223,7 +235,18 @@ Deno.serve(async request => {
       .eq('submission_key', submissionKey)
       .maybeSingle();
     if (priorError) throw priorError;
-    if (prior) return reply(200, { submission: prior, replayed: true });
+    if (prior) return reply(200, { submission: sanitizeForClerk(prior as Record<string, unknown>), replayed: true });
+
+    // Per-invite hourly burst cap to protect free-tier storage and egress quotas.
+    const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { count: recentCount, error: countError } = await admin.from('staged_invoices')
+      .select('id', { count: 'exact', head: true })
+      .eq('owner_user_id', invite.owner_user_id)
+      .eq('submitted_by_invite_id', invite.id)
+      .gte('updated_at', oneHourAgo);
+    if (!countError && typeof recentCount === 'number' && recentCount >= 30) {
+      return reply(429, { error: 'Hourly submission limit reached for this clerk link. Try again later.' });
+    }
 
     const requestedId = cleanText(body.docket.id, 160);
     const baseRecord = {
@@ -260,7 +283,7 @@ Deno.serve(async request => {
         .maybeSingle();
       if (error) throw error;
       if (!data) return reply(409, { error: 'This docket has already changed. Refresh the clerk history and try again.' });
-      return reply(200, { submission: data, replayed: false });
+      return reply(200, { submission: sanitizeForClerk(data as Record<string, unknown>), replayed: false });
     }
 
     const record = {
@@ -275,10 +298,10 @@ Deno.serve(async request => {
         .eq('submitted_by_invite_id', invite.id)
         .eq('submission_key', submissionKey)
         .maybeSingle();
-      if (replay) return reply(200, { submission: replay, replayed: true });
+      if (replay) return reply(200, { submission: sanitizeForClerk(replay as Record<string, unknown>), replayed: true });
     }
     if (error) throw error;
-    return reply(200, { submission: data, replayed: false });
+    return reply(200, { submission: sanitizeForClerk(data as Record<string, unknown>), replayed: false });
   } catch (error) {
     console.error('[clerk-api]', error);
     return reply(400, { error: error instanceof Error ? error.message : 'Clerk request failed.' });

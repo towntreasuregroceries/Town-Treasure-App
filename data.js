@@ -1004,13 +1004,24 @@ function fmtDate(value) {
   return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${date.getFullYear()}`;
 }
 
-/** Sanitize user input before inserting into innerHTML to prevent XSS */
+/** Sanitize user input before inserting into HTML/attribute contexts to prevent XSS */
 function escapeHtml(str) {
   if (str === null || str === undefined) return '';
-  const s = String(str);
-  const div = document.createElement('div');
-  div.textContent = s;
-  return div.innerHTML;
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+/** Allow only validated image data URLs in img[src] */
+function sanitizeImageDataUrl(url) {
+  if (typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (/^data:image\/(?:jpe?g|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/i.test(trimmed)) return trimmed;
+  if (/^data:image\/svg\+xml;charset=utf-8,[A-Za-z0-9%_.!~*'()-]+$/i.test(trimmed)) return trimmed;
+  return '';
 }
 
 /**

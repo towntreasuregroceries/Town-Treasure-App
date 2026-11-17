@@ -382,7 +382,7 @@ function renderPersonalTab() {
       return `<tr>
         <td>${fmtDate(e.date)}</td>
         <td>${escapeHtml(e.desc)}</td>
-        <td><span class="badge badge-info">${catLabel}</span></td>
+        <td><span class="badge badge-info">${escapeHtml(catLabel)}</span></td>
         <td>KES ${fmtMoney(e.amount)}</td>
         <td><button class="btn btn-sm btn-danger" onclick="deleteExpense('${e.id}')">Del</button></td>
       </tr>`;
@@ -557,7 +557,7 @@ function viewRepayments(loanId) {
     <tr>
       <td>${fmtDate(r.date)}</td>
       <td style="color:var(--green-700)">KES ${fmtMoney(r.amount)}</td>
-      <td>${r.desc || '—'}</td>
+      <td>${escapeHtml(r.desc || '—')}</td>
       <td><button class="btn btn-sm btn-danger" onclick="deleteRepayment('${loanId}', '${r.id}')">Del</button></td>
     </tr>
   `).join('');

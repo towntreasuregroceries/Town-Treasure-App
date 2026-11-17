@@ -139,6 +139,11 @@ AS $function$
   SELECT ttg_private.save_encrypted_vault_cas_internal($1, $2, $3);
 $function$;
 
+REVOKE ALL PRIVILEGES ON FUNCTION ttg_private.save_encrypted_vault_cas_internal(UUID, BIGINT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION ttg_private.save_encrypted_vault_cas_internal(UUID, BIGINT, TEXT) TO authenticated, service_role;
+REVOKE ALL PRIVILEGES ON FUNCTION public.save_encrypted_vault_cas(UUID, BIGINT, TEXT) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.save_encrypted_vault_cas(UUID, BIGINT, TEXT) TO authenticated, service_role;
+
 -- 3. Clerk Invites
 CREATE TABLE IF NOT EXISTS public.clerk_invites (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -180,6 +185,9 @@ CREATE TABLE IF NOT EXISTS public.staged_invoices (
   submission_key TEXT
 );
 ALTER TABLE public.staged_invoices ENABLE ROW LEVEL SECURITY;
+REVOKE ALL PRIVILEGES ON TABLE public.staged_invoices FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.staged_invoices TO authenticated;
+GRANT ALL PRIVILEGES ON TABLE public.staged_invoices TO service_role;
 
 CREATE INDEX IF NOT EXISTS idx_staged_invoices_status ON public.staged_invoices(status);
 CREATE INDEX IF NOT EXISTS idx_staged_invoices_created ON public.staged_invoices(created_at DESC);

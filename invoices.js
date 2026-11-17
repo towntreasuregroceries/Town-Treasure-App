@@ -54,6 +54,7 @@ async function saveInvoice(bypassDuplicateCheck = false) {
   if (!restId) return toast('Select a restaurant', 'error');
   const items = [];
   let valid = true;
+  let validationError = '';
   document.querySelectorAll('#lineItemsBody tr').forEach(row => {
     const desc = row.querySelector('.item-desc').value.trim();
     const qty = parseFloat(row.querySelector('.item-qty').value) || 0;
@@ -61,8 +62,11 @@ async function saveInvoice(bypassDuplicateCheck = false) {
     const buy = parseFloat(row.querySelector('.item-buy').value) || 0;
     const sell = parseFloat(row.querySelector('.item-sell').value) || 0;
     if (!desc) { valid = false; return; }
+    if (!Number.isFinite(qty) || qty <= 0) { validationError = 'Item quantities must be greater than zero.'; return; }
+    if (!Number.isFinite(buy) || buy < 0 || !Number.isFinite(sell) || sell < 0) { validationError = 'Item prices cannot be negative.'; return; }
     items.push({ desc, qty, unit, buyPrice: buy, sellPrice: sell, total: qty * sell });
   });
+  if (validationError) return toast(validationError, 'error');
   if (!valid || !items.length) return toast('Fill in all item descriptions', 'error');
   const totalSell = items.reduce((s, i) => s + i.total, 0);
   const totalBuy = items.reduce((s, i) => s + i.qty * i.buyPrice, 0);
@@ -219,6 +223,7 @@ async function saveInvoice(bypassDuplicateCheck = false) {
 
     const deliveryCost = parseFloat(document.getElementById('invDeliveryCost').value) || 0;
     const otherCost = parseFloat(document.getElementById('invOtherCost').value) || 0;
+    if (deliveryCost < 0 || otherCost < 0) return toast('Delivery and other costs cannot be negative.', 'error');
     
     const inv = {
       id: invId, number: invNumber || generateSecureInvoiceNumber(invDateVal), restaurantId: restId,
@@ -372,7 +377,7 @@ function loadInvoiceDraft(id) {
   if (draft.items && draft.items.length > 0) {
     draft.items.forEach(item => {
       const row = document.createElement('tr');
-      row.innerHTML = `<td><input type="text" placeholder="e.g. Tomatoes" class="item-desc" value="${item.desc || ''}"></td><td><input type="number" min="0" step="any" class="item-qty" value="${item.qty || 1}"></td><td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs" ${item.unit === 'kgs' || !item.unit ? 'selected' : ''}>Kgs</option><option value="litres" ${item.unit === 'litres' ? 'selected' : ''}>Litres</option><option value="pieces" ${item.unit === 'pieces' ? 'selected' : ''}>Pieces</option><option value="crates" ${item.unit === 'crates' ? 'selected' : ''}>Crates</option><option value="bags" ${item.unit === 'bags' ? 'selected' : ''}>Bags</option><option value="trays" ${item.unit === 'trays' ? 'selected' : ''}>Trays</option><option value="bundles" ${item.unit === 'bundles' ? 'selected' : ''}>Bundles</option><option value="dozen" ${item.unit === 'dozen' ? 'selected' : ''}>Dozen</option><option value="packets" ${item.unit === 'packets' ? 'selected' : ''}>Packets</option><option value="banch" ${item.unit === 'banch' ? 'selected' : ''}>Banch</option></select></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy" value="${item.buyPrice !== undefined ? item.buyPrice : (item.buy || '')}"></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell" value="${item.sellPrice !== undefined ? item.sellPrice : (item.sell || '')}"></td><td class="item-total" style="font-weight:600">0.00</td><td><button type="button" class="btn-remove-row" onclick="removeLineItem(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>`;
+      row.innerHTML = `<td><input type="text" placeholder="e.g. Tomatoes" class="item-desc" value="${escapeHtml(item.desc || '')}"></td><td><input type="number" min="0" step="any" class="item-qty" value="${item.qty || 1}"></td><td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs" ${item.unit === 'kgs' || !item.unit ? 'selected' : ''}>Kgs</option><option value="litres" ${item.unit === 'litres' ? 'selected' : ''}>Litres</option><option value="pieces" ${item.unit === 'pieces' ? 'selected' : ''}>Pieces</option><option value="crates" ${item.unit === 'crates' ? 'selected' : ''}>Crates</option><option value="bags" ${item.unit === 'bags' ? 'selected' : ''}>Bags</option><option value="trays" ${item.unit === 'trays' ? 'selected' : ''}>Trays</option><option value="bundles" ${item.unit === 'bundles' ? 'selected' : ''}>Bundles</option><option value="dozen" ${item.unit === 'dozen' ? 'selected' : ''}>Dozen</option><option value="packets" ${item.unit === 'packets' ? 'selected' : ''}>Packets</option><option value="banch" ${item.unit === 'banch' ? 'selected' : ''}>Banch</option></select></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy" value="${item.buyPrice !== undefined ? item.buyPrice : (item.buy || '')}"></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell" value="${item.sellPrice !== undefined ? item.sellPrice : (item.sell || '')}"></td><td class="item-total" style="font-weight:600">0.00</td><td><button type="button" class="btn-remove-row" onclick="removeLineItem(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>`;
       body.appendChild(row);
       attachLineListeners(row);
     });
@@ -396,11 +401,11 @@ function checkInvoiceDraft() {
       const itemsCount = d.items ? d.items.length : 0;
       return `<tr>
         <td>${dateStr}</td>
-        <td>${d.restaurantName || 'Unknown'}</td>
+        <td>${escapeHtml(d.restaurantName || 'Unknown')}</td>
         <td>${itemsCount} item(s)</td>
         <td>
-          <button class="btn btn-sm btn-primary" onclick="loadInvoiceDraft('${d.id}')">Resume</button>
-          <button class="btn btn-sm btn-danger" onclick="deleteDraft('${d.id}')">Del</button>
+          <button class="btn btn-sm btn-primary" data-id="${escapeHtml(d.id)}" onclick="loadInvoiceDraft(this.dataset.id)">Resume</button>
+          <button class="btn btn-sm btn-danger" data-id="${escapeHtml(d.id)}" onclick="deleteDraft(this.dataset.id)">Del</button>
         </td>
       </tr>`;
     }).join('');
@@ -542,13 +547,13 @@ function renderBin() {
       return;
     }
     body.innerHTML = items.map(i => `<tr>
-      <td><input type="checkbox" class="bin-checkbox" value="${i.id}" onchange="updateBinSelection()"></td>
-      <td><strong>${i.number}</strong></td>
-      <td>${i.restaurantName || 'Unknown'}</td>
+      <td><input type="checkbox" class="bin-checkbox" value="${escapeHtml(i.id)}" onchange="updateBinSelection()"></td>
+      <td><strong>${escapeHtml(i.number)}</strong></td>
+      <td>${escapeHtml(i.restaurantName || 'Unknown')}</td>
       <td>${fmtDate(i.date)}</td>
       <td>KES ${fmtMoney(i.totalSell)}</td>
       <td><span style="color:var(--text-2);font-size:.85rem;">${i.deletedAt ? fmtDate(i.deletedAt.slice(0, 10)) : '—'}</span></td>
-      <td><button class="btn btn-sm btn-primary" onclick="restoreInvoice('${i.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Restore</button></td>
+      <td><button class="btn btn-sm btn-primary" data-id="${escapeHtml(i.id)}" onclick="restoreInvoice(this.dataset.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Restore</button></td>
     </tr>`).join('');
   } 
   else if (binTab === 'staff') {
@@ -560,12 +565,12 @@ function renderBin() {
       return;
     }
     body.innerHTML = items.map(s => `<tr>
-      <td><input type="checkbox" class="bin-checkbox" value="${s.id}" onchange="updateBinSelection()"></td>
-      <td><strong>${s.name}</strong></td>
-      <td>${s.role || '—'}</td>
+      <td><input type="checkbox" class="bin-checkbox" value="${escapeHtml(s.id)}" onchange="updateBinSelection()"></td>
+      <td><strong>${escapeHtml(s.name)}</strong></td>
+      <td>${escapeHtml(s.role || '—')}</td>
       <td>KES ${fmtMoney(s.salary)}</td>
       <td><span style="color:var(--text-2);font-size:.85rem;">${s.deletedAt ? fmtDate(s.deletedAt.slice(0, 10)) : '—'}</span></td>
-      <td><button class="btn btn-sm btn-primary" onclick="restoreStaff('${s.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Restore</button></td>
+      <td><button class="btn btn-sm btn-primary" data-id="${escapeHtml(s.id)}" onclick="restoreStaff(this.dataset.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Restore</button></td>
     </tr>`).join('');
   }
   else if (binTab === 'pricelists') {
@@ -577,11 +582,11 @@ function renderBin() {
       return;
     }
     body.innerHTML = items.map(p => `<tr>
-      <td><input type="checkbox" class="bin-checkbox" value="${p.id}" onchange="updateBinSelection()"></td>
-      <td><strong>${p.name}</strong></td>
+      <td><input type="checkbox" class="bin-checkbox" value="${escapeHtml(p.id)}" onchange="updateBinSelection()"></td>
+      <td><strong>${escapeHtml(p.name)}</strong></td>
       <td>${p.items ? p.items.length : 0} items</td>
       <td><span style="color:var(--text-2);font-size:.85rem;">${p.deletedAt ? fmtDate(p.deletedAt.slice(0, 10)) : '—'}</span></td>
-      <td><button class="btn btn-sm btn-primary" onclick="restorePriceList('${p.id}')"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Restore</button></td>
+      <td><button class="btn btn-sm btn-primary" data-id="${escapeHtml(p.id)}" onclick="restorePriceList(this.dataset.id)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg> Restore</button></td>
     </tr>`).join('');
   }
 }
@@ -747,7 +752,7 @@ function editInvoice(id) {
   if (inv.items && inv.items.length > 0) {
     inv.items.forEach(item => {
       const row = document.createElement('tr');
-      row.innerHTML = `<td><input type="text" placeholder="e.g. Tomatoes" class="item-desc" value="${item.desc || ''}"></td><td><input type="number" min="0" step="any" class="item-qty" value="${item.qty || 1}"></td><td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs" ${item.unit === 'kgs' || !item.unit ? 'selected' : ''}>Kgs</option><option value="litres" ${item.unit === 'litres' ? 'selected' : ''}>Litres</option><option value="pieces" ${item.unit === 'pieces' ? 'selected' : ''}>Pieces</option><option value="crates" ${item.unit === 'crates' ? 'selected' : ''}>Crates</option><option value="bags" ${item.unit === 'bags' ? 'selected' : ''}>Bags</option><option value="trays" ${item.unit === 'trays' ? 'selected' : ''}>Trays</option><option value="bundles" ${item.unit === 'bundles' ? 'selected' : ''}>Bundles</option><option value="dozen" ${item.unit === 'dozen' ? 'selected' : ''}>Dozen</option><option value="packets" ${item.unit === 'packets' ? 'selected' : ''}>Packets</option><option value="banch" ${item.unit === 'banch' ? 'selected' : ''}>Banch</option></select></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy" value="${item.buyPrice !== undefined ? item.buyPrice : (item.buy || '')}"></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell" value="${item.sellPrice !== undefined ? item.sellPrice : (item.sell || '')}"></td><td class="item-total" style="font-weight:600">0.00</td><td><button type="button" class="btn-remove-row" onclick="removeLineItem(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>`;
+      row.innerHTML = `<td><input type="text" placeholder="e.g. Tomatoes" class="item-desc" value="${escapeHtml(item.desc || '')}"></td><td><input type="number" min="0" step="any" class="item-qty" value="${item.qty || 1}"></td><td><select class="item-unit form-control" style="padding:6px 4px;font-size:0.8rem;"><option value="kgs" ${item.unit === 'kgs' || !item.unit ? 'selected' : ''}>Kgs</option><option value="litres" ${item.unit === 'litres' ? 'selected' : ''}>Litres</option><option value="pieces" ${item.unit === 'pieces' ? 'selected' : ''}>Pieces</option><option value="crates" ${item.unit === 'crates' ? 'selected' : ''}>Crates</option><option value="bags" ${item.unit === 'bags' ? 'selected' : ''}>Bags</option><option value="trays" ${item.unit === 'trays' ? 'selected' : ''}>Trays</option><option value="bundles" ${item.unit === 'bundles' ? 'selected' : ''}>Bundles</option><option value="dozen" ${item.unit === 'dozen' ? 'selected' : ''}>Dozen</option><option value="packets" ${item.unit === 'packets' ? 'selected' : ''}>Packets</option><option value="banch" ${item.unit === 'banch' ? 'selected' : ''}>Banch</option></select></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-buy" value="${item.buyPrice !== undefined ? item.buyPrice : (item.buy || '')}"></td><td><input type="number" min="0" step="any" placeholder="0.00" class="item-sell" value="${item.sellPrice !== undefined ? item.sellPrice : (item.sell || '')}"></td><td class="item-total" style="font-weight:600">0.00</td><td><button type="button" class="btn-remove-row" onclick="removeLineItem(this)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></td>`;
       body.appendChild(row);
       attachLineListeners(row);
     });

@@ -66,7 +66,7 @@ function refreshDashboard() {
   if (!recent.length) { tbody.innerHTML = '<tr><td colspan="6" class="empty-state"><h3>No invoices yet this month</h3><p>Create an invoice to see data here.</p></td></tr>'; return; }
   tbody.innerHTML = recent.map(i => {
     const bc = i.status === 'paid' ? 'badge-success' : i.status === 'overdue' ? 'badge-danger' : 'badge-warning';
-    return `<tr style="cursor:pointer" onclick="viewInvoice('${i.id}')"><td><strong>${i.number}</strong></td><td>${escapeHtml(invoiceRestaurantDisplayName(i))}</td><td>${fmtDate(i.date)}</td><td>KES ${fmtMoney(i.totalSell)}</td><td style="color:var(--green-700)">KES ${fmtMoney(i.profit)}</td><td><span class="badge ${bc}">${i.status}</span></td></tr>`;
+    return `<tr style="cursor:pointer" data-id="${escapeHtml(i.id)}" onclick="viewInvoice(this.dataset.id)"><td><strong>${escapeHtml(i.number)}</strong></td><td>${escapeHtml(invoiceRestaurantDisplayName(i))}</td><td>${fmtDate(i.date)}</td><td>KES ${fmtMoney(i.totalSell)}</td><td style="color:var(--green-700)">KES ${fmtMoney(i.profit)}</td><td><span class="badge ${bc}">${escapeHtml(i.status)}</span></td></tr>`;
   }).join('');
 }
 
@@ -92,7 +92,7 @@ function toggleReportRestaurant() {
     select.innerHTML = '<option value="">Select a product…</option>' + 
       Object.entries(productMap)
         .sort((a, b) => a[1].name.localeCompare(b[1].name))
-        .map(([key, p]) => `<option value="${key}">${p.name} — ${p.qty} ${p.unit} sold (${p.count}x)</option>`)
+        .map(([key, p]) => `<option value="${escapeHtml(key)}">${escapeHtml(p.name)} — ${p.qty} ${escapeHtml(p.unit)} sold (${p.count}x)</option>`)
         .join('');
   }
 }
@@ -237,7 +237,7 @@ function generateReport() {
          ${matches.length > 0 ? `
          <table class="receipt-table">
             <thead><tr><th>Invoice</th><th>Restaurant</th><th>Date</th><th style="text-align: right;">Qty</th><th>Unit</th><th style="text-align: right;">Sell Price</th><th style="text-align: right;">Total</th><th style="text-align: right;">Profit</th></tr></thead>
-            <tbody>${matches.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(m=>`<tr><td>${m.invoiceNum}</td><td>${m.restaurant}</td><td>${fmtDate(m.date)}</td><td style="text-align: right;">${m.qty}</td><td style="text-transform: capitalize;">${escapeHtml(m.unit)}</td><td style="text-align: right;">KES ${fmtMoney(m.sellPrice)}</td><td style="text-align: right;">KES ${fmtMoney(m.total)}</td><td style="text-align: right; color: var(--green-700);">KES ${fmtMoney(m.profit)}</td></tr>`).join('')}</tbody>
+            <tbody>${matches.sort((a,b)=>appDateKey(a.date).localeCompare(appDateKey(b.date))).map(m=>`<tr><td>${escapeHtml(m.invoiceNum)}</td><td>${escapeHtml(m.restaurant)}</td><td>${fmtDate(m.date)}</td><td style="text-align: right;">${m.qty}</td><td style="text-transform: capitalize;">${escapeHtml(m.unit)}</td><td style="text-align: right;">KES ${fmtMoney(m.sellPrice)}</td><td style="text-align: right;">KES ${fmtMoney(m.total)}</td><td style="text-align: right; color: var(--green-700);">KES ${fmtMoney(m.profit)}</td></tr>`).join('')}</tbody>
          </table>
          ` : '<p style="padding: 20px; color: #616161;">No transactions found for this product in the selected period.</p>'}
       </div>

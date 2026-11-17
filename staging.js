@@ -74,25 +74,26 @@ const StagingDB = {
 
   /** Helper to generate realistic visual docket SVG receipt for demo/offline verification */
   generateDocketSVG(docketNum, client, date, items, clerk) {
+    const esc = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
     const rows = (items || []).slice(0, 8).map((it, idx) => `
-      <text x="32" y="${175 + idx * 26}" font-family="monospace" font-size="12" fill="#1f2937">${(idx + 1).toString().padStart(2, '0')}. ${it.desc}</text>
-      <text x="290" y="${175 + idx * 26}" font-family="monospace" font-size="12" fill="#1f2937" text-anchor="end">${it.qty} ${it.unit}</text>
-      <text x="390" y="${175 + idx * 26}" font-family="monospace" font-size="12" fill="#1f2937" text-anchor="end">KES ${it.sellPrice || it.price || 0}</text>
-      <text x="510" y="${175 + idx * 26}" font-family="monospace" font-weight="bold" font-size="12" fill="#111827" text-anchor="end">KES ${(it.qty * (it.sellPrice || it.price || 0)).toLocaleString()}</text>
+      <text x="32" y="${175 + idx * 26}" font-family="monospace" font-size="12" fill="#1f2937">${(idx + 1).toString().padStart(2, '0')}. ${esc(it.desc)}</text>
+      <text x="290" y="${175 + idx * 26}" font-family="monospace" font-size="12" fill="#1f2937" text-anchor="end">${Number(it.qty) || 0} ${esc(it.unit)}</text>
+      <text x="390" y="${175 + idx * 26}" font-family="monospace" font-size="12" fill="#1f2937" text-anchor="end">KES ${Number(it.sellPrice || it.price || 0)}</text>
+      <text x="510" y="${175 + idx * 26}" font-family="monospace" font-weight="bold" font-size="12" fill="#111827" text-anchor="end">KES ${((Number(it.qty) || 0) * (Number(it.sellPrice || it.price || 0))).toLocaleString()}</text>
     `).join('');
 
-    const subtotal = (items || []).reduce((s, i) => s + (i.qty * (i.sellPrice || i.price || 0)), 0);
+    const subtotal = (items || []).reduce((s, i) => s + ((Number(i.qty) || 0) * (Number(i.sellPrice || i.price || 0))), 0);
 
     const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="550" height="480" viewBox="0 0 550 480">
       <rect width="100%" height="100%" fill="#fffdfa" stroke="#d1d5db" stroke-width="2" rx="8"/>
       <rect x="20" y="20" width="510" height="74" fill="#f0fdf4" stroke="#86efac" rx="6"/>
       <text x="35" y="48" font-family="sans-serif" font-weight="bold" font-size="16" fill="#166534">TOWN TREASURE GROCERIES</text>
       <text x="35" y="68" font-family="sans-serif" font-size="11" fill="#15803d">WHOLESALE PRODUCE &amp; FRESH DELIVERY NOTE</text>
-      <text x="515" y="48" font-family="monospace" font-size="12" fill="#374151" text-anchor="end">DOCKET: ${docketNum}</text>
-      <text x="515" y="68" font-family="monospace" font-size="11" fill="#4b5563" text-anchor="end">DATE: ${date}</text>
+      <text x="515" y="48" font-family="monospace" font-size="12" fill="#374151" text-anchor="end">DOCKET: ${esc(docketNum)}</text>
+      <text x="515" y="68" font-family="monospace" font-size="11" fill="#4b5563" text-anchor="end">DATE: ${esc(date)}</text>
       
-      <text x="30" y="118" font-family="sans-serif" font-size="12" fill="#4b5563">Client / Destination: <tspan font-weight="bold" fill="#111827">${client}</tspan></text>
-      <text x="30" y="136" font-family="sans-serif" font-size="11" fill="#6b7280">Intake Clerk: ${clerk} | Dispatch Inspection Verified</text>
+      <text x="30" y="118" font-family="sans-serif" font-size="12" fill="#4b5563">Client / Destination: <tspan font-weight="bold" fill="#111827">${esc(client)}</tspan></text>
+      <text x="30" y="136" font-family="sans-serif" font-size="11" fill="#6b7280">Intake Clerk: ${esc(clerk)} | Dispatch Inspection Verified</text>
       
       <line x1="20" y1="148" x2="530" y2="148" stroke="#9ca3af" stroke-dasharray="4"/>
       
