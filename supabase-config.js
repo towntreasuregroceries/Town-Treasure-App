@@ -78,3 +78,33 @@ async function signOut() {
    'ttg_borrowings', 'ttg_settings', 'ttg_last_page', 'ttg_staged_invoices'].forEach(k => localStorage.removeItem(k));
   return true;
 }
+
+/* ══ Basic UI Inspection Deterrent (Right-Click & DevTools Shortcuts) ══ */
+function isBlockedInspectionShortcut(event) {
+  if (!event) return false;
+  const key = String(event.key || '').toUpperCase();
+  if (key === 'F12' || event.keyCode === 123) return true;
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && key === 'U') return true;
+  if (event.ctrlKey && event.shiftKey && ['I', 'J', 'C', 'K'].includes(key)) return true;
+  if (event.metaKey && event.altKey && ['I', 'J', 'C', 'K', 'U'].includes(key)) return true;
+  return false;
+}
+
+function installUiInspectionGuard() {
+  if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return;
+  const host = typeof window !== 'undefined' ? window : globalThis;
+  if (host.__ttgUiGuardInstalled) return;
+  host.__ttgUiGuardInstalled = true;
+
+  document.addEventListener('contextmenu', function (event) {
+    event.preventDefault();
+  });
+
+  document.addEventListener('keydown', function (event) {
+    if (isBlockedInspectionShortcut(event)) {
+      event.preventDefault();
+    }
+  });
+}
+
+installUiInspectionGuard();

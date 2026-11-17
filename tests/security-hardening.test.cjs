@@ -150,3 +150,59 @@ test('KRA PIN helpers validate 11-character Kenyan PINs and reject malformed inp
   assert.equal(ctx.isValidKraPin('P0512345'), false);
   assert.equal(ctx.isValidKraPin('P051234567<'), false);
 });
+
+test('UI inspection guard blocks contextmenu and DevTools shortcuts without affecting normal keys', () => {
+  const listeners = {};
+  const ctx = vm.createContext({
+    window: {},
+    document: {
+      addEventListener(type, fn) {
+        listeners[type] = listeners[type] || [];
+        listeners[type].push(fn);
+      }
+    },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    console: quiet
+  });
+  vm.runInContext(
+    source('supabase-config.js') + '\nglobalThis.installUiInspectionGuard = installUiInspectionGuard; globalThis.isBlockedInspectionShortcut = isBlockedInspectionShortcut;',
+    ctx
+  );
+
+  // Calling installUiInspectionGuard again must remain idempotent
+  ctx.installUiInspectionGuard();
+  assert.equal(listeners.contextmenu.length, 1);
+  assert.equal(listeners.keydown.length, 1);
+
+  let contextPrevented = false;
+  listeners.contextmenu[0]({ preventDefault() { contextPrevented = true; } });
+  assert.equal(contextPrevented, true);
+
+  const shouldBlock = [
+    { key: 'F12' },
+    { ctrlKey: true, shiftKey: true, key: 'I' },
+    { ctrlKey: true, shiftKey: true, key: 'j' },
+    { ctrlKey: true, shiftKey: true, key: 'C' },
+    { ctrlKey: true, key: 'u' },
+    { metaKey: true, altKey: true, key: 'I' }
+  ];
+  for (const evt of shouldBlock) {
+    let blocked = false;
+    listeners.keydown[0]({ ...evt, preventDefault() { blocked = true; } });
+    assert.equal(blocked, true, `expected shortcut to be blocked: ${JSON.stringify(evt)}`);
+  }
+
+  const shouldAllow = [
+    { key: 'i' },
+    { ctrlKey: true, key: 'c' },
+    { ctrlKey: true, key: 'v' },
+    { ctrlKey: true, key: 'p' },
+    { ctrlKey: true, key: 'f' },
+    { key: 'Enter' }
+  ];
+  for (const evt of shouldAllow) {
+    let blocked = false;
+    listeners.keydown[0]({ ...evt, preventDefault() { blocked = true; } });
+    assert.equal(blocked, false, `expected shortcut to remain allowed: ${JSON.stringify(evt)}`);
+  }
+});
