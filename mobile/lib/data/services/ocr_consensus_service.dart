@@ -1,0 +1,1231 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
+import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
+import 'package:image_picker/image_picker.dart';
+
+import '../../domain/models/models.dart';
+
+/// Abstraction over Google ML Kit on-device text recognition for testability.
+abstract class OcrTextRecognizerGateway {
+  Future<String> recognizeTextFromFile(String filePath);
+  Future<void> close();
+}
+
+/// Live Google ML Kit Latin script text recognizer.
+class MlKitTextRecognizerGateway implements OcrTextRecognizerGateway {
+  MlKitTextRecognizerGateway([TextRecognizer? recognizer])
+      : _injectedRecognizer = recognizer;
+
+  final TextRecognizer? _injectedRecognizer;
+  TextRecognizer? _lazyRecognizer;
+
+  TextRecognizer _getRecognizer() {
+    if (_injectedRecognizer != null) return _injectedRecognizer;
+    return _lazyRecognizer ??= TextRecognizer(
+      script: TextRecognitionScript.latin,
+    );
+  }
+
+  @override
+  Future<String> recognizeTextFromFile(String filePath) async {
+    final inputImage = InputImage.fromFilePath(filePath);
+    final recognized = await _getRecognizer().processImage(inputImage);
+    return recognized.text;
+  }
+
+  @override
+  Future<void> close() async {
+    if (_injectedRecognizer != null) {
+      await _injectedRecognizer.close();
+      return;
+    }
+    if (_lazyRecognizer != null) {
+      await _lazyRecognizer!.close();
+      _lazyRecognizer = null;
+    }
+  }
+}
+
+/// Abstraction over `image_picker` for multi-photo camera/gallery capture.
+abstract class ImagePickerGateway {
+  Future<XFile?> pickCameraImage({int imageQuality = 85});
+  Future<List<XFile>> pickGalleryImages({int imageQuality = 85});
+}
+
+/// Live `ImagePicker` wrapper supporting camera single-shot and gallery multi-select.
+class DeviceImagePickerGateway implements ImagePickerGateway {
+  DeviceImagePickerGateway([ImagePicker? picker])
+      : _picker = picker ?? ImagePicker();
+
+  final ImagePicker _picker;
+
+  @override
+  Future<XFile?> pickCameraImage({int imageQuality = 85}) {
+    return _picker.pickImage(
+      source: ImageSource.camera,
+      maxWidth: 1600,
+      maxHeight: 1600,
+      imageQuality: imageQuality,
+    );
+  }
+
+  @override
+  Future<List<XFile>> pickGalleryImages({int imageQuality = 85}) {
+    return _picker.pickMultiImage(
+      maxWidth: 1600,
+      maxHeight: 1600,
+      imageQuality: imageQuality,
+    );
+  }
+}
+
+/// Captured image page ready for OCR and receipt attachment.
+class OcrImagePage {
+  const OcrImagePage({
+    required this.dataUrl,
+    this.filePath,
+    this.bytes,
+  });
+
+  final String dataUrl;
+  final String? filePath;
+  final Uint8List? bytes;
+}
+
+/// Structured docket extraction result from `OcrConsensusService.processDocket`.
+class OcrDocketResult {
+  const OcrDocketResult({
+    required this.restaurantName,
+    required this.invoiceNumber,
+    required this.date,
+    required this.items,
+    required this.deliveryCost,
+    required this.otherCost,
+    required this.subtotal,
+    required this.grandTotal,
+    required this.csv,
+    required this.enginesUsed,
+    required this.confidence,
+    required this.receiptPhoto,
+    required this.receiptPhotos,
+    required this.pageCount,
+    this.rawMlKitText = '',
+  });
+
+  final String restaurantName;
+  final String invoiceNumber;
+  final String date;
+  final List<InvoiceLineItem> items;
+  final double deliveryCost;
+  final double otherCost;
+  final double subtotal;
+  final double grandTotal;
+  final String csv;
+  final List<String> enginesUsed;
+  final int confidence;
+  final String? receiptPhoto;
+  final List<String> receiptPhotos;
+  final int pageCount;
+  final String rawMlKitText;
+}
+
+/// Structured produce price list extraction result from `OcrConsensusService.processPriceList`.
+class OcrPriceListResult {
+  const OcrPriceListResult({
+    required this.name,
+    required this.subtitle,
+    required this.effectiveDate,
+    required this.items,
+    required this.pageCount,
+    required this.sourcePhotos,
+    required this.enginesUsed,
+  });
+
+  final String name;
+  final String subtitle;
+  final String effectiveDate;
+  final List<PriceListItem> items;
+  final int pageCount;
+  final List<String> sourcePhotos;
+  final List<String> enginesUsed;
+}
+
+/// Redundant Consensus OCR & CSV Pipeline matching `ocr-consensus.js`:
+/// - Engine 1: Optional Gemini Vision REST API (when an API key is configured)
+/// - Engine 2: On-device Google ML Kit Latin text recognition + deterministic line parser
+/// - Engine 3: Deterministic Mathematical Invariant Validator & Discrepancy Arbiter
+class OcrConsensusService {
+  OcrConsensusService({
+    http.Client? httpClient,
+    OcrTextRecognizerGateway? textRecognizer,
+    ImagePickerGateway? imagePicker,
+    String? geminiApiKey,
+    this.apiKeyProvider,
+  })  : _http = httpClient ?? http.Client(),
+        _textRecognizer = textRecognizer ?? MlKitTextRecognizerGateway(),
+        _imagePicker = imagePicker ?? DeviceImagePickerGateway(),
+        _staticApiKey = geminiApiKey;
+
+  static const List<String> models = [
+    'gemini-3.5-flash-lite',
+    'gemini-2.5-flash',
+    'gemini-flash-lite-latest',
+  ];
+
+  static const List<String> validPriceListCategories = [
+    'vegetables',
+    'fruits',
+    'cereals',
+    'dairy',
+    'meat',
+    'fish',
+    'legumes',
+    'spices',
+    'packaged',
+    'other',
+  ];
+
+  static const List<String> validPriceListUnits = [
+    'kgs',
+    'litres',
+    'pieces',
+    'crates',
+    'bags',
+    'trays',
+    'bundles',
+    'dozen',
+    'packets',
+    'bunch',
+    'pnts',
+    'heads',
+  ];
+
+  static const List<String> docketDropdownUnits = [
+    'kgs',
+    'crates',
+    'bags',
+    'pieces',
+    'bunches',
+    'heads',
+    'pnts',
+    'bundles',
+    'litres',
+    'trays',
+    'dozen',
+  ];
+
+  final http.Client _http;
+  final OcrTextRecognizerGateway _textRecognizer;
+  final ImagePickerGateway _imagePicker;
+  final String? _staticApiKey;
+  final String? Function()? apiKeyProvider;
+
+  static const String _envGeminiKey = String.fromEnvironment('TTG_GEMINI_KEY');
+  static const String _defaultEncodedGeminiKey =
+      'QVEuQWI4Uk42SW01Smc5akhENVRMMDZxcE1vZXptdzdWTDRBa2tKYU1CUElfdDhscGY1YWc=';
+
+  /// Resolves the configured Gemini API key (override -> provider -> static -> dart-define -> web app default).
+  String getApiKey([String? overrideKey]) {
+    if (overrideKey != null && overrideKey.trim().isNotEmpty) {
+      return overrideKey.trim();
+    }
+    final provided = apiKeyProvider?.call();
+    if (provided != null && provided.trim().isNotEmpty) {
+      return provided.trim();
+    }
+    if (_staticApiKey != null && _staticApiKey.trim().isNotEmpty) {
+      return _staticApiKey.trim();
+    }
+    if (_envGeminiKey.trim().isNotEmpty) {
+      return _envGeminiKey.trim();
+    }
+    try {
+      return utf8.decode(base64Decode(_defaultEncodedGeminiKey)).trim();
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /// Picks a single photo from the device camera and compresses it to a JPEG data URL.
+  Future<OcrImagePage?> pickCameraPage({int maxDim = 1600, int quality = 85}) async {
+    final file = await _imagePicker.pickCameraImage(imageQuality: quality);
+    if (file == null) return null;
+    final bytes = await file.readAsBytes();
+    final dataUrl = compressAndEncodeDataUrl(bytes, maxDim: maxDim, quality: quality);
+    return OcrImagePage(dataUrl: dataUrl, filePath: file.path, bytes: bytes);
+  }
+
+  /// Picks one or more photos from the device gallery and encodes each as a JPEG data URL.
+  Future<List<OcrImagePage>> pickGalleryPages({
+    int maxDim = 1600,
+    int quality = 85,
+  }) async {
+    final files = await _imagePicker.pickGalleryImages(imageQuality: quality);
+    final pages = <OcrImagePage>[];
+    for (final file in files) {
+      final bytes = await file.readAsBytes();
+      final dataUrl = compressAndEncodeDataUrl(bytes, maxDim: maxDim, quality: quality);
+      pages.add(OcrImagePage(dataUrl: dataUrl, filePath: file.path, bytes: bytes));
+    }
+    return pages;
+  }
+
+  /// Compresses and resizes image bytes to fit `maxDim` and returns a `data:image/jpeg;base64,...` URL.
+  static String compressAndEncodeDataUrl(
+    Uint8List rawBytes, {
+    int maxDim = 1600,
+    int quality = 85,
+  }) {
+    try {
+      final decoded = img.decodeImage(rawBytes);
+      if (decoded != null) {
+        img.Image processed = decoded;
+        if (decoded.width > maxDim || decoded.height > maxDim) {
+          if (decoded.width >= decoded.height) {
+            processed = img.copyResize(decoded, width: maxDim);
+          } else {
+            processed = img.copyResize(decoded, height: maxDim);
+          }
+        }
+        final jpgBytes = img.encodeJpg(processed, quality: quality);
+        return 'data:image/jpeg;base64,${base64Encode(jpgBytes)}';
+      }
+    } catch (_) {
+      // Fall back to encoding raw bytes if image decoder cannot parse test/mock bytes.
+    }
+    return 'data:image/jpeg;base64,${base64Encode(rawBytes)}';
+  }
+
+  /// Extracts mime type and raw bytes from a `data:image/...;base64,...` URL.
+  static ({String mimeType, Uint8List bytes})? decodeImageDataUrl(String? dataUrl) {
+    if (dataUrl == null || dataUrl.isEmpty) return null;
+    final match = RegExp(
+      r'^data:(image\/[a-zA-Z0-9+.-]+);base64,(.+)$',
+      dotAll: true,
+    ).firstMatch(dataUrl.trim());
+    if (match == null) return null;
+    try {
+      final mime = match.group(1)!;
+      final cleanB64 = match.group(2)!.replaceAll(RegExp(r'\s+'), '');
+      return (mimeType: mime, bytes: base64Decode(cleanB64));
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Runs the redundant OCR pipeline on one or more docket image pages.
+  Future<OcrDocketResult> processDocket(
+    List<OcrImagePage> pages, {
+    void Function(String status)? onProgress,
+    String? geminiApiKey,
+  }) async {
+    if (pages.isEmpty) {
+      throw ArgumentError('At least one docket photo is required.');
+    }
+    final pageCount = pages.length;
+    onProgress?.call(
+      'Analyzing $pageCount docket page${pageCount > 1 ? 's' : ''} with Town Treasure Optical Engine...',
+    );
+
+    final apiKey = getApiKey(geminiApiKey);
+    Map<String, dynamic>? geminiResult;
+    Object? lastError;
+
+    // Engine 1: Optional Cloud Vision (only when API key is configured)
+    if (apiKey.isNotEmpty) {
+      final dataUrls = pages.map((p) => p.dataUrl).toList();
+      for (final model in models) {
+        try {
+          onProgress?.call('Scanning produce lines & pricing (High-Precision Pass)...');
+          final candidate = await _runGeminiDocketVision(dataUrls, model, apiKey);
+          final items = candidate['items'];
+          if (items is List && items.isNotEmpty) {
+            geminiResult = candidate;
+            break;
+          }
+        } catch (err) {
+          lastError = err;
+        }
+      }
+    }
+
+    // Engine 2: On-Device Google ML Kit Text Recognition across pages with file paths
+    final mlKitTexts = <String>[];
+    final filePages = pages.where((p) => p.filePath != null && p.filePath!.isNotEmpty).toList();
+    if (filePages.isNotEmpty) {
+      onProgress?.call('Cross-checking with on-device Google ML Kit recognition...');
+      for (final page in filePages) {
+        try {
+          final txt = await _textRecognizer.recognizeTextFromFile(page.filePath!);
+          if (txt.trim().isNotEmpty) {
+            mlKitTexts.add(txt.trim());
+          }
+        } catch (err) {
+          lastError ??= err;
+        }
+      }
+    }
+
+    final combinedMlKitText = mlKitTexts.join('\n--- PAGE BREAK ---\n');
+    final mlKitParsed = combinedMlKitText.trim().isNotEmpty
+        ? parseRawTextToDocket(combinedMlKitText)
+        : null;
+
+    if (geminiResult == null &&
+        (mlKitParsed == null ||
+            ((mlKitParsed['items'] as List?)?.isEmpty ?? true &&
+                combinedMlKitText.trim().isEmpty))) {
+      final detail = lastError?.toString().toLowerCase() ?? '';
+      if (detail.contains('socket') ||
+          detail.contains('network') ||
+          detail.contains('host lookup') ||
+          detail.contains('timeout')) {
+        throw StateError(
+          'Could not reach the cloud scanner and the photo was unclear offline. Please check your internet connection or retake a sharper photo.',
+        );
+      }
+      throw StateError(
+        'Could not read items clearly from this docket photo. Please retake in good lighting or enter the items manually.',
+      );
+    }
+
+    // Engine 3: Deterministic Mathematical Invariant Validator & Discrepancy Arbiter
+    onProgress?.call('Running Deterministic Mathematical Arbiter & checksum verification...');
+    final consensus = reconcileWithMath(
+      geminiData: geminiResult,
+      mlKitData: mlKitParsed,
+      rawMlKitText: combinedMlKitText,
+      pageCount: pageCount,
+    );
+
+    final csvData = itemsToCsv(consensus.items);
+    final photoUrls = pages.map((p) => p.dataUrl).toList();
+
+    return OcrDocketResult(
+      restaurantName: consensus.restaurantName,
+      invoiceNumber: consensus.invoiceNumber,
+      date: consensus.date,
+      items: consensus.items,
+      deliveryCost: consensus.deliveryCost,
+      otherCost: consensus.otherCost,
+      subtotal: consensus.subtotal,
+      grandTotal: consensus.grandTotal,
+      csv: csvData,
+      enginesUsed: consensus.enginesUsed,
+      confidence: consensus.confidence,
+      receiptPhoto: photoUrls.isNotEmpty ? photoUrls.first : null,
+      receiptPhotos: photoUrls,
+      pageCount: pageCount,
+      rawMlKitText: combinedMlKitText,
+    );
+  }
+
+  /// Runs optical extraction on produce price list photos (Gemini Vision if configured,
+  /// with Google ML Kit on-device fallback).
+  Future<OcrPriceListResult> processPriceList(
+    List<OcrImagePage> pages, {
+    void Function(String status)? onProgress,
+    String? geminiApiKey,
+  }) async {
+    if (pages.isEmpty) {
+      throw ArgumentError('At least one price list photo is required.');
+    }
+    final pageCount = pages.length;
+    onProgress?.call(
+      'Analyzing $pageCount price list page${pageCount > 1 ? 's' : ''} with Town Treasure Optical Engine...',
+    );
+
+    final apiKey = getApiKey(geminiApiKey);
+    Map<String, dynamic>? extractionResult;
+    final enginesUsed = <String>[];
+    Object? lastError;
+
+    if (apiKey.isNotEmpty) {
+      final dataUrls = pages.map((p) => p.dataUrl).toList();
+      for (final model in models) {
+        try {
+          onProgress?.call('Digitizing produce catalog & commodity prices...');
+          final candidate = await _runGeminiPriceListVision(dataUrls, model, apiKey);
+          final items = candidate['items'];
+          if (items is List && items.isNotEmpty) {
+            extractionResult = candidate;
+            enginesUsed.add('Town Treasure Optical Engine');
+            break;
+          }
+        } catch (err) {
+          lastError = err;
+        }
+      }
+    }
+
+    if (extractionResult == null) {
+      final mlKitTexts = <String>[];
+      for (final page in pages) {
+        if (page.filePath != null && page.filePath!.isNotEmpty) {
+          try {
+            final txt = await _textRecognizer.recognizeTextFromFile(page.filePath!);
+            if (txt.trim().isNotEmpty) mlKitTexts.add(txt.trim());
+          } catch (err) {
+            lastError ??= err;
+          }
+        }
+      }
+      if (mlKitTexts.isNotEmpty) {
+        extractionResult = parseRawTextToPriceList(mlKitTexts.join('\n'));
+        enginesUsed.add('Google ML Kit On-Device');
+      }
+    }
+
+    final rawItems = extractionResult?['items'];
+    if (extractionResult == null || rawItems is! List || rawItems.isEmpty) {
+      final errStr = (lastError ?? '').toString().toLowerCase();
+      if (errStr.contains('socketexception') ||
+          errStr.contains('failed host lookup') ||
+          errStr.contains('timed out')) {
+        throw StateError(
+          'Could not reach the optical scan service. Please check your internet connection or try a sharper photo.',
+        );
+      }
+      throw StateError(
+        'Could not read price list items from the photo. Please try a clearer, well-lit photo.',
+      );
+    }
+
+    var currentCategory = 'vegetables';
+    final processedItems = <PriceListItem>[];
+
+    for (final raw in rawItems) {
+      if (raw is! Map) continue;
+      final it = Map<String, dynamic>.from(raw);
+      if (it['isHeader'] == true) {
+        final headerName = (it['name'] ?? '').toString().trim().toUpperCase();
+        if (headerName.isNotEmpty) {
+          processedItems.add(
+            PriceListItem(
+              id: 'h_${AppHelpers.genId()}',
+              isHeader: true,
+              name: headerName,
+            ),
+          );
+          final lowerH = headerName.toLowerCase();
+          if (lowerH.contains('fruit')) {
+            currentCategory = 'fruits';
+          } else if (lowerH.contains('veg')) {
+            currentCategory = 'vegetables';
+          } else if (lowerH.contains('herb') ||
+              lowerH.contains('spice') ||
+              lowerH.contains('culinary')) {
+            currentCategory = 'spices';
+          } else if (lowerH.contains('dairy') ||
+              lowerH.contains('milk') ||
+              lowerH.contains('egg')) {
+            currentCategory = 'dairy';
+          } else if (lowerH.contains('meat') ||
+              lowerH.contains('beef') ||
+              lowerH.contains('chicken') ||
+              lowerH.contains('pork')) {
+            currentCategory = 'meat';
+          } else if (lowerH.contains('fish') || lowerH.contains('seafood')) {
+            currentCategory = 'fish';
+          } else if (lowerH.contains('cereal') ||
+              lowerH.contains('grain') ||
+              lowerH.contains('rice') ||
+              lowerH.contains('flour')) {
+            currentCategory = 'cereals';
+          } else if (lowerH.contains('legume') ||
+              lowerH.contains('bean') ||
+              lowerH.contains('pea')) {
+            currentCategory = 'legumes';
+          }
+        }
+      } else {
+        final name = (it['name'] ?? it['desc'] ?? '').toString().trim();
+        if (name.isEmpty) continue;
+
+        var cat = (it['category'] ?? '').toString().toLowerCase().trim();
+        if (!validPriceListCategories.contains(cat)) cat = currentCategory;
+
+        var unit = (it['unit'] ?? 'kgs').toString().toLowerCase().trim();
+        if (unit.startsWith('kg')) {
+          unit = 'kgs';
+        } else if (unit.startsWith('bunch') || unit == 'bchs') {
+          unit = 'bundles';
+        } else if (unit == 'pcs' || unit == 'piece') {
+          unit = 'pieces';
+        } else if (unit == 'crate') {
+          unit = 'crates';
+        } else if (unit == 'bag') {
+          unit = 'bags';
+        } else if (unit == 'punnet' || unit == 'punnets') {
+          unit = 'pnts';
+        } else if (unit == 'head') {
+          unit = 'heads';
+        } else if (unit == 'tray') {
+          unit = 'trays';
+        } else if (!validPriceListUnits.contains(unit)) {
+          unit = 'kgs';
+        }
+
+        final price = AppHelpers.parseDouble(
+          it['price'] ?? it['sellPrice'] ?? it['rate'],
+        );
+        final notes =
+            (it['notes'] ?? it['grade'] ?? it['variety'] ?? '').toString().trim();
+
+        processedItems.add(
+          PriceListItem(
+            id: 'it_${AppHelpers.genId()}',
+            isHeader: false,
+            name: name,
+            category: cat,
+            unit: unit,
+            price: price,
+            notes: notes,
+          ),
+        );
+      }
+    }
+
+    final today = AppHelpers.normalizeAppDate(DateTime.now());
+    return OcrPriceListResult(
+      name: (extractionResult['name'] ?? '').toString().trim().isNotEmpty
+          ? extractionResult['name'].toString().trim()
+          : 'Price List - $today',
+      subtitle: (extractionResult['subtitle'] ?? '').toString().trim().isNotEmpty
+          ? extractionResult['subtitle'].toString().trim()
+          : 'Food Supplies (Veg and Fruits)',
+      effectiveDate: AppHelpers.normalizeAppDate(
+        extractionResult['effectiveDate'],
+      ).isNotEmpty
+          ? AppHelpers.normalizeAppDate(extractionResult['effectiveDate'])
+          : today,
+      items: processedItems,
+      pageCount: pageCount,
+      sourcePhotos: pages.map((p) => p.dataUrl).toList(),
+      enginesUsed: enginesUsed,
+    );
+  }
+
+  /// Engine 3: Deterministic Mathematical Invariant Validator & Discrepancy Arbiter.
+  /// Matches `_reconcileWithMath` in `ocr-consensus.js`.
+  static ({
+    String restaurantName,
+    String invoiceNumber,
+    String date,
+    List<InvoiceLineItem> items,
+    double deliveryCost,
+    double otherCost,
+    double subtotal,
+    double grandTotal,
+    int confidence,
+    List<String> enginesUsed,
+  }) reconcileWithMath({
+    Map<String, dynamic>? geminiData,
+    Map<String, dynamic>? mlKitData,
+    String rawMlKitText = '',
+    int pageCount = 1,
+  }) {
+    final enginesUsed = <String>[];
+    if (geminiData != null) enginesUsed.add('Town Treasure Optical Engine');
+    if (mlKitData != null || rawMlKitText.trim().isNotEmpty) {
+      enginesUsed.add('Google ML Kit On-Device');
+    }
+    enginesUsed.add('Math Invariant Arbiter');
+
+    final primary = geminiData ?? mlKitData ?? const <String, dynamic>{};
+    final rawItems = primary['items'] is List
+        ? (primary['items'] as List)
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList()
+        : <Map<String, dynamic>>[];
+
+    final statedSubtotal = AppHelpers.parseDouble(primary['subtotal']);
+    final sumOfRawTotals = rawItems.fold<double>(
+      0,
+      (acc, it) => acc + AppHelpers.parseDouble(it['total']),
+    );
+    final totalsAreGroundTruth =
+        statedSubtotal > 0 && (sumOfRawTotals - statedSubtotal).abs() <= 2;
+
+    final items = rawItems.map((it) {
+      final descRaw = (it['desc'] ?? it['name'] ?? 'Produce Item').toString().trim();
+      final desc = descRaw.isEmpty ? 'Produce Item' : descRaw;
+      final qty = AppHelpers.parseDouble(it['qty'], 1);
+      var price = AppHelpers.parseDouble(it['price'] ?? it['sellPrice']);
+      var total = AppHelpers.parseDouble(it['total']);
+      final unit = normalizeUnit((it['unit'] ?? 'kgs').toString());
+
+      // Mathematical Arbitration: line Total and Qty carry highest handwriting clarity.
+      if (qty > 0 && total > 0) {
+        final mathPrice = ((total / qty) * 100).roundToDouble() / 100;
+        if (price == 0 || (qty * price - total).abs() > 0.5) {
+          price = mathPrice;
+        }
+      } else if (qty > 0 && price > 0 && total == 0) {
+        total = ((qty * price) * 100).roundToDouble() / 100;
+      }
+
+      final resolvedTotal = total > 0
+          ? total
+          : (((qty * price) * 100).roundToDouble() / 100);
+
+      return InvoiceLineItem(
+        desc: desc,
+        qty: qty > 0 ? qty : 1,
+        unit: unit,
+        buyPrice: AppHelpers.parseDouble(it['buyPrice']),
+        sellPrice: price,
+        total: resolvedTotal,
+      );
+    }).toList();
+
+    final calculatedSubtotal = items.fold<double>(0, (s, it) => s + it.total);
+    final delCost = AppHelpers.parseDouble(
+      primary['delivery_cost'] ?? primary['deliveryCost'],
+    );
+    final othCost = AppHelpers.parseDouble(
+      primary['other_cost'] ?? primary['otherCost'],
+    );
+    final finalSubtotal = totalsAreGroundTruth ? statedSubtotal : calculatedSubtotal;
+    final grandTotal = finalSubtotal + delCost + othCost;
+
+    final gemRest = (geminiData?['restaurant_name'] ??
+            geminiData?['restaurantName'] ??
+            '')
+        .toString()
+        .trim();
+    final mlRest = (mlKitData?['restaurant_name'] ??
+            mlKitData?['restaurantName'] ??
+            '')
+        .toString()
+        .trim();
+    final restaurantName = gemRest.isNotEmpty ? gemRest : mlRest;
+
+    final gemInv =
+        (geminiData?['invoice_number'] ?? geminiData?['invoiceNumber'] ?? '')
+            .toString()
+            .trim();
+    final mlInv =
+        (mlKitData?['invoice_number'] ?? mlKitData?['invoiceNumber'] ?? '')
+            .toString()
+            .trim();
+    final invoiceNumber = gemInv.isNotEmpty ? gemInv : mlInv;
+
+    final rawDate = (geminiData?['invoice_date'] ??
+            geminiData?['date'] ??
+            mlKitData?['invoice_date'] ??
+            mlKitData?['date'] ??
+            '')
+        .toString()
+        .trim();
+    final normalizedDate = AppHelpers.normalizeAppDate(rawDate);
+    final date = normalizedDate.isNotEmpty
+        ? normalizedDate
+        : AppHelpers.normalizeAppDate(DateTime.now());
+
+    return (
+      restaurantName: restaurantName,
+      invoiceNumber: invoiceNumber,
+      date: date,
+      items: items,
+      deliveryCost: delCost,
+      otherCost: othCost,
+      subtotal: finalSubtotal,
+      grandTotal: grandTotal,
+      confidence: geminiData != null ? 99 : 85,
+      enginesUsed: enginesUsed,
+    );
+  }
+
+  /// Normalizes produce unit aliases matching `ocr-consensus.js`.
+  static String normalizeUnit(String rawUnit) {
+    final unit = rawUnit.toLowerCase().trim();
+    if (unit.isEmpty) return 'kgs';
+    if (unit.startsWith('bunch') || unit == 'bchs') return 'bunches';
+    if (unit.startsWith('pnt') || unit.startsWith('punnet')) return 'pnts';
+    if (unit.startsWith('head')) return 'heads';
+    if (unit.startsWith('pc') || unit == 'piece') return 'pcs';
+    if (unit == 'k' || unit == 'kilo' || unit == 'kilogram') return 'kg';
+    return unit;
+  }
+
+  /// Maps normalized OCR units to canonical dropdown option keys used by forms.
+  static String normalizeDropdownUnit(String rawUnit) {
+    final u = normalizeUnit(rawUnit);
+    switch (u) {
+      case 'kg':
+      case 'kilograms':
+        return 'kgs';
+      case 'pcs':
+      case 'piece':
+        return 'pieces';
+      case 'punnet':
+      case 'punnets':
+        return 'pnts';
+      case 'crate':
+        return 'crates';
+      case 'bag':
+        return 'bags';
+      case 'bundle':
+        return 'bundles';
+      case 'litre':
+        return 'litres';
+      case 'tray':
+        return 'trays';
+      default:
+        return docketDropdownUnits.contains(u) ? u : 'kgs';
+    }
+  }
+
+  /// Parses raw on-device ML Kit OCR text into structured docket fields and produce items.
+  static Map<String, dynamic> parseRawTextToDocket(String rawText) {
+    final lines = rawText
+        .split(RegExp(r'\r?\n'))
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+
+    var restaurantName = '';
+    var invoiceNumber = '';
+    var invoiceDate = '';
+    var deliveryCost = 0.0;
+    var subtotal = 0.0;
+    final items = <Map<String, dynamic>>[];
+
+    final invPattern = RegExp(
+      r'(?:DKT|INV|TTG)[-#:\s]*[A-Z0-9-]+|(?:DOCKET|INVOICE)\s*(?:NO\.?|#)\s*:?\s*([A-Z0-9-]+)',
+      caseSensitive: false,
+    );
+    final clientLabelPattern = RegExp(
+      r'^(?:client|customer|restaurant|hotel|deliver\s*to|to)\s*[:\-]\s*(.+)$',
+      caseSensitive: false,
+    );
+    final datePattern = RegExp(
+      r'\b(\d{4}-\d{2}-\d{2}|\d{2}[/-]\d{2}[/-]\d{4})\b',
+    );
+    final deliveryPattern = RegExp(
+      r'delivery(?:\s*(?:fee|cost))?\s*[:\-]?\s*(?:kes|ksh)?\s*([\d,]+(?:\.\d+)?)',
+      caseSensitive: false,
+    );
+    final subtotalPattern = RegExp(
+      r'^(?:sub\s*total|subtotal)\s*[:\-]?\s*(?:kes|ksh)?\s*([\d,]+(?:\.\d+)?)',
+      caseSensitive: false,
+    );
+    final lineItemPattern = RegExp(
+      r'^(?:\d+[\.\)]\s*)?([A-Za-z][A-Za-z0-9\s\(\)\/&,-]{1,60}?)\s+(\d+(?:\.\d+)?)\s*(kgs?|kilograms?|crates?|bags?|pcs|pieces?|bunches?|bchs|bundles?|heads?|pnts?|punnets?|litres?|trays?|dozen|boxes?)\b(?:\s*(?:@|x|kes|ksh)?\s*([\d,]+(?:\.\d+)?))?(?:\s*(?:=|kes|ksh)?\s*([\d,]+(?:\.\d+)?))?$',
+      caseSensitive: false,
+    );
+
+    for (final line in lines) {
+      if (invoiceNumber.isEmpty) {
+        final invMatch = invPattern.firstMatch(line);
+        if (invMatch != null) {
+          invoiceNumber = (invMatch.group(1) ?? invMatch.group(0) ?? '').trim();
+        }
+      }
+
+      if (invoiceDate.isEmpty) {
+        final dateMatch = datePattern.firstMatch(line);
+        if (dateMatch != null) {
+          final norm = AppHelpers.normalizeAppDate(dateMatch.group(1));
+          if (norm.isNotEmpty) invoiceDate = norm;
+        }
+      }
+
+      if (restaurantName.isEmpty) {
+        final clientMatch = clientLabelPattern.firstMatch(line);
+        if (clientMatch != null) {
+          restaurantName = clientMatch.group(1)!.trim();
+          continue;
+        }
+        final lower = line.toLowerCase();
+        if (!lower.contains('town treasure') &&
+            (lower.contains('hotel') ||
+                lower.contains('suites') ||
+                lower.contains('resort') ||
+                lower.contains('restaurant') ||
+                lower.contains('lodge') ||
+                lower.contains('kempinski') ||
+                lower.contains('serena') ||
+                lower.contains('sarova'))) {
+          restaurantName = line;
+          continue;
+        }
+      }
+
+      final delMatch = deliveryPattern.firstMatch(line);
+      if (delMatch != null) {
+        deliveryCost = _parseFormattedNumber(delMatch.group(1));
+        continue;
+      }
+
+      final subMatch = subtotalPattern.firstMatch(line);
+      if (subMatch != null) {
+        subtotal = _parseFormattedNumber(subMatch.group(1));
+        continue;
+      }
+
+      final lower = line.toLowerCase();
+      if (lower.startsWith('total') ||
+          lower.startsWith('grand total') ||
+          lower.startsWith('item description') ||
+          lower.startsWith('goods received')) {
+        continue;
+      }
+
+      final itemMatch = lineItemPattern.firstMatch(line);
+      if (itemMatch != null) {
+        final desc = itemMatch.group(1)!.trim();
+        final qty = double.tryParse(itemMatch.group(2) ?? '1') ?? 1;
+        final unit = itemMatch.group(3) ?? 'kgs';
+        final num1 = _parseFormattedNumber(itemMatch.group(4));
+        final num2 = _parseFormattedNumber(itemMatch.group(5));
+
+        double price = 0;
+        double total = 0;
+        if (num1 > 0 && num2 > 0) {
+          price = num1;
+          total = num2;
+        } else if (num1 > 0) {
+          price = num1;
+          total = qty * price;
+        }
+
+        items.add({
+          'desc': desc,
+          'qty': qty,
+          'unit': unit,
+          'price': price,
+          'total': total,
+        });
+      }
+    }
+
+    return {
+      'restaurant_name': restaurantName,
+      'invoice_number': invoiceNumber,
+      'invoice_date': invoiceDate,
+      'items': items,
+      'delivery_cost': deliveryCost,
+      'other_cost': 0.0,
+      'subtotal': subtotal,
+    };
+  }
+
+  /// Parses raw on-device ML Kit text into structured price list headers and items.
+  static Map<String, dynamic> parseRawTextToPriceList(String rawText) {
+    final lines = rawText
+        .split(RegExp(r'\r?\n'))
+        .map((l) => l.trim())
+        .where((l) => l.isNotEmpty)
+        .toList();
+
+    final items = <Map<String, dynamic>>[];
+    final headerKeywords = RegExp(
+      r'^(VEGETABLES|FRUITS|HERBS\s*&\s*SPICES|SPICES|DAIRY(?:\s*&\s*EGGS)?|CEREALS|MEAT|FISH|LEGUMES|ROOT\s*CROPS)$',
+      caseSensitive: false,
+    );
+    final priceRowPattern = RegExp(
+      r'^([A-Za-z][A-Za-z0-9\s\(\)\/&,-]{1,50}?)\s*[-:]?\s*(?:kes|ksh)?\s*([\d,]+(?:\.\d+)?)\s*(?:/|\s*per)?\s*(kgs?|crates?|bags?|pieces?|pcs|bunches?|bundles?|heads?|pnts?|punnets?|litres?|trays?|dozen)?$',
+      caseSensitive: false,
+    );
+
+    for (final line in lines) {
+      if (headerKeywords.hasMatch(line)) {
+        items.add({'isHeader': true, 'name': line.toUpperCase()});
+        continue;
+      }
+      final match = priceRowPattern.firstMatch(line);
+      if (match != null) {
+        final name = match.group(1)!.trim();
+        final price = _parseFormattedNumber(match.group(2));
+        final unit = (match.group(3) ?? 'kgs').trim();
+        if (name.isNotEmpty && price > 0) {
+          items.add({
+            'isHeader': false,
+            'name': name,
+            'unit': unit,
+            'price': price,
+          });
+        }
+      }
+    }
+
+    return {
+      'name': 'Scanned Price List',
+      'subtitle': 'Food Supplies (Veg and Fruits)',
+      'effectiveDate': AppHelpers.normalizeAppDate(DateTime.now()),
+      'items': items,
+    };
+  }
+
+  /// Converts line items to structured CSV format matching `itemsToCSV` in `ocr-consensus.js`.
+  static String itemsToCsv(List<InvoiceLineItem> items) {
+    const header = 'Item Description,Quantity,Unit,Unit Price,Total';
+    final rows = items.map((it) {
+      final escapedDesc = it.desc.replaceAll('"', '""');
+      final qtyStr = _formatCsvNumber(it.qty);
+      final unit = it.unit.isNotEmpty ? it.unit : 'kgs';
+      final priceStr = _formatCsvNumber(it.sellPrice);
+      final totalStr = _formatCsvNumber(it.total);
+      return '"$escapedDesc",$qtyStr,$unit,$priceStr,$totalStr';
+    });
+    return [header, ...rows].join('\n');
+  }
+
+  /// Parses CSV string into `InvoiceLineItem` list matching `csvToItems` in `ocr-consensus.js`.
+  static List<InvoiceLineItem> csvToItems(String csvString) {
+    final trimmed = csvString.trim();
+    if (trimmed.isEmpty) return const [];
+    final lines = trimmed.split(RegExp(r'\r?\n'));
+    if (lines.length <= 1) return const [];
+
+    final items = <InvoiceLineItem>[];
+    for (var i = 1; i < lines.length; i++) {
+      final line = lines[i].trim();
+      if (line.isEmpty) continue;
+
+      final parts = _splitCsvLine(line);
+      var desc = parts.isNotEmpty ? parts[0].trim() : 'Item';
+      if (desc.startsWith('"') && desc.endsWith('"') && desc.length >= 2) {
+        desc = desc.substring(1, desc.length - 1);
+      }
+      desc = desc.replaceAll('""', '"');
+      if (desc.isEmpty) desc = 'Item';
+
+      final qty =
+          parts.length > 1 ? (double.tryParse(parts[1].trim()) ?? 1.0) : 1.0;
+      final unitRaw = parts.length > 2 ? parts[2].trim() : '';
+      final unit = unitRaw.isNotEmpty ? unitRaw : 'kgs';
+      final price =
+          parts.length > 3 ? (double.tryParse(parts[3].trim()) ?? 0.0) : 0.0;
+      final total = parts.length > 4 && parts[4].trim().isNotEmpty
+          ? (double.tryParse(parts[4].trim()) ?? (qty * price))
+          : (qty * price);
+
+      items.add(
+        InvoiceLineItem(
+          desc: desc,
+          qty: qty,
+          unit: unit,
+          buyPrice: 0,
+          sellPrice: price,
+          total: total,
+        ),
+      );
+    }
+    return items;
+  }
+
+  Future<Map<String, dynamic>> _runGeminiDocketVision(
+    List<String> imgList,
+    String modelName,
+    String apiKey,
+  ) async {
+    final isMultiPage = imgList.length > 1;
+    final systemPrompt = '''You are a precision OCR accountant for Town Treasure Groceries, a Kenyan wholesale produce supplier.
+Extract all produce line items from this physical delivery docket/invoice.
+${isMultiPage ? 'IMPORTANT: This is a MULTI-PAGE docket (${imgList.length} pages). Combine all line items from ALL pages into a single continuous list of items in natural order. If the last page contains the final subtotal/total due, extract that.' : ''}
+
+The standard columns are:
+1. ITEM DESCRIPTION
+2. QTY & UNIT (e.g. 2 bags, 5 bunches, 2 pnts, 10 pcs, 4 heads, 5 kg, 8 pcs, 10 kgs)
+3. UNIT PRICE (Ksh)
+4. TOTAL (Ksh)
+
+CRITICAL INSTRUCTIONS:
+- Read each line strictly horizontally across all columns.
+- For each row, QTY * UNIT PRICE = TOTAL.
+- Do NOT vertically shift unit prices into adjacent rows.
+- Read the line totals in the rightmost column carefully.
+- Extract the Customer / Restaurant name, Invoice #, Date, Subtotal, Delivery Cost, and Grand Total.
+- Common Kenyan units: bags, bunches, pnts (punnets), pcs (pieces), heads, kg, kgs, crates, trays, boxes, litres.
+
+Return ONLY a JSON object matching this exact structure:
+{
+  "restaurant_name": "Customer or restaurant name if visible",
+  "invoice_number": "Invoice/docket number if visible",
+  "invoice_date": "YYYY-MM-DD date if visible",
+  "items": [
+    {
+      "desc": "Maize (Dry Bag)",
+      "qty": 2.0,
+      "unit": "bags",
+      "price": 4500.0,
+      "total": 9000.0
+    }
+  ],
+  "subtotal": 13810.0,
+  "delivery_cost": 300.0,
+  "grand_total": 14110.0
+}''';
+
+    return _callGeminiVision(imgList, modelName, apiKey, systemPrompt, 'docket');
+  }
+
+  Future<Map<String, dynamic>> _runGeminiPriceListVision(
+    List<String> imgList,
+    String modelName,
+    String apiKey,
+  ) async {
+    final isMultiPage = imgList.length > 1;
+    final systemPrompt = '''You are a precision wholesale produce catalog specialist for Town Treasure Groceries in Kenya.
+Analyze this produce price list or price sheet (single or multi-page) and extract all category headers and produce items into structured JSON.
+${isMultiPage ? 'IMPORTANT: This document has ${imgList.length} pages. Extract items from ALL pages into a continuous structured sequence.' : ''}
+
+CRITICAL RULES:
+1. Detect section/category headers (e.g. "VEGETABLES", "FRUITS", "HERBS & SPICES", "DAIRY & EGGS", "CEREALS", "ROOT CROPS").
+   Represent each section header as an object with "isHeader": true and "name": "SECTION TITLE".
+2. Under each section, extract individual produce items:
+   - "name": Produce item name (e.g. "Roma Tomatoes", "Red Onions", "Baby Spinach")
+   - "category": One of "vegetables", "fruits", "spices", "cereals", "dairy", "meat", "fish", "legumes", "packaged", "other"
+   - "unit": Kenyan produce unit ("kgs", "crates", "bags", "pieces", "bunches", "heads", "pnts", "litres", "trays", "dozen", "bundles")
+   - "price": Selling price in KES as a number (e.g. 155.0, 3200.0)
+   - "notes": Grade, variety, or packaging specification if mentioned
+3. Extract Document Title / Header ("name"), Subtitle ("subtitle"), and Effective Date ("effectiveDate" as YYYY-MM-DD if visible).
+
+Return ONLY JSON matching:
+{
+  "name": "Produce Price List",
+  "subtitle": "Fresh Vegetables & Fruits",
+  "effectiveDate": "YYYY-MM-DD",
+  "items": [
+    { "isHeader": true, "name": "VEGETABLES" },
+    { "isHeader": false, "name": "Roma Tomatoes", "category": "vegetables", "unit": "crates", "price": 3200.0, "notes": "Grade A" }
+  ]
+}''';
+
+    return _callGeminiVision(
+      imgList,
+      modelName,
+      apiKey,
+      systemPrompt,
+      'price list',
+    );
+  }
+
+  Future<Map<String, dynamic>> _callGeminiVision(
+    List<String> imgList,
+    String modelName,
+    String apiKey,
+    String systemPrompt,
+    String docLabel,
+  ) async {
+    final isMultiPage = imgList.length > 1;
+    final parts = <Map<String, dynamic>>[
+      {'text': systemPrompt},
+    ];
+
+    for (var i = 0; i < imgList.length; i++) {
+      final dataUrl = imgList[i];
+      final decoded = decodeImageDataUrl(dataUrl);
+      final mime = decoded?.mimeType ?? 'image/jpeg';
+      final cleanB64 = decoded != null
+          ? base64Encode(decoded.bytes)
+          : dataUrl.replaceFirst(RegExp(r'^data:image\/[a-zA-Z0-9+.-]+;base64,'), '');
+      if (isMultiPage) {
+        parts.add({'text': 'Page ${i + 1} of $docLabel:'});
+      }
+      parts.add({
+        'inlineData': {
+          'mimeType': mime,
+          'data': cleanB64,
+        },
+      });
+    }
+
+    final payload = {
+      'contents': [
+        {'parts': parts},
+      ],
+      'generationConfig': {
+        'responseMimeType': 'application/json',
+        'temperature': 0.1,
+      },
+    };
+
+    final uri = Uri.parse(
+      'https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey',
+    );
+    final response = await _http.post(
+      uri,
+      headers: const {'Content-Type': 'application/json'},
+      body: jsonEncode(payload),
+    );
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw StateError('API error (${response.statusCode}): ${response.body}');
+    }
+
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map) {
+      throw const FormatException('Invalid JSON payload from vision model.');
+    }
+    final candidates = decoded['candidates'];
+    if (candidates is! List || candidates.isEmpty) {
+      throw StateError('Empty candidates from vision model.');
+    }
+    final text = candidates.first?['content']?['parts']?[0]?['text']?.toString();
+    if (text == null || text.trim().isEmpty) {
+      throw StateError('Empty response from vision model.');
+    }
+
+    final cleaned = _stripJsonCodeFence(text);
+    final parsed = jsonDecode(cleaned);
+    if (parsed is! Map) {
+      throw const FormatException('Vision response was not a JSON object.');
+    }
+    return Map<String, dynamic>.from(parsed);
+  }
+
+  static String _stripJsonCodeFence(String text) {
+    final trimmed = text.trim();
+    final match = RegExp(r'^```(?:json)?\s*([\s\S]*?)\s*```$').firstMatch(trimmed);
+    return match != null ? match.group(1)!.trim() : trimmed;
+  }
+
+  static List<String> _splitCsvLine(String line) {
+    final parts = <String>[];
+    var inQuotes = false;
+    final current = StringBuffer();
+    for (var i = 0; i < line.length; i++) {
+      final ch = line[i];
+      if (ch == '"') {
+        if (inQuotes && i + 1 < line.length && line[i + 1] == '"') {
+          current.write('"');
+          i++;
+        } else {
+          inQuotes = !inQuotes;
+        }
+      } else if (ch == ',' && !inQuotes) {
+        parts.add(current.toString().trim());
+        current.clear();
+      } else {
+        current.write(ch);
+      }
+    }
+    parts.add(current.toString().trim());
+    return parts;
+  }
+
+  static String _formatCsvNumber(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+    return value.toString();
+  }
+
+  static double _parseFormattedNumber(String? raw) {
+    if (raw == null) return 0;
+    final clean = raw.replaceAll(',', '').trim();
+    return double.tryParse(clean) ?? 0;
+  }
+
+  Future<void> dispose() async {
+    await _textRecognizer.close();
+  }
+}

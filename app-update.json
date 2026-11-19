@@ -1,0 +1,8 @@
+{
+  "version": "1.0.2",
+  "buildNumber": 2003,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.0.2/TownTreasureGroceries.apk",
+  "sha256": "480dbb941e620cf25892e992140628b24e0179397a8f83f8c5f19870b0950017",
+  "releaseNotes": "v1.0.2+3: Fixed full-bleed Invoice PDF header and footer overlap on single and multi-page invoices, added bottom safe-area clearance above the Android navigation bar across OCR scanner, clerk review, restaurant editor, and finance sheets, and verified 24-hour notification cooldown.",
+  "mandatory": false
+}

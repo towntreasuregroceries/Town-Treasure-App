@@ -1,0 +1,759 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../../../data/repositories/vault_repository.dart';
+import '../../../domain/models/models.dart';
+import '../../core/theme/app_theme.dart';
+import 'invoice_editor_screen.dart';
+import 'invoice_formatters.dart';
+import 'invoice_pdf_builder.dart';
+import 'invoices_view_model.dart';
+
+/// Mobile-first Invoice Detail preview screen with Paid/Unpaid toggle,
+/// A4 PDF download/print, Share PDF, WhatsApp dispatch summary, Edit, and Delete.
+class InvoiceDetailScreen extends StatefulWidget {
+  const InvoiceDetailScreen({
+    super.key,
+    required this.invoiceId,
+    this.viewModel,
+    this.onOpenScanner,
+    this.onEdit,
+  });
+
+  final String invoiceId;
+  final InvoicesViewModel? viewModel;
+  final Future<List<InvoiceLineItem>?> Function(BuildContext context)?
+      onOpenScanner;
+  final void Function(Invoice invoice)? onEdit;
+
+  @override
+  State<InvoiceDetailScreen> createState() => _InvoiceDetailScreenState();
+}
+
+class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
+  InvoicesViewModel? _ownedVm;
+  bool _pdfBusy = false;
+
+  InvoicesViewModel get _vm => widget.viewModel ?? _ownedVm!;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (widget.viewModel == null && _ownedVm == null) {
+      _ownedVm = InvoicesViewModel(vault: context.read<VaultRepository>());
+    }
+  }
+
+  @override
+  void dispose() {
+    _ownedVm?.dispose();
+    super.dispose();
+  }
+
+  void _showSnack(String message, {bool isError = false, bool isWarning = false}) {
+    if (!mounted) return;
+    final bg = isError
+        ? AppTheme.danger
+        : (isWarning ? AppTheme.warning : AppTheme.forestGreen);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: bg,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _togglePaidStatus(Invoice inv) async {
+    if (inv.isPaid) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Undo Paid Status'),
+          content: Text(
+            'Are you sure you want to mark Invoice ${inv.number} as UNPAID? This will return it to pending status.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Yes, Mark Unpaid'),
+            ),
+          ],
+        ),
+      );
+      if (confirm != true) return;
+      final res = await _vm.markAsUnpaid(inv.id);
+      _showSnack(res.message, isWarning: !res.synced);
+    } else {
+      final res = await _vm.markAsPaid(inv.id);
+      _showSnack(res.message, isWarning: !res.synced);
+    }
+  }
+
+  Future<void> _handlePrintPdf(Invoice inv, Restaurant? rest) async {
+    final vault = context.read<VaultRepository>();
+    setState(() => _pdfBusy = true);
+    try {
+      await InvoicePdfBuilder.previewAndPrint(
+        invoice: inv,
+        restaurant: rest,
+        settings: vault.settings,
+      );
+    } catch (e) {
+      _showSnack('Failed to generate PDF: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _pdfBusy = false);
+    }
+  }
+
+  Future<void> _handleSharePdf(Invoice inv, Restaurant? rest) async {
+    final vault = context.read<VaultRepository>();
+    setState(() => _pdfBusy = true);
+    try {
+      await InvoicePdfBuilder.sharePdfFile(
+        invoice: inv,
+        restaurant: rest,
+        settings: vault.settings,
+      );
+    } catch (e) {
+      _showSnack('Failed to share PDF: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _pdfBusy = false);
+    }
+  }
+
+  Future<void> _handleShareWhatsApp(Invoice inv, Restaurant? rest) async {
+    final vault = context.read<VaultRepository>();
+    setState(() => _pdfBusy = true);
+    try {
+      await InvoicePdfBuilder.shareViaWhatsApp(
+        invoice: inv,
+        restaurant: rest,
+        settings: vault.settings,
+      );
+    } catch (e) {
+      _showSnack('Could not open WhatsApp: $e', isError: true);
+    } finally {
+      if (mounted) setState(() => _pdfBusy = false);
+    }
+  }
+
+  Future<void> _handleDelete(Invoice inv) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete Invoice'),
+        content: Text(
+          'Invoice ${inv.number} will be moved to the Recycle Bin. You can restore it later.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.danger),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Yes, Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    final res = await _vm.softDeleteInvoice(inv.id);
+    if (!mounted) return;
+    _showSnack(res.message, isWarning: !res.synced);
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final vault = context.watch<VaultRepository>();
+
+    return ListenableBuilder(
+      listenable: _vm,
+      builder: (context, _) {
+        final inv = _vm.findInvoiceById(widget.invoiceId);
+        if (inv == null) {
+          return Scaffold(
+            backgroundColor: AppTheme.surfaceSage,
+            appBar: AppBar(title: const Text('Invoice')),
+            body: const Center(
+              child: Text('Invoice was not found or has been deleted.'),
+            ),
+          );
+        }
+
+        final rest = _vm.resolveRestaurant(inv);
+        final clientName = _vm.displayRestaurantName(inv);
+        final kraPin = Restaurant.normalizeKraPin(rest?.kraPin);
+        final signatureBytes =
+            InvoicePdfBuilder.decodeSignatureDataUrl(vault.settings.signature);
+
+        return Scaffold(
+          backgroundColor: AppTheme.surfaceSage,
+          appBar: AppBar(
+            title: Text('Invoice ${inv.number}'),
+            actions: [
+              IconButton(
+                tooltip: 'Edit invoice',
+                icon: const Icon(Icons.edit_outlined),
+                onPressed: () {
+                  if (widget.onEdit != null) {
+                    widget.onEdit!(inv);
+                    return;
+                  }
+                  Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => InvoiceEditorScreen(
+                        viewModel: _vm,
+                        initialInvoice: inv,
+                        onOpenScanner: widget.onOpenScanner,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              IconButton(
+                tooltip: 'Delete invoice',
+                icon: const Icon(Icons.delete_outline),
+                onPressed: () => _handleDelete(inv),
+              ),
+            ],
+          ),
+          bottomNavigationBar: Container(
+            decoration: const BoxDecoration(
+              color: AppTheme.surfaceCard,
+              border: Border(top: BorderSide(color: AppTheme.borderSubtle)),
+            ),
+            padding: EdgeInsets.fromLTRB(
+              16,
+              10,
+              16,
+              10 +
+                  math.max(
+                    MediaQuery.viewPaddingOf(context).bottom,
+                    MediaQuery.paddingOf(context).bottom,
+                  ),
+            ),
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              alignment: WrapAlignment.spaceBetween,
+              children: [
+                FilledButton.icon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor:
+                        inv.isPaid ? AppTheme.slateDark : AppTheme.forestGreen,
+                  ),
+                  onPressed: () => _togglePaidStatus(inv),
+                  icon: Icon(
+                    inv.isPaid
+                        ? Icons.undo_outlined
+                        : Icons.check_circle_outline,
+                    size: 18,
+                  ),
+                  label: Text(inv.isPaid ? 'Mark as Unpaid' : 'Mark as Paid'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _pdfBusy ? null : () => _handlePrintPdf(inv, rest),
+                  icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
+                  label: const Text('PDF'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _pdfBusy ? null : () => _handleSharePdf(inv, rest),
+                  icon: const Icon(Icons.share_outlined, size: 18),
+                  label: const Text('Share'),
+                ),
+                FilledButton.tonalIcon(
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppTheme.sageTint,
+                    foregroundColor: AppTheme.forestGreenDeep,
+                  ),
+                  onPressed:
+                      _pdfBusy ? null : () => _handleShareWhatsApp(inv, rest),
+                  icon: const Icon(Icons.chat_outlined, size: 18),
+                  label: const Text('WhatsApp'),
+                ),
+              ],
+            ),
+          ),
+          body: ListView(
+            padding: const EdgeInsets.all(16),
+            children: [
+              Card(
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Container(
+                      color: AppTheme.leafGreen,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 18,
+                        vertical: 16,
+                      ),
+                      child: Row(
+                        children: [
+                          Image.asset(
+                            'assets/logo.png',
+                            height: 44,
+                            fit: BoxFit.contain,
+                            errorBuilder: (_, _, _) => const Icon(
+                              Icons.eco_outlined,
+                              color: Colors.white,
+                              size: 32,
+                            ),
+                          ),
+                          const Spacer(),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: inv.isPaid
+                                  ? AppTheme.forestGreenDeep
+                                  : AppTheme.slateDark,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: Text(
+                              inv.isPaid
+                                  ? 'PAID & PROCESSED'
+                                  : inv.status.toUpperCase(),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'INVOICE',
+                                style: TextStyle(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.leafGreen,
+                                ),
+                              ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    'Receipt No: ${inv.number}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.slateInk,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Order Date: ${InvoiceFormatters.formatDisplayDate(inv.date)}',
+                                    style: const TextStyle(
+                                      fontSize: 12.5,
+                                      color: AppTheme.slateMuted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          const Divider(height: 1),
+                          const SizedBox(height: 14),
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'FROM:',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppTheme.slateMuted,
+                                      ),
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Town Treasure Limited',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: AppTheme.forestGreen,
+                                      ),
+                                    ),
+                                    SizedBox(height: 3),
+                                    Text(
+                                      '0708567696',
+                                      style: TextStyle(fontSize: 12),
+                                    ),
+                                    Text(
+                                      'thetowntreasure25@gmail.com',
+                                      style: TextStyle(fontSize: 12),
+                                    ),
+                                    Text(
+                                      'towntreasuregroceries.com',
+                                      style: TextStyle(fontSize: 12),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.end,
+                                  children: [
+                                    const Text(
+                                      'BILLED TO:',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppTheme.slateMuted,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      clientName,
+                                      textAlign: TextAlign.right,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w700,
+                                        color: AppTheme.slateInk,
+                                      ),
+                                    ),
+                                    if (kraPin.isNotEmpty) ...[
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        'KRA PIN: $kraPin',
+                                        textAlign: TextAlign.right,
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppTheme.slateDark,
+                                        ),
+                                      ),
+                                    ],
+                                    if (rest != null &&
+                                        rest.address.isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        rest.address,
+                                        textAlign: TextAlign.right,
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
+                                    ],
+                                    if (rest != null &&
+                                        rest.phone.isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        rest.phone,
+                                        textAlign: TextAlign.right,
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 16),
+                          Container(
+                            color: AppTheme.slateDark,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            child: const Row(
+                              children: [
+                                SizedBox(
+                                  width: 28,
+                                  child: Text(
+                                    '#',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 3,
+                                  child: Text(
+                                    'ITEM',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 2,
+                                  child: Text(
+                                    'QTY',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                Expanded(
+                                  flex: 2,
+                                  child: Text(
+                                    'TOTAL',
+                                    textAlign: TextAlign.right,
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          ...List.generate(inv.items.length, (i) {
+                            final it = inv.items[i];
+                            final lineTotal = it.total > 0
+                                ? it.total
+                                : (it.qty * it.sellPrice);
+                            return Container(
+                              color: i.isOdd
+                                  ? AppTheme.surfaceSage
+                                  : AppTheme.surfaceCard,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 9,
+                              ),
+                              child: Row(
+                                children: [
+                                  SizedBox(
+                                    width: 28,
+                                    child: Text(
+                                      (i + 1).toString().padLeft(2, '0'),
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 3,
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          it.desc,
+                                          style: const TextStyle(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        Text(
+                                          'KSh ${InvoiceFormatters.formatMoney(it.sellPrice)} / ${it.unit}',
+                                          style: const TextStyle(
+                                            fontSize: 11,
+                                            color: AppTheme.slateMuted,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 2,
+                                    child: Text(
+                                      '${it.qty} ${it.unit}',
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                  ),
+                                  Expanded(
+                                    flex: 2,
+                                    child: Text(
+                                      'KSh ${InvoiceFormatters.formatMoney(lineTotal)}',
+                                      textAlign: TextAlign.right,
+                                      style: const TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                          const SizedBox(height: 14),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 10,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppTheme.leafGreen,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Row(
+                              mainAxisAlignment:
+                                  MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Flexible(
+                                  child: Text(
+                                    'Grand Total:',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Flexible(
+                                  child: Text(
+                                    'KSh ${InvoiceFormatters.formatMoney(inv.totalSell)}',
+                                    textAlign: TextAlign.right,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: Container(
+                              width: 195,
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: AppTheme.slateDark,
+                                  width: 2,
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Column(
+                                children: [
+                                  Image.asset(
+                                    'assets/stamp.png',
+                                    height: 36,
+                                    fit: BoxFit.contain,
+                                    errorBuilder: (_, _, _) => const Text(
+                                      'TOWN TREASURE GROCERIES',
+                                      style: TextStyle(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    inv.isPaid
+                                        ? 'PAID & PROCESSED'
+                                        : 'AUTHORIZED',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.8,
+                                    ),
+                                  ),
+                                  Text(
+                                    'DATE: ${InvoiceFormatters.formatDisplayDate(InvoiceFormatters.todayIso())}',
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontFamily: 'monospace',
+                                      color: AppTheme.danger,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  if (signatureBytes != null)
+                                    Image.memory(
+                                      signatureBytes,
+                                      height: 36,
+                                      fit: BoxFit.contain,
+                                    )
+                                  else
+                                    const Text(
+                                      'No saved signature',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: AppTheme.slateMuted,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Internal Cost & Profit Summary',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.slateInk,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Buy: KES ${InvoiceFormatters.formatMoney(inv.totalBuy)}  |  Ops: KES ${InvoiceFormatters.formatMoney(inv.deliveryCost + inv.otherCost)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.slateMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Text(
+                        'KES ${InvoiceFormatters.formatMoney(inv.profit)}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: 15,
+                          color: inv.profit >= 0
+                              ? AppTheme.forestGreen
+                              : AppTheme.danger,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}

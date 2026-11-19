@@ -1,0 +1,51 @@
+name: town_treasure_groceries
+description: "Town Treasure Groceries mobile application for invoice, ledger, payroll, price list, and clerk staging management."
+publish_to: 'none'
+
+version: 1.0.2+3
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8
+  supabase_flutter: ^2.8.0
+  cryptography: ^2.7.0
+  flutter_secure_storage: ^9.2.2
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+  local_auth: ^2.3.0
+  package_info_plus: ^8.0.2
+  open_filex: ^4.5.0
+  crypto: ^3.0.5
+  path_provider: ^2.1.4
+  http: ^1.2.2
+  provider: ^6.1.2
+  intl: ^0.19.0
+  pdf: ^3.11.1
+  printing: ^5.13.2
+  share_plus: ^10.0.2
+  image_picker: ^1.1.2
+  google_mlkit_text_recognition: ^0.13.1
+  image: ^4.2.0
+  fl_chart: ^0.69.0
+  excel: ^4.0.6
+  flutter_local_notifications: ^17.2.2
+  url_launcher: ^6.3.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  sqflite_common_ffi: ^2.3.3+1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo.png
+    - assets/logo.jpg
+    - assets/stamp.png
+    - assets/favicon.png
