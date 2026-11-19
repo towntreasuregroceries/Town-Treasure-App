@@ -19,8 +19,111 @@ class UpdateCheckerSheet extends StatefulWidget {
   final RemoteUpdateService updateService;
   final String manifestUrl;
 
+  /// Opens the OTA updater bottom sheet with a standard modal presentation.
+  static Future<void> show(
+    BuildContext context, {
+    required RemoteUpdateService updateService,
+    required String manifestUrl,
+  }) {
+    return showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => UpdateCheckerSheet(
+        updateService: updateService,
+        manifestUrl: manifestUrl,
+      ),
+    );
+  }
+
   @override
   State<UpdateCheckerSheet> createState() => _UpdateCheckerSheetState();
+}
+
+/// Shared in-app banner notifying Owner or Clerk users of a newer APK release.
+class UpdateAvailableBanner extends StatelessWidget {
+  const UpdateAvailableBanner({
+    super.key,
+    required this.version,
+    required this.releaseNotes,
+    required this.onOpenUpdater,
+  });
+
+  final String version;
+  final String releaseNotes;
+  final VoidCallback onOpenUpdater;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('banner_update_available'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.infoSurface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppTheme.info.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: AppTheme.info.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.system_update_outlined,
+              color: AppTheme.info,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Update Available (v$version)',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.slateInk,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  releaseNotes.isNotEmpty
+                      ? releaseNotes
+                      : 'A newer signed release is ready to install.',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.slateMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.tonal(
+            key: const Key('btn_open_update_banner'),
+            onPressed: onOpenUpdater,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.info,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _UpdateCheckerSheetState extends State<UpdateCheckerSheet> {

@@ -8,9 +8,11 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../data/repositories/staging_repository.dart';
 import '../../../data/services/duplicate_detector_service.dart';
 import '../../../data/services/ocr_consensus_service.dart';
+import '../../../data/services/remote_update_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
 import '../../core/theme/app_theme.dart';
+import '../dashboard/update_checker_sheet.dart';
 import '../scanner/docket_scanner_sheet.dart';
 import 'clerk_view_model.dart';
 
@@ -45,12 +47,16 @@ class ClerkPortalScreen extends StatefulWidget {
     this.initialInviteToken,
     this.allowOwnerQuickPair = false,
     this.standaloneClerkApp = false,
+    this.updateService,
+    this.updateManifestUrl = RemoteUpdateService.defaultClerkManifestUrl,
   });
 
   final ClerkViewModel viewModel;
   final String? initialInviteToken;
   final bool allowOwnerQuickPair;
   final bool standaloneClerkApp;
+  final RemoteUpdateService? updateService;
+  final String updateManifestUrl;
 
   @override
   State<ClerkPortalScreen> createState() => _ClerkPortalScreenState();
@@ -138,6 +144,9 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
           widget.viewModel.savedClerkName.isNotEmpty &&
           _clerkNameController.text.isEmpty) {
         _clerkNameController.text = widget.viewModel.savedClerkName;
+      }
+      if (mounted && widget.standaloneClerkApp) {
+        unawaited(widget.viewModel.runSilentUpdateCheck());
       }
     });
   }
@@ -704,6 +713,20 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
     );
   }
 
+  Future<void> _openUpdateChecker() async {
+    final service = widget.updateService ??
+        widget.viewModel.updateService ??
+        RemoteUpdateService();
+    final manifestUrl = widget.updateManifestUrl.trim().isNotEmpty
+        ? widget.updateManifestUrl
+        : widget.viewModel.updateManifestUrl;
+    await UpdateCheckerSheet.show(
+      context,
+      updateService: service,
+      manifestUrl: manifestUrl,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final vm = widget.viewModel;
@@ -724,6 +747,20 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
               : 'Clerk Intake Portal',
         ),
         actions: [
+          if (widget.standaloneClerkApp)
+            IconButton(
+              key: const Key('btn_clerk_check_updates'),
+              tooltip: vm.hasUpdateAvailable
+                  ? 'App Update Available'
+                  : 'Check for App Updates',
+              onPressed: _openUpdateChecker,
+              icon: Badge(
+                isLabelVisible: vm.hasUpdateAvailable,
+                backgroundColor: AppTheme.info,
+                smallSize: 8,
+                child: const Icon(Icons.system_update_outlined),
+              ),
+            ),
           if (vm.hasClerkInvite)
             IconButton(
               tooltip: 'Refresh History & Verify Token',
@@ -735,6 +772,16 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
       body: ListView(
         padding: const EdgeInsets.all(14),
         children: [
+          if (widget.standaloneClerkApp &&
+              vm.hasUpdateAvailable &&
+              vm.availableUpdate?.manifest != null) ...[
+            UpdateAvailableBanner(
+              version: vm.availableUpdate!.manifest!.version,
+              releaseNotes: vm.availableUpdate!.manifest!.releaseNotes,
+              onOpenUpdater: _openUpdateChecker,
+            ),
+            const SizedBox(height: 12),
+          ],
           // 1. Invite Token Pairing / Verified Route Banner
           if (!canSend)
             _buildPairingCard(vm)

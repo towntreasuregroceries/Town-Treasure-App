@@ -16,6 +16,7 @@ import 'package:town_treasure_groceries/data/services/crypto_service.dart';
 import 'package:town_treasure_groceries/data/services/duplicate_detector_service.dart';
 import 'package:town_treasure_groceries/data/services/local_storage_service.dart';
 import 'package:town_treasure_groceries/data/services/ocr_consensus_service.dart';
+import 'package:town_treasure_groceries/data/services/remote_update_service.dart';
 import 'package:town_treasure_groceries/data/services/supabase_service.dart';
 import 'package:town_treasure_groceries/domain/models/models.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
@@ -1720,6 +1721,93 @@ void main() {
       await tester.pumpAndSettle();
       expect(approvedCallbackInv, isNotNull);
       expect(approvedCallbackInv!.restaurantName, 'The Golden Crest Hotel');
+    });
+
+    testWidgets(
+        'ClerkPortalScreen standalone mode checks clerk-update.json, renders UpdateAvailableBanner, and opens UpdateCheckerSheet',
+        (tester) async {
+      final storage = _InMemoryLocalStorageService();
+      final supabase = _ClerkFakeSupabaseGateway();
+      final vault = VaultRepository(
+        cryptoService: CryptoService(),
+        localStorage: storage,
+        supabase: supabase,
+      );
+      addTearDown(vault.dispose);
+      final staging = StagingRepository(
+        supabase: supabase,
+        localStorage: storage,
+        vaultRepository: vault,
+      );
+
+      String? checkedUrl;
+      String? openedApkPath;
+      final apkBytes = utf8.encode('fake-clerk-apk-v1.1.7');
+      final digestHex =
+          '0000000000000000000000000000000000000000000000000000000000000000';
+      // Real HTTP MockClient validating defaultClerkManifestUrl and download flow
+      final mockUpdater = RemoteUpdateService(
+        versionProvider: () async => (version: '1.1.6', buildNumber: 2010),
+        tempDirProvider: () async => Directory.systemTemp,
+        apkOpener: (path) async {
+          openedApkPath = path;
+          return true;
+        },
+        httpClient: MockClient((req) async {
+          if (req.url.toString() == RemoteUpdateService.defaultClerkManifestUrl) {
+            checkedUrl = req.url.toString();
+            return http.Response(
+              jsonEncode({
+                'version': '1.1.7',
+                'buildNumber': 2011,
+                'apkUrl':
+                    'https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.1.7/TownTreasureClerk.apk',
+                'sha256': digestHex,
+                'releaseNotes': 'Clerk OTA auto-update support.',
+                'mandatory': false,
+              }),
+              200,
+            );
+          }
+          return http.Response.bytes(apkBytes, 200);
+        }),
+      );
+
+      final vm = ClerkViewModel(
+        stagingRepository: staging,
+        vaultRepository: vault,
+        supabase: supabase,
+        localStorage: storage,
+        ocrService: OcrConsensusService(),
+        duplicateDetector: DuplicateDetectorService(),
+        updateService: mockUpdater,
+      );
+      addTearDown(vm.dispose);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: ClerkPortalScreen(
+            viewModel: vm,
+            standaloneClerkApp: true,
+            updateService: mockUpdater,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Silent check ran on startup against clerk-update.json even before pairing
+      expect(checkedUrl, RemoteUpdateService.defaultClerkManifestUrl);
+      expect(find.byKey(const Key('banner_update_available')), findsOneWidget);
+      expect(find.text('Update Available (v1.1.7)'), findsOneWidget);
+      expect(find.byKey(const Key('btn_clerk_check_updates')), findsOneWidget);
+
+      // Tapping the banner opens UpdateCheckerSheet wired to clerk-update.json
+      await tester.tap(find.byKey(const Key('btn_open_update_banner')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('btn_install_update')), findsOneWidget);
+      expect(openedApkPath, isNull);
     });
   });
 }

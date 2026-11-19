@@ -7,6 +7,7 @@ import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/duplicate_detector_service.dart';
 import '../../../data/services/local_storage_service.dart';
 import '../../../data/services/ocr_consensus_service.dart';
+import '../../../data/services/remote_update_service.dart';
 import '../../../data/services/supabase_service.dart';
 import '../../../domain/models/models.dart';
 
@@ -110,16 +111,23 @@ class ClerkViewModel extends ChangeNotifier {
     required LocalStorageService localStorage,
     required OcrConsensusService ocrService,
     required DuplicateDetectorService duplicateDetector,
+    this._updateService,
+    this._updateManifestUrl = RemoteUpdateService.defaultClerkManifestUrl,
+    DateTime Function()? clock,
   })  : _staging = stagingRepository,
         _vault = vaultRepository,
         _storage = localStorage,
         _ocr = ocrService,
-        _audit = duplicateDetector;
+        _audit = duplicateDetector,
+        _clock = clock ?? DateTime.now;
 
   static const String keyClerkInviteToken = 'ttg_clerk_invite_token';
   static const String keyClerkInviteMeta = 'ttg_clerk_invite_meta';
   static const String keyClerkName = 'ttg_clerk_name';
   static const String keyClerkSubmissionKey = 'ttg_clerk_submission_key';
+  static const String keyLastClerkUpdateCheckAt =
+      'ttg_clerk_last_update_check_at';
+  static const Duration silentUpdateCheckInterval = Duration(hours: 6);
   static const String defaultClerkWebBaseUrl =
       'https://towntreasuregroceries.github.io/Town-Treasure-App/clerk.html';
 
@@ -129,10 +137,15 @@ class ClerkViewModel extends ChangeNotifier {
   final LocalStorageService _storage;
   final OcrConsensusService _ocr;
   final DuplicateDetectorService _audit;
+  final RemoteUpdateService? _updateService;
+  final String _updateManifestUrl;
+  final DateTime Function() _clock;
 
   OcrConsensusService get ocrService => _ocr;
   DuplicateDetectorService get duplicateDetector => _audit;
   List<Restaurant> get vaultRestaurants => _vault.restaurants;
+  RemoteUpdateService? get updateService => _updateService;
+  String get updateManifestUrl => _updateManifestUrl;
 
   // --- Owner Inbox State ---
   List<StagingDocket> _submissions = [];
@@ -208,8 +221,44 @@ class ClerkViewModel extends ChangeNotifier {
   bool _isLoadingClerkHistory = false;
   String? _clerkHistoryError;
   AuditResult? _liveDuplicateWarning;
+  UpdateCheckResult? _availableUpdate;
 
   String get clerkInviteToken => _clerkInviteToken;
+  UpdateCheckResult? get availableUpdate => _availableUpdate;
+  bool get hasUpdateAvailable => _availableUpdate?.updateAvailable == true;
+
+  /// Silently checks `clerk-update.json` for a newer standalone Clerk APK without interrupting offline work.
+  Future<void> runSilentUpdateCheck({bool force = false}) async {
+    final updater = _updateService;
+    if (updater == null) return;
+    if (_updateManifestUrl.trim().isEmpty) return;
+
+    final now = _clock();
+    if (!force) {
+      final rawLast = await _storage.getRaw(keyLastClerkUpdateCheckAt);
+      final lastAt = DateTime.tryParse(rawLast ?? '');
+      if (lastAt != null) {
+        final elapsed = now.difference(lastAt);
+        if (!elapsed.isNegative && elapsed < silentUpdateCheckInterval) {
+          return;
+        }
+      }
+    }
+
+    try {
+      final result = await updater
+          .checkForUpdate(_updateManifestUrl)
+          .timeout(const Duration(seconds: 6));
+      await _storage.setRaw(
+        keyLastClerkUpdateCheckAt,
+        now.toUtc().toIso8601String(),
+      );
+      _availableUpdate = result;
+      notifyListeners();
+    } catch (_) {
+      // Offline / DNS failures stay silent on startup checks.
+    }
+  }
   bool get hasClerkInvite => _clerkInviteToken.isNotEmpty;
   String get savedClerkName => _savedClerkName;
   String get inviteOwnerName => _inviteOwnerName;

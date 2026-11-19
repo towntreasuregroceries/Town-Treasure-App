@@ -81,6 +81,11 @@ typedef ApkFileOpener = Future<bool> Function(String filePath);
 /// Checks a remote JSON manifest, downloads the APK, verifies its SHA-256 digest,
 /// and hands off installation to Android via `open_filex` + FileProvider.
 class RemoteUpdateService {
+  static const String defaultOwnerManifestUrl =
+      'https://towntreasuregroceries.github.io/Town-Treasure-App/app-update.json';
+  static const String defaultClerkManifestUrl =
+      'https://towntreasuregroceries.github.io/Town-Treasure-App/clerk-update.json';
+
   RemoteUpdateService({
     http.Client? httpClient,
     PackageVersionProvider? versionProvider,

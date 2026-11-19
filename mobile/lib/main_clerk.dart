@@ -7,6 +7,7 @@ import 'data/services/crypto_service.dart';
 import 'data/services/duplicate_detector_service.dart';
 import 'data/services/local_storage_service.dart';
 import 'data/services/ocr_consensus_service.dart';
+import 'data/services/remote_update_service.dart';
 import 'data/services/supabase_service.dart';
 import 'ui/core/theme/app_theme.dart';
 import 'ui/features/clerk/clerk_portal_screen.dart';
@@ -36,6 +37,7 @@ Future<void> main() async {
   );
   final ocrService = OcrConsensusService();
   final duplicateDetectorService = DuplicateDetectorService();
+  final remoteUpdateService = RemoteUpdateService();
 
   final clerkViewModel = ClerkViewModel(
     stagingRepository: stagingRepository,
@@ -44,6 +46,8 @@ Future<void> main() async {
     localStorage: localStorageService,
     ocrService: ocrService,
     duplicateDetector: duplicateDetectorService,
+    updateService: remoteUpdateService,
+    updateManifestUrl: RemoteUpdateService.defaultClerkManifestUrl,
   );
 
   runApp(
@@ -54,6 +58,7 @@ Future<void> main() async {
       stagingRepository: stagingRepository,
       ocrService: ocrService,
       duplicateDetectorService: duplicateDetectorService,
+      remoteUpdateService: remoteUpdateService,
       clerkViewModel: clerkViewModel,
     ),
   );
@@ -68,6 +73,7 @@ class TownTreasureClerkApp extends StatelessWidget {
     required this.stagingRepository,
     required this.ocrService,
     required this.duplicateDetectorService,
+    required this.remoteUpdateService,
     required this.clerkViewModel,
   });
 
@@ -77,6 +83,7 @@ class TownTreasureClerkApp extends StatelessWidget {
   final StagingRepository stagingRepository;
   final OcrConsensusService ocrService;
   final DuplicateDetectorService duplicateDetectorService;
+  final RemoteUpdateService remoteUpdateService;
   final ClerkViewModel clerkViewModel;
 
   @override
@@ -87,6 +94,7 @@ class TownTreasureClerkApp extends StatelessWidget {
         Provider<SupabaseGateway>.value(value: supabaseService),
         Provider<OcrConsensusService>.value(value: ocrService),
         Provider<DuplicateDetectorService>.value(value: duplicateDetectorService),
+        Provider<RemoteUpdateService>.value(value: remoteUpdateService),
         ChangeNotifierProvider<VaultRepository>.value(value: vaultRepository),
         ChangeNotifierProvider<StagingRepository>.value(
           value: stagingRepository,
@@ -101,6 +109,8 @@ class TownTreasureClerkApp extends StatelessWidget {
           viewModel: clerkViewModel,
           allowOwnerQuickPair: false,
           standaloneClerkApp: true,
+          updateService: remoteUpdateService,
+          updateManifestUrl: RemoteUpdateService.defaultClerkManifestUrl,
         ),
       ),
     );
