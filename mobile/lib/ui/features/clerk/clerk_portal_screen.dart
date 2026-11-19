@@ -9,6 +9,7 @@ import '../../../data/repositories/staging_repository.dart';
 import '../../../data/services/duplicate_detector_service.dart';
 import '../../../data/services/ocr_consensus_service.dart';
 import '../../../domain/models/models.dart';
+import '../../core/app_lock_guard.dart';
 import '../../core/theme/app_theme.dart';
 import '../scanner/docket_scanner_sheet.dart';
 import 'clerk_view_model.dart';
@@ -275,6 +276,19 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
       }
     } catch (e) {
       if (mounted) _showSnack('Gallery error: $e', color: AppTheme.danger);
+    }
+  }
+
+  Future<void> _pickPdf() async {
+    try {
+      final pages = await AppLockGuard.runWithoutRelock(
+        () => widget.viewModel.ocrService.pickPdfPages(),
+      );
+      if (pages.isNotEmpty && mounted) {
+        setState(() => _photoPages.addAll(pages));
+      }
+    } catch (e) {
+      if (mounted) _showSnack('PDF load error: $e', color: AppTheme.danger);
     }
   }
 
@@ -938,6 +952,13 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
                               icon: const Icon(Icons.photo_library_outlined,
                                   size: 18),
                               label: const Text('Gallery (Multi)'),
+                            ),
+                            OutlinedButton.icon(
+                              key: const Key('btn_clerk_pick_pdf'),
+                              onPressed: _pickPdf,
+                              icon: const Icon(Icons.picture_as_pdf_outlined,
+                                  size: 18),
+                              label: const Text('Upload PDF'),
                             ),
                           ],
                         ),

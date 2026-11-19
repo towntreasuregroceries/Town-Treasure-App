@@ -18,6 +18,7 @@ import 'package:town_treasure_groceries/domain/models/models.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
 import 'package:town_treasure_groceries/ui/features/auth/auth_screen.dart';
 import 'package:town_treasure_groceries/ui/features/auth/auth_view_model.dart';
+import 'package:town_treasure_groceries/ui/features/dashboard/background_update_worker.dart';
 import 'package:town_treasure_groceries/ui/features/dashboard/change_password_dialog.dart';
 import 'package:town_treasure_groceries/ui/features/dashboard/dashboard_screen.dart';
 import 'package:town_treasure_groceries/ui/features/dashboard/dashboard_view_model.dart';
@@ -1169,6 +1170,116 @@ void main() {
       expect(statementsOpened, isTrue);
       expect(invoicesOpened, isFalse);
       expect(openedExpenseTab, isNull);
+    });
+
+    test(
+        'BackgroundAlertRunner dispatches all smart alerts while app is closed and respects cooldowns',
+        () async {
+      final f = await _createFixture();
+      addTearDown(f.storage.close);
+      addTearDown(f.vault.dispose);
+
+      await f.auth.signIn('owner@ttg.test', 'vault-pass');
+      await f.storage.setRaw('ttg_overdue_notifications', 'true');
+      await f.vault.setInvoices([
+        const Invoice(
+          id: 'inv-od',
+          number: 'TTG-401',
+          restaurantId: 'r1',
+          restaurantName: 'Kempinski Hotel',
+          date: '2026-09-01',
+          dueDate: '2026-09-10',
+          totalSell: 15000,
+          totalBuy: 11000,
+          profit: 4000,
+          status: 'overdue',
+        ),
+      ], sync: false);
+      await f.vault.setStaff([
+        const Staff(
+          id: 's-1',
+          name: 'Samuel K',
+          role: 'Driver',
+          salary: 22000,
+          payDay: '1',
+          status: 'active',
+        ),
+      ], sync: false);
+      await f.vault.setRecurringExpenses([
+        const RecurringExpense(
+          id: 'rec-1',
+          desc: 'Coldroom Electricity',
+          category: 'utilities',
+          amount: 4500,
+          dueDay: '2',
+        ),
+      ], sync: false);
+
+      f.supabase.stagedInvoices.add({
+        'id': 'stg_bg_1',
+        'owner_user_id': 'user-1',
+        'clerk_name': 'Daniel',
+        'restaurant_name': 'Sankara Suites',
+        'invoice_date': '2026-11-02',
+        'status': 'pending',
+        'notes': '',
+        'items_json': [],
+      });
+
+      final notifications = FakeOverdueNotificationGateway();
+      const manifest = AppUpdateManifest(
+        version: '1.1.2',
+        buildNumber: 6,
+        apkUrl: 'https://updates.example.com/ttg-1.1.2.apk',
+        sha256:
+            '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        releaseNotes: 'PDF OCR and 30m background alerts.',
+      );
+      final updater = FakeRemoteUpdateService(
+        result: const UpdateCheckResult(
+          updateAvailable: true,
+          currentVersion: '1.1.1',
+          currentBuildNumber: 5,
+          manifest: manifest,
+        ),
+      );
+
+      final now = DateTime(2026, 11, 2, 10, 0);
+      await BackgroundAlertRunner.runCheck(
+        storage: f.storage,
+        vault: f.vault,
+        supabase: f.supabase,
+        updateService: updater,
+        overdueNotifier: notifications,
+        smartNotifier: notifications,
+        clock: () => now,
+      );
+
+      expect(notifications.showCalls, 1);
+      expect(notifications.lastOverdueCount, 1);
+      expect(
+        notifications.categoryCalls.map((c) => c.category).toSet(),
+        containsAll([
+          NotificationCategory.payrollDue,
+          NotificationCategory.recurringBills,
+          NotificationCategory.monthlyStatements,
+          NotificationCategory.clerkSubmissions,
+          NotificationCategory.appUpdates,
+        ]),
+      );
+
+      // Running 30 minutes later skips duplicates cleanly.
+      await BackgroundAlertRunner.runCheck(
+        storage: f.storage,
+        vault: f.vault,
+        supabase: f.supabase,
+        updateService: updater,
+        overdueNotifier: notifications,
+        smartNotifier: notifications,
+        clock: () => now.add(const Duration(minutes: 30)),
+      );
+      expect(notifications.showCalls, 1);
+      expect(notifications.categoryCalls.length, 5);
     });
   });
 }

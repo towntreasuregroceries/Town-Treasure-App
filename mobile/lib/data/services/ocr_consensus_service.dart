@@ -1,8 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
@@ -123,6 +124,39 @@ class DeviceImagePickerGateway implements ImagePickerGateway {
   }
 }
 
+/// Platform interface for picking a PDF document and rasterizing its pages
+/// into local JPEG images for multi-page offline & cloud OCR.
+abstract class PdfPagePickerGateway {
+  Future<List<({String? filePath, Uint8List bytes})>> pickPdfRenderedPages();
+}
+
+/// Android `ACTION_OPEN_DOCUMENT` + `PdfRenderer` implementation via MethodChannel.
+class MethodChannelPdfPagePickerGateway implements PdfPagePickerGateway {
+  MethodChannelPdfPagePickerGateway([MethodChannel? channel])
+      : _channel = channel ?? const MethodChannel(_channelName);
+
+  static const String _channelName = 'com.towntreasuregroceries/pdf_picker';
+  final MethodChannel _channel;
+
+  @override
+  Future<List<({String? filePath, Uint8List bytes})>> pickPdfRenderedPages() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return const [];
+    }
+    final raw = await _channel.invokeListMethod<dynamic>('pickAndRenderPdf');
+    if (raw == null) return const [];
+    final pages = <({String? filePath, Uint8List bytes})>[];
+    for (final entry in raw) {
+      if (entry is! Map) continue;
+      final rawBytes = entry['bytes'];
+      if (rawBytes is! Uint8List || rawBytes.isEmpty) continue;
+      final path = entry['filePath']?.toString();
+      pages.add((filePath: path, bytes: rawBytes));
+    }
+    return pages;
+  }
+}
+
 /// Captured image page ready for OCR and receipt attachment.
 class OcrImagePage {
   const OcrImagePage({
@@ -204,12 +238,14 @@ class OcrConsensusService {
     OcrTextRecognizerGateway? textRecognizer,
     PaddleOcrGateway? paddleOcr,
     ImagePickerGateway? imagePicker,
+    PdfPagePickerGateway? pdfPicker,
     String? geminiApiKey,
     this.apiKeyProvider,
   })  : _http = httpClient ?? http.Client(),
         _textRecognizer = textRecognizer ?? MlKitTextRecognizerGateway(),
         _paddleOcr = paddleOcr ?? MethodChannelPaddleOcrGateway(),
         _imagePicker = imagePicker ?? DeviceImagePickerGateway(),
+        _pdfPicker = pdfPicker ?? MethodChannelPdfPagePickerGateway(),
         _staticApiKey = geminiApiKey;
 
   static const List<String> models = [
@@ -264,6 +300,7 @@ class OcrConsensusService {
   final OcrTextRecognizerGateway _textRecognizer;
   final PaddleOcrGateway _paddleOcr;
   final ImagePickerGateway _imagePicker;
+  final PdfPagePickerGateway _pdfPicker;
   final String? _staticApiKey;
   final String? Function()? apiKeyProvider;
 
@@ -313,6 +350,31 @@ class OcrConsensusService {
       final bytes = await file.readAsBytes();
       final dataUrl = compressAndEncodeDataUrl(bytes, maxDim: maxDim, quality: quality);
       pages.add(OcrImagePage(dataUrl: dataUrl, filePath: file.path, bytes: bytes));
+    }
+    return pages;
+  }
+
+  /// Picks a PDF file from device storage and renders its pages as high-res
+  /// JPEG pages ready for offline `PP-OCRv5` ONNX, ML Kit, and Cloud Vision.
+  Future<List<OcrImagePage>> pickPdfPages({
+    int maxDim = 1800,
+    int quality = 88,
+  }) async {
+    final rendered = await _pdfPicker.pickPdfRenderedPages();
+    final pages = <OcrImagePage>[];
+    for (final r in rendered) {
+      final dataUrl = compressAndEncodeDataUrl(
+        r.bytes,
+        maxDim: maxDim,
+        quality: quality,
+      );
+      pages.add(
+        OcrImagePage(
+          dataUrl: dataUrl,
+          filePath: r.filePath,
+          bytes: r.bytes,
+        ),
+      );
     }
     return pages;
   }

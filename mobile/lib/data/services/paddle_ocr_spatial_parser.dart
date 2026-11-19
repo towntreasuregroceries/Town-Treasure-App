@@ -116,6 +116,12 @@ class SpatialOcrParser {
   static const Set<String> _knownUnits = {
     'kg',
     'kgs',
+    'ky',
+    'kys',
+    'kq',
+    'kqs',
+    'k9',
+    'k9s',
     'kilogram',
     'kilograms',
     'crate',
@@ -153,21 +159,88 @@ class SpatialOcrParser {
     'packets',
   };
 
-  /// Estimates dominant skew angle from wide boxes, rotates coordinates flat,
-  /// and clusters text boxes into left-to-right visual table rows.
+  /// Estimates dominant skew angle from wide boxes or baseline projection, rotates
+  /// coordinates flat, and clusters text boxes into left-to-right visual table rows.
   static List<List<OcrTextBox>> reconstructDeskewedRows(List<OcrTextBox> boxes) {
     final valid = boxes.where((b) => b.text.trim().isNotEmpty).toList();
     if (valid.isEmpty) return const [];
+
+    final heights = valid
+        .map((b) => math.min(b.width, b.height))
+        .where((h) => h > 0)
+        .toList()
+      ..sort();
+    final medH = heights.isNotEmpty ? heights[heights.length ~/ 2] : 24.0;
+    final baseTol = math.max(12.0, medH * 0.72);
+    var rowThreshold = baseTol;
 
     final wideAngles = valid
         .where((b) => math.max(b.width, b.height) >= 40 && b.angle != 0)
         .map((b) => b.angle)
         .toList()
       ..sort();
-    final medAngle = wideAngles.isNotEmpty
+    var medAngle = wideAngles.isNotEmpty
         ? wideAngles[wideAngles.length ~/ 2]
         : 0.0;
-    final rad = -medAngle * (math.pi / 180.0);
+
+    // Only apply sparse pitch widening + baseline projection tilt when individual
+    // boxes are near 0 deg AND horizontal clustering leaves >32% boxes isolated
+    // (typical on wavy/tilted handwritten camera photos, never on crisp printed tables).
+    if (medAngle.abs() < 1.5 && valid.length >= 6) {
+      final zeroGroups = _clusterRowsAtAngle(valid, 0.0, baseTol);
+      final zeroMultiCount = zeroGroups
+          .where((g) => g.length >= 2)
+          .fold<int>(0, (s, g) => s + g.length);
+
+      if (zeroMultiCount < (valid.length * 0.82).ceil()) {
+        double minX = double.infinity;
+        double maxX = double.negativeInfinity;
+        for (final b in valid) {
+          if (b.centerX < minX) minX = b.centerX;
+          if (b.centerX > maxX) maxX = b.centerX;
+        }
+        final spanX = maxX - minX;
+        if (spanX >= 300) {
+          final leftYs = valid
+              .where((b) => b.centerX <= minX + spanX * 0.38)
+              .map((b) => b.centerY)
+              .toList()
+            ..sort();
+          final rowGaps = <double>[];
+          for (var i = 0; i + 1 < leftYs.length; i++) {
+            final gap = leftYs[i + 1] - leftYs[i];
+            if (gap >= medH * 1.4) {
+              rowGaps.add(gap);
+            }
+          }
+          if (rowGaps.length >= 3) {
+            rowGaps.sort();
+            final medPitch = rowGaps[rowGaps.length ~/ 2];
+            if (medPitch >= medH * 3.0) {
+              rowThreshold = math.max(
+                rowThreshold,
+                math.min(medPitch * 0.35, medH * 2.0),
+              );
+            }
+          }
+          medAngle = _estimateBaselineTiltDeg(valid, tolY: rowThreshold);
+        }
+      }
+    }
+
+    final finalGroups = _clusterRowsAtAngle(valid, medAngle, rowThreshold);
+    return finalGroups.map((group) {
+      group.sort((a, b) => a.dx.compareTo(b.dx));
+      return group.map((g) => g.box).toList();
+    }).toList();
+  }
+
+  static List<List<_DeskewedBox>> _clusterRowsAtAngle(
+    List<OcrTextBox> valid,
+    double deg,
+    double rowThreshold,
+  ) {
+    final rad = -deg * (math.pi / 180.0);
     final cosA = math.cos(rad);
     final sinA = math.sin(rad);
 
@@ -177,14 +250,6 @@ class SpatialOcrParser {
       return _DeskewedBox(box: b, dx: dx, dy: dy);
     }).toList()
       ..sort((a, b) => a.dy.compareTo(b.dy));
-
-    final heights = valid
-        .map((b) => math.min(b.width, b.height))
-        .where((h) => h > 0)
-        .toList()
-      ..sort();
-    final medH = heights.isNotEmpty ? heights[heights.length ~/ 2] : 24.0;
-    final rowThreshold = math.max(12.0, medH * 0.58);
 
     final rowGroups = <List<_DeskewedBox>>[];
     for (final item in deskewed) {
@@ -201,11 +266,43 @@ class SpatialOcrParser {
         rowGroups.add([item]);
       }
     }
+    return rowGroups;
+  }
 
-    return rowGroups.map((group) {
-      group.sort((a, b) => a.dx.compareTo(b.dx));
-      return group.map((g) => g.box).toList();
-    }).toList();
+  static double _estimateBaselineTiltDeg(
+    List<OcrTextBox> boxes, {
+    required double tolY,
+  }) {
+    ({int multiCount, double spreadSum}) evalDeg(double deg) {
+      final groups = _clusterRowsAtAngle(boxes, deg, tolY);
+      var multiCount = 0;
+      var spreadSum = 0.0;
+      for (final g in groups) {
+        if (g.length >= 2) {
+          multiCount += g.length;
+          spreadSum += g.last.dy - g.first.dy;
+        }
+      }
+      return (multiCount: multiCount, spreadSum: spreadSum);
+    }
+
+    final zeroStats = evalDeg(0.0);
+    var bestAngle = 0.0;
+    var bestScore = zeroStats.multiCount * 100000.0 - zeroStats.spreadSum;
+
+    for (var step = -24; step <= 24; step++) {
+      if (step == 0) continue;
+      final deg = step * 0.5;
+      final stats = evalDeg(deg);
+      if (stats.multiCount <= zeroStats.multiCount + 1) continue;
+      final score =
+          stats.multiCount * 100000.0 - stats.spreadSum - deg.abs() * 50.0;
+      if (score > bestScore) {
+        bestScore = score;
+        bestAngle = deg;
+      }
+    }
+    return bestAngle;
   }
 
   /// Flattens reconstructed spatial rows to aligned text lines for logging or
@@ -287,7 +384,17 @@ class SpatialOcrParser {
     if (u.startsWith('litre')) return 'litres';
     if (u.startsWith('box')) return 'boxes';
     if (u == 'dozen') return 'dozen';
-    if (u == 'k' || u.startsWith('kg') || u.startsWith('kilo')) return 'kgs';
+    if (u == 'k' ||
+        u == 'ky' ||
+        u == 'kys' ||
+        u == 'kq' ||
+        u == 'kqs' ||
+        u == 'k9' ||
+        u == 'k9s' ||
+        u.startsWith('kg') ||
+        u.startsWith('kilo')) {
+      return 'kgs';
+    }
     return u;
   }
 
@@ -464,7 +571,10 @@ class SpatialOcrParser {
           lower.contains('delivery docket') ||
           lower.contains('commercial delivery') ||
           lower.contains('item description') ||
+          lower.contains('unit price') ||
+          lower.contains('quantiy') ||
           (lower.contains('item') && lower.contains('qty') && lower.contains('total')) ||
+          (lower.contains('item') && lower.contains('quantity')) ||
           (lower.contains('unit price') && lower.contains('total')) ||
           (lower.contains('qty') && lower.contains('total')) ||
           lower.startsWith('p.o.') ||
@@ -618,18 +728,54 @@ class SpatialOcrParser {
     }
 
     // Walk backward from rightmost cell: Total -> Unit Price / Qty -> Description
+    // OR handle 3-column "Item | Unit Price | Qty+Unit" sheets with no Total column.
     var idx = tokens.length - 1;
-    double? total;
+    double total = 0;
     double? price;
     double? qty;
     String? unit;
 
     final lastVal = parseOcrNumber(tokens[idx]);
-    if (lastVal <= 0) return null;
-    total = lastVal;
-    idx--;
+    if (lastVal > 0) {
+      total = lastVal;
+      idx--;
+    } else {
+      final rightQty = _tryParseQtyUnit(tokens[idx]);
+      final fuzzyUnitSuffix = RegExp(
+        r'^[A-Za-z0-9]{1,5}\s*(kgs?|ky|kq|kilograms?|bags?|crates?|bunches?|bundles?|pcs|pieces?|trays?|litres?|dozen)$',
+        caseSensitive: false,
+      ).firstMatch(tokens[idx].trim());
 
-    if (idx >= startIdx + 1) {
+      if (rightQty != null &&
+          rightQty.unit.isNotEmpty &&
+          idx - 1 >= startIdx + 1) {
+        final leftPrice = parseOcrNumber(tokens[idx - 1]);
+        if (leftPrice > 0) {
+          qty = rightQty.qty;
+          unit = rightQty.unit;
+          price = leftPrice;
+          total = qty * price;
+          idx -= 2;
+        } else {
+          return null;
+        }
+      } else if (fuzzyUnitSuffix != null && idx - 1 >= startIdx + 1) {
+        final leftPrice = parseOcrNumber(tokens[idx - 1]);
+        if (leftPrice > 0) {
+          qty = 1.0;
+          unit = normalizeOcrUnit(fuzzyUnitSuffix.group(1)!);
+          price = leftPrice;
+          total = leftPrice;
+          idx -= 2;
+        } else {
+          return null;
+        }
+      } else {
+        return null;
+      }
+    }
+
+    if (price == null && idx >= startIdx + 1) {
       final secondLastVal = parseOcrNumber(tokens[idx]);
       if (secondLastVal > 0 && _tryParseQtyUnit(tokens[idx])?.unit.isEmpty != false) {
         // Confirm it isn't a unit-tagged quantity like "10 kgs"

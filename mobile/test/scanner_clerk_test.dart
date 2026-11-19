@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 import 'package:town_treasure_groceries/data/repositories/staging_repository.dart';
 import 'package:town_treasure_groceries/data/repositories/vault_repository.dart';
@@ -89,6 +90,15 @@ class _FakeSpatialTextRecognizer
 
   @override
   Future<void> close() async {}
+}
+
+class _FakePdfPickerGateway implements PdfPagePickerGateway {
+  _FakePdfPickerGateway(this.pages);
+  final List<({String? filePath, Uint8List bytes})> pages;
+
+  @override
+  Future<List<({String? filePath, Uint8List bytes})>> pickPdfRenderedPages() async =>
+      pages;
 }
 
 OcrTextBox _skewedBox(
@@ -1255,6 +1265,144 @@ void main() {
           [18000, 9450, 12000, 14740]);
       expect(result.subtotal, 54190);
       expect(result.grandTotal, 54190);
+      service.dispose();
+    });
+
+    test(
+        'Offline PP-OCRv5 boxes from 20261119_162415.jpg recover baseline tilt and extract all 6 handwritten Item | Unit Price | Qty rows without Total column',
+        () async {
+      OcrTextBox camBox(String text, double cx, double cy) => OcrTextBox(
+            text: text,
+            confidence: 0.90,
+            centerX: cx,
+            centerY: cy,
+            width: 240,
+            height: 70,
+            angle: 0,
+            left: cx - 120,
+            top: cy - 35,
+            right: cx + 120,
+            bottom: cy + 35,
+          );
+
+      // Exact real coordinates & tokens detected by offline PP-OCRv5 on 20261119_162415.jpg
+      final handwrittenBoxes = <OcrTextBox>[
+        camBox('bastrant', 534.7, 398.0),
+        camBox('Itew', 387.9, 585.0),
+        camBox('Unit Price', 1597.1, 610.4),
+        camBox('Quantiy', 2560.1, 524.9),
+        camBox('Maize meal', 501.8, 763.0),
+        camBox('1120', 1509.9, 812.8),
+        camBox('rokg', 2586.2, 801.1),
+        camBox('White Cabbage', 556.4, 1153.9),
+        camBox('1112', 1423.7, 1132.2),
+        camBox('13ky', 2621.0, 1143.2),
+        camBox('Fresh tomators', 579.5, 1445.1),
+        camBox('582', 1515.9, 1397.2),
+        camBox('46kg', 2627.5, 1440.8),
+        camBox('Coffee Beans', 543.3, 1844.5),
+        camBox('1155', 1547.1, 1797.3),
+        camBox('9 kg', 2649.2, 1802.0),
+        camBox('Eggs (iray)', 534.6, 2203.6),
+        camBox('438', 1554.9, 2129.3),
+        camBox('16kg', 2703.4, 2120.0),
+        camBox('Wheat flour', 510.8, 2591.6),
+        camBox('596', 1527.9, 2561.4),
+        camBox('21kg', 2699.2, 2467.1),
+      ];
+
+      final service = OcrConsensusService(
+        geminiApiKey: '',
+        paddleOcr: _FakePaddleOcrGateway(handwrittenBoxes),
+        textRecognizer: _FakeTextRecognizer([]),
+      );
+
+      final result = await service.processDocket([
+        OcrImagePage(
+          dataUrl: 'data:image/jpeg;base64,${base64Encode([1, 2, 3])}',
+          filePath: '20261119_162415.jpg',
+          bytes: Uint8List.fromList([1, 2, 3]),
+        ),
+      ]);
+
+      expect(result.enginesUsed, contains('PaddleOCR PP-OCRv5 ONNX (Offline)'));
+      expect(result.items.length, 6);
+      expect(
+        result.items.map((i) => i.desc).toList(),
+        [
+          'Maize meal',
+          'White Cabbage',
+          'Fresh tomators',
+          'Coffee Beans',
+          'Eggs (iray)',
+          'Wheat flour',
+        ],
+      );
+      expect(result.items.map((i) => i.sellPrice).toList(),
+          [1120, 1112, 582, 1155, 438, 596]);
+      expect(result.items.map((i) => i.qty).toList(), [1, 13, 46, 9, 16, 21]);
+      expect(result.items.map((i) => i.total).toList(),
+          [1120, 14456, 26772, 10395, 7008, 12516]);
+      service.dispose();
+    });
+
+    testWidgets(
+        'DocketScannerSheet uploads multi-page PDF and runs offline OCR for both Invoices and Price Lists',
+        (tester) async {
+      final sampleJpg = Uint8List.fromList(
+        img.encodeJpg(img.Image(width: 8, height: 8)),
+      );
+      final pdfFake = _FakePdfPickerGateway([
+        (filePath: 'price_list_p1.jpg', bytes: sampleJpg),
+        (filePath: 'price_list_p2.jpg', bytes: sampleJpg),
+      ]);
+      final priceListBoxes = <OcrTextBox>[
+        _skewedBox('VEGETABLES', 200, 140, 200, 24, angleDeg: 0),
+        _skewedBox('Roma Tomatoes', 200, 220, 200, 24, angleDeg: 0),
+        _skewedBox('Crate', 420, 220, 90, 24, angleDeg: 0),
+        _skewedBox('KES 3.200', 620, 220, 130, 24, angleDeg: 0),
+      ];
+
+      final service = OcrConsensusService(
+        geminiApiKey: '',
+        pdfPicker: pdfFake,
+        paddleOcr: _FakePaddleOcrGateway(priceListBoxes),
+        textRecognizer: _FakeTextRecognizer([]),
+      );
+      OcrPriceListResult? appliedPriceList;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Scaffold(
+            body: DocketScannerSheet(
+              ocrService: service,
+              mode: ScannerTargetMode.priceList,
+              onApplyPriceList: (res) => appliedPriceList = res,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('btn_scanner_pick_pdf')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Docket Pages (2)'), findsOneWidget);
+
+      await tester.tap(find.textContaining('Auto-Extract from 2 Pages'));
+      await tester.pumpAndSettle();
+
+      expect(find.byIcon(Icons.check_circle_outline), findsWidgets);
+      await tester.tap(find.text('Apply Price List'));
+      await tester.pumpAndSettle();
+
+      expect(appliedPriceList, isNotNull);
+      expect(appliedPriceList!.pageCount, 2);
+      expect(
+        appliedPriceList!.items.any((i) => i.name == 'Roma Tomatoes'),
+        isTrue,
+      );
       service.dispose();
     });
   });

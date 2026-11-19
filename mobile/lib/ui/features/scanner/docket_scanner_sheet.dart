@@ -155,6 +155,33 @@ class _DocketScannerSheetState extends State<DocketScannerSheet>
     }
   }
 
+  Future<void> _pickFromPdf() async {
+    setState(() {
+      _errorText = null;
+      _progressText = 'Rendering PDF pages for OCR...';
+    });
+    try {
+      final picked = await AppLockGuard.runWithoutRelock(
+        () => widget.ocrService.pickPdfPages(),
+      );
+      if (mounted) {
+        setState(() {
+          _progressText = '';
+          if (picked.isNotEmpty) {
+            _pages.addAll(picked);
+          }
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _progressText = '';
+          _errorText = 'Could not load PDF: ${UserFriendlyError.format(e)}';
+        });
+      }
+    }
+  }
+
   Future<void> _runOcr() async {
     if (_pages.isEmpty) {
       setState(() => _errorText = 'Please attach at least one docket photo.');
@@ -364,7 +391,7 @@ class _DocketScannerSheetState extends State<DocketScannerSheet>
                           ),
                         ),
                         const Text(
-                          'Multi-page camera, ML Kit on-device OCR & CSV',
+                          'Multi-page photos, PDF upload, offline AI OCR & CSV',
                           style: TextStyle(
                             fontSize: 12,
                             color: AppTheme.slateMuted,
@@ -533,7 +560,7 @@ class _DocketScannerSheetState extends State<DocketScannerSheet>
                         ),
                         const SizedBox(height: 4),
                         const Text(
-                          'Snap physical pages with your camera or select multiple photos from gallery.',
+                          'Snap physical pages, pick multiple photos from gallery, or upload a PDF document.',
                           style: TextStyle(
                             fontSize: 12,
                             color: AppTheme.slateMuted,
@@ -556,6 +583,12 @@ class _DocketScannerSheetState extends State<DocketScannerSheet>
                               icon: const Icon(Icons.photo_library_outlined),
                               label: const Text('Gallery (Multi)'),
                             ),
+                            OutlinedButton.icon(
+                              key: const Key('btn_scanner_pick_pdf'),
+                              onPressed: _pickFromPdf,
+                              icon: const Icon(Icons.picture_as_pdf_outlined),
+                              label: const Text('Upload PDF'),
+                            ),
                           ],
                         ),
                       ],
@@ -572,15 +605,30 @@ class _DocketScannerSheetState extends State<DocketScannerSheet>
                         ),
                       ),
                       const Spacer(),
-                      TextButton.icon(
-                        onPressed: _pickFromCamera,
-                        icon: const Icon(Icons.add_a_photo_outlined, size: 16),
-                        label: const Text('+ Camera'),
-                      ),
-                      TextButton.icon(
-                        onPressed: _pickFromGallery,
-                        icon: const Icon(Icons.add_photo_alternate_outlined, size: 16),
-                        label: const Text('+ Gallery'),
+                      Flexible(
+                        child: SingleChildScrollView(
+                          scrollDirection: Axis.horizontal,
+                          child: Row(
+                            children: [
+                              TextButton.icon(
+                                onPressed: _pickFromCamera,
+                                icon: const Icon(Icons.add_a_photo_outlined, size: 16),
+                                label: const Text('+ Camera'),
+                              ),
+                              TextButton.icon(
+                                onPressed: _pickFromGallery,
+                                icon: const Icon(Icons.add_photo_alternate_outlined, size: 16),
+                                label: const Text('+ Gallery'),
+                              ),
+                              TextButton.icon(
+                                key: const Key('btn_scanner_add_pdf'),
+                                onPressed: _pickFromPdf,
+                                icon: const Icon(Icons.picture_as_pdf_outlined, size: 16),
+                                label: const Text('+ PDF'),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),

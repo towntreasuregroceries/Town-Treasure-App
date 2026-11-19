@@ -42,7 +42,7 @@ class PaddleOcrPlugin(private val context: Context) : MethodChannel.MethodCallHa
         private const val DET_ASSET = "assets/ocr/det.onnx"
         private const val REC_ASSET = "assets/ocr/rec.onnx"
         private const val DICT_ASSET = "assets/ocr/dict.txt"
-        private const val MAX_DET_SIDE = 960
+        private const val MAX_DET_SIDE = 1280
         private const val DET_THRESH = 0.30f
         private const val BOX_SCORE_THRESH = 0.45f
         private const val UNCLIP_RATIO = 1.55f
@@ -273,12 +273,12 @@ class PaddleOcrPlugin(private val context: Context) : MethodChannel.MethodCallHa
                 val score = if (scoreCount > 0) scoreSum / scoreCount else 0f
                 if (score < BOX_SCORE_THRESH) continue
 
-                // DBNet unclip expansion
+                // DBNet unclip expansion (extra horizontal margin prevents edge char clipping)
                 val expand = (bw * bh) * UNCLIP_RATIO / (2f * (bw + bh))
-                val u0 = minU - expand
-                val u1 = maxU + expand
-                val v0 = minV - expand * 0.85f
-                val v1 = maxV + expand * 0.85f
+                val u0 = minU - expand * 1.15f
+                val u1 = maxU + expand * 1.15f
+                val v0 = minV - expand * 0.90f
+                val v1 = maxV + expand * 0.90f
 
                 val centerU = (u0 + u1) * 0.5f
                 val centerV = (v0 + v1) * 0.5f
