@@ -1,8 +1,8 @@
 {
-  "version": "1.1.0",
-  "buildNumber": 2004,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.1.0/TownTreasureGroceries.apk",
-  "sha256": "c939826baafb777b9667d0ef7a036842c0e7b6402f2c33d243e41b8cdc1a40b0",
-  "releaseNotes": "v1.1.0+4: Added bundled offline PaddleOCR PP-OCRv5 ONNX engine with 2D skew-compensated table reconstruction and Google ML Kit spatial redundancy, plus the Smart Notification Center and silent daily Workmanager background update checks.",
+  "version": "1.1.1",
+  "buildNumber": 2005,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.1.1/TownTreasureGroceries.apk",
+  "sha256": "2841926d8fb3e4709f25a470563fbfea0a43a1f1c41519a2f867a386c96b175a",
+  "releaseNotes": "v1.1.1+5: Fixed OCR item description interpretation to strip row serial numbers (e.g. 01..05) and unit rates (e.g. KSh 15.00 / kgs), added European/spaced total number parsing (18.000,00 / 12.000 00 / 14 740 00), text-month Order Date parsing, split-row Billed To client detection, and tightened invoice number matching.",
   "mandatory": false
 }

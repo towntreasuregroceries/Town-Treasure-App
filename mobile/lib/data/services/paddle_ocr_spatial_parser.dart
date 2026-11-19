@@ -218,7 +218,8 @@ class SpatialOcrParser {
   }
 
   /// Normalizes common OCR substitutions on Kenyan numeric tokens
-  /// (`1.OOO` -> `1000`, `IO` -> `10`, `3.200` / `36.800` -> `3200` / `36800`).
+  /// (`1.OOO` -> `1000`, `IO` -> `10`, `3.200` / `36.800` -> `3200` / `36800`,
+  /// `18.000,00` / `9.450.00` / `12.000 00` / `14 740 00` -> `18000`, `9450`, `12000`, `14740`).
   static double parseOcrNumber(String? raw, {bool treatTripleDotAsThousands = true}) {
     if (raw == null) return 0;
     var s = raw.trim();
@@ -226,7 +227,7 @@ class SpatialOcrParser {
 
     // Strip common currency & rate prefixes/suffixes
     s = s.replaceAll(
-      RegExp(r'(?:kesi?|ksh|@|=|/|-+$)', caseSensitive: false),
+      RegExp(r'(?:kesi?|ksh|shs?\.?|@|=|/|-+$)', caseSensitive: false),
       '',
     ).trim();
 
@@ -235,21 +236,40 @@ class SpatialOcrParser {
     // Repair common OCR digit confusions only if token is predominantly numeric
     final repaired = s
         .replaceAll(RegExp(r'[Oo]'), '0')
-        .replaceAll(RegExp(r'[Il|]'), '1');
-    if (RegExp(r'^[\d,.\s]+$').hasMatch(repaired)) {
-      s = repaired.replaceAll(' ', '');
-    } else {
+        .replaceAll(RegExp(r'[Il|]'), '1')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (!RegExp(r'^[\d,.\s]+$').hasMatch(repaired)) {
       return 0;
     }
 
-    // Handle European/scanned thousand separators like "3.200", "36.800", "16.000"
+    // Rule A: Multi-group numbers with explicit 1-2 decimal digits at the end, e.g.:
+    // "18.000,00", "9.450.00", "54.190.00", "12.000 00", "14 740 00", "1,400.00"
+    final multiGroupDec = RegExp(
+      r'^([\d,.\s]+?)[.,\s]+(\d{1,2})$',
+    ).firstMatch(repaired);
+    if (multiGroupDec != null) {
+      final head = multiGroupDec.group(1)!;
+      final dec = multiGroupDec.group(2)!;
+      if (RegExp(r'[.,\s]').hasMatch(head)) {
+        final whole = head.replaceAll(RegExp(r'[.,\s]'), '');
+        return double.tryParse('$whole.$dec') ?? 0;
+      }
+    }
+
+    // Rule B: Single comma decimal separator, e.g. "15,50"
+    if (RegExp(r'^\d[\d\s]*,\d{1,2}$').hasMatch(repaired)) {
+      s = repaired.replaceAll(' ', '').replaceAll(',', '.');
+      return double.tryParse(s) ?? 0;
+    }
+
+    // Rule C: Standard integers, single decimals, or triple-dot thousands ("3.200")
+    s = repaired.replaceAll(RegExp(r'[\s,]'), '');
     if (treatTripleDotAsThousands &&
-        !s.contains(',') &&
         RegExp(r'^\d{1,3}(?:\.\d{3})+$').hasMatch(s)) {
       s = s.replaceAll('.', '');
     }
 
-    s = s.replaceAll(',', '');
     return double.tryParse(s) ?? 0;
   }
 
@@ -309,26 +329,45 @@ class SpatialOcrParser {
     final items = <Map<String, dynamic>>[];
 
     final invPattern = RegExp(
-      r'(?:DKT|INV|TTG|TTM)[-#:\s]*[A-Z0-9-]+|(?:DOCKET|INVOICE)\s*(?:NO\.?|#)\s*:?\s*([A-Z0-9-]+)',
+      r'\b(?:DKT|INV|TTG|TTM)[-#:]\s*[A-Z0-9-]+|\b(?:DKT|INV|TTG|TTM)\s+\d[A-Z0-9-]*|(?:DOCKET|INVOICE|RECEIPT)\s*(?:NO\.?|#)\s*:?\s*([A-Z0-9-]+)',
       caseSensitive: false,
     );
     final clientLabelPattern = RegExp(
-      r'(?:client|customer|restaurant|hotel|deliver\s*to)\s*[:\-]\s*([A-Za-z0-9\s&\x27\.-]+?)(?:\s+date\b|$)',
+      r'(?:client|customer|restaurant|hotel|billed\s*to|bill\s*to|deliver\s*to)\s*[:\-]\s*([A-Za-z0-9\s&\x27\.-]+?)(?:\s+(?:order\s*)?date\b|$)',
       caseSensitive: false,
     );
     final datePattern = RegExp(
       r'\b(\d{4}-\d{2}-\d{2}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4})\b',
     );
+    final textDatePattern = RegExp(
+      r'\b(\d{1,2})\s+(jan|feb|mar|apr|may|mav|jun|jul|aug|sep|oct|nov|dec)[a-z]*[,\s]+(\d{4})\b',
+      caseSensitive: false,
+    );
+    const monthNums = <String, String>{
+      'jan': '01',
+      'feb': '02',
+      'mar': '03',
+      'apr': '04',
+      'may': '05',
+      'mav': '05',
+      'jun': '06',
+      'jul': '07',
+      'aug': '08',
+      'sep': '09',
+      'oct': '10',
+      'nov': '11',
+      'dec': '12',
+    };
     final deliveryPattern = RegExp(
-      r'delivery(?:\s*(?:fee|cost))?\s*[:\-]?\s*(?:kes|ksh)?\s*([\d,.OoIl]+)',
+      r'delivery(?:\s*(?:fee|cost))?\s*[:\-]?\s*(?:kes|ksh)?\s*([\d,.OoIl\s]+)',
       caseSensitive: false,
     );
     final subtotalPattern = RegExp(
-      r'(?:sub\s*total|subtotal)\s*[:\-]?\s*(?:kes|ksh)?\s*([\d,.OoIl]+)',
+      r'(?:sub\s*total|subtotal)\s*[:\-]?\s*(?:kes|ksh)?\s*([\d,.OoIl\s]+)',
       caseSensitive: false,
     );
     final grandTotalPattern = RegExp(
-      r'grand\s*total\s*[:\-]?\s*(?:kes|ksh)?\s*([\d,.OoIl]+)',
+      r'grand\s*total\s*[:\-]?\s*(?:kes|ksh)?\s*([\d,.OoIl\s]+)',
       caseSensitive: false,
     );
 
@@ -343,7 +382,7 @@ class SpatialOcrParser {
           final cand = (invM.group(1) ?? invM.group(0) ?? '').trim();
           if (cand.isNotEmpty && cand.length >= 3) {
             invoiceNumber = cand.replaceFirst(
-              RegExp(r'^(?:DOCKET|INVOICE)\s*(?:NO\.?|#)\s*:?\s*', caseSensitive: false),
+              RegExp(r'^(?:DOCKET|INVOICE|RECEIPT)\s*(?:NO\.?|#)\s*:?\s*', caseSensitive: false),
               '',
             ).trim();
           }
@@ -355,25 +394,46 @@ class SpatialOcrParser {
         if (dm != null) {
           final norm = AppHelpers.normalizeAppDate(dm.group(1));
           if (norm.isNotEmpty) invoiceDate = norm;
+        } else {
+          final tm = textDatePattern.firstMatch(line);
+          if (tm != null) {
+            final day = tm.group(1)!.padLeft(2, '0');
+            final mon = monthNums[tm.group(2)!.toLowerCase()];
+            final year = tm.group(3)!;
+            if (mon != null) {
+              invoiceDate = '$year-$mon-$day';
+            }
+          }
         }
       }
 
-      if (restaurantName.isEmpty) {
+      if (restaurantName.isEmpty && !lower.startsWith('thank')) {
         final cm = clientLabelPattern.firstMatch(line);
         if (cm != null) {
           final name = cm.group(1)!.trim();
           if (name.isNotEmpty && !name.toLowerCase().contains('town treasure')) {
             restaurantName = name;
           }
-        } else if (!lower.contains('town treasure') &&
-            !lower.contains('town trfasure') &&
-            (lower.contains('hotel') ||
-                lower.contains('suites') ||
-                lower.contains('resort') ||
-                lower.contains('bistro') ||
-                lower.contains('restaurant') ||
-                lower.contains('lodge'))) {
-          restaurantName = line;
+        } else {
+          // Inspect individual row cells so split-column "FROM: Town Treasure | BILLED TO: Hotel" works cleanly
+          for (final cell in row) {
+            final cellTxt = cell.text.trim();
+            final cellLower = cellTxt.toLowerCase();
+            if (cellLower.contains('town treasure') ||
+                cellLower.contains('town trfasure')) {
+              continue;
+            }
+            if (cellLower.contains('hotel') ||
+                cellLower.contains('suites') ||
+                cellLower.contains('resort') ||
+                cellLower.contains('bistro') ||
+                cellLower.contains('restaurant') ||
+                cellLower.contains('lodge') ||
+                RegExp(r'\binn\b').hasMatch(cellLower)) {
+              restaurantName = cellTxt;
+              break;
+            }
+          }
         }
       }
 
@@ -404,6 +464,7 @@ class SpatialOcrParser {
           lower.contains('delivery docket') ||
           lower.contains('commercial delivery') ||
           lower.contains('item description') ||
+          (lower.contains('item') && lower.contains('qty') && lower.contains('total')) ||
           (lower.contains('unit price') && lower.contains('total')) ||
           (lower.contains('qty') && lower.contains('total')) ||
           lower.startsWith('p.o.') ||
@@ -413,6 +474,10 @@ class SpatialOcrParser {
           lower.startsWith('address:') ||
           lower.startsWith('attention:') ||
           lower.startsWith('client:') ||
+          lower.startsWith('billed to') ||
+          lower.startsWith('from:') ||
+          lower.startsWith('receipt no') ||
+          lower.startsWith('order date') ||
           lower.startsWith('date:') ||
           lower.startsWith('received') ||
           lower.startsWith('delivered by') ||
@@ -442,6 +507,76 @@ class SpatialOcrParser {
     };
   }
 
+  /// Strips leading row serial numbers (`01 `, `2. `, `#03 `) and embedded
+  /// currency/rate annotations (`KSh 15.00`, `KES 30.00 / kgs`, `@120`) from an
+  /// extracted produce description so invoice line names stay clean.
+  static ({String desc, double? embeddedPrice, String? embeddedUnit})
+      sanitizeProduceDescription(String rawDesc) {
+    var clean = rawDesc.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (clean.isEmpty) {
+      return (desc: '', embeddedPrice: null, embeddedUnit: null);
+    }
+
+    double? embeddedPrice;
+    String? embeddedUnit;
+
+    // 1. Strip trailing currency/rate tags (e.g. "KSh 15.00", "KES 350.00 / kgs", "@120")
+    final trailingRatePattern = RegExp(
+      r'\s*(?:@|\b(?:ksh|kes|shs?)\b\.?)\s*([\d,]+(?:\.\d{1,2})?)(?:\s*/\s*([A-Za-z]+))?\s*$',
+      caseSensitive: false,
+    );
+    for (var pass = 0; pass < 2; pass++) {
+      final m = trailingRatePattern.firstMatch(clean);
+      if (m == null) break;
+      final parsedVal = parseOcrNumber(
+        m.group(1),
+        treatTripleDotAsThousands: false,
+      );
+      if (parsedVal > 0 && embeddedPrice == null) {
+        embeddedPrice = parsedVal;
+      }
+      final rawUnit = (m.group(2) ?? '').trim();
+      if (rawUnit.isNotEmpty &&
+          _knownUnits.contains(rawUnit.toLowerCase()) &&
+          embeddedUnit == null) {
+        embeddedUnit = normalizeOcrUnit(rawUnit);
+      }
+      clean = clean.substring(0, m.start).trim();
+    }
+
+    // Also strip dangling currency markers left without digits at the end.
+    clean = clean
+        .replaceFirst(
+          RegExp(r'\s+\b(?:ksh|kes|shs?)\.?$', caseSensitive: false),
+          '',
+        )
+        .trim();
+
+    // 2. Strip leading row serial numbers (e.g. "01 Dhania", "02 Parsley", "1. Cabbage")
+    final serialMatch = RegExp(
+      r'^(?:#\s*)?(\d{1,3})([.)])?\s+([A-Za-z][A-Za-z0-9\s\(\)\/&,-]*)$',
+    ).firstMatch(clean);
+    if (serialMatch != null) {
+      final hasPunct = serialMatch.group(2) != null;
+      final remainder = serialMatch.group(3)!.trim();
+      final firstWord = remainder
+          .split(RegExp(r'\s+'))
+          .first
+          .toLowerCase()
+          .replaceAll(RegExp(r'[^a-z]'), '');
+      if (hasPunct ||
+          (!_knownUnits.contains(firstWord) && firstWord.length >= 2)) {
+        clean = remainder;
+      }
+    }
+
+    return (
+      desc: clean.replaceFirst(RegExp(r'[\s/\-:]+$'), '').trim(),
+      embeddedPrice: embeddedPrice,
+      embeddedUnit: embeddedUnit,
+    );
+  }
+
   static Map<String, dynamic>? _extractItemFromRowCells(List<OcrTextBox> row) {
     if (row.isEmpty) return null;
 
@@ -451,14 +586,16 @@ class SpatialOcrParser {
       // Single wide line fallback
       final single = tokens.first;
       final m = RegExp(
-        r'^(?:\d+[\.\)]\s*)?([A-Za-z][A-Za-z0-9\s\(\)\/&,-]{1,50}?)\s+(\d+(?:\.\d+)?)\s*([A-Za-z]+)\s*[@x]?\s*([\d,.]+)?\s*=?\s*([\d,.]+)?$',
+        r'^(?:\d+[\.\)]\s*)?([A-Za-z0-9][A-Za-z0-9\s\(\)\/&.,-]{1,65}?)\s+(\d+(?:\.\d+)?)\s*([A-Za-z]+)\s*[@x]?\s*([\d,.]+)?\s*=?\s*([\d,.]+)?$',
         caseSensitive: false,
       ).firstMatch(single);
       if (m != null) {
-        final desc = m.group(1)!.trim();
+        final cleaned = sanitizeProduceDescription(m.group(1)!);
+        final desc = cleaned.desc;
         final qty = parseOcrNumber(m.group(2), treatTripleDotAsThousands: false);
-        final unit = normalizeOcrUnit(m.group(3) ?? 'kgs');
-        final p = parseOcrNumber(m.group(4));
+        final unit = normalizeOcrUnit(m.group(3) ?? cleaned.embeddedUnit ?? 'kgs');
+        final parsedP = parseOcrNumber(m.group(4));
+        final p = parsedP > 0 ? parsedP : (cleaned.embeddedPrice ?? 0.0);
         final t = parseOcrNumber(m.group(5));
         if (desc.isNotEmpty && (p > 0 || t > 0)) {
           return {
@@ -473,7 +610,14 @@ class SpatialOcrParser {
       return null;
     }
 
-    // Walk backward from rightmost cell: Total -> Unit Price -> Unit / Qty -> Description
+    // Skip an explicit leftmost row index column (e.g. "01", "2.") when followed by text
+    var startIdx = 0;
+    while (tokens.length - startIdx >= 3 &&
+        RegExp(r'^(?:#\s*)?0?\d{1,2}[.)]?$').hasMatch(tokens[startIdx])) {
+      startIdx++;
+    }
+
+    // Walk backward from rightmost cell: Total -> Unit Price / Qty -> Description
     var idx = tokens.length - 1;
     double? total;
     double? price;
@@ -485,29 +629,63 @@ class SpatialOcrParser {
     total = lastVal;
     idx--;
 
-    if (idx >= 1) {
+    if (idx >= startIdx + 1) {
       final secondLastVal = parseOcrNumber(tokens[idx]);
       if (secondLastVal > 0 && _tryParseQtyUnit(tokens[idx])?.unit.isEmpty != false) {
         // Confirm it isn't a unit-tagged quantity like "10 kgs"
-        if (!RegExp(r'[A-Za-z]{2,}').hasMatch(tokens[idx].replaceAll(RegExp(r'(?:kes|ksh)', caseSensitive: false), ''))) {
+        if (!RegExp(r'[A-Za-z]{2,}').hasMatch(
+            tokens[idx].replaceAll(RegExp(r'(?:kes|ksh)', caseSensitive: false), ''))) {
           price = secondLastVal;
           idx--;
         }
       }
     }
 
-    // Consume Unit and/or Qty cell(s) before description
-    while (idx >= 1) {
+    // Consume Unit, Qty, and Rate cell(s) before description
+    while (idx >= startIdx + 1) {
       final cell = tokens[idx].trim();
       final qParsed = _tryParseQtyUnit(cell);
       if (qParsed != null) {
-        qty ??= qParsed.qty;
-        if (qParsed.unit.isNotEmpty && (unit == null || unit.isEmpty)) {
-          unit = qParsed.unit;
+        if (qty == null) {
+          qty = qParsed.qty;
+          if (qParsed.unit.isNotEmpty && (unit == null || unit.isEmpty)) {
+            unit = qParsed.unit;
+          }
+          idx--;
+          continue;
         }
-        idx--;
-        continue;
+        // A bare numeric cell left of Qty is a Unit Price (Rate before Qty layout)
+        if (price == null && qParsed.unit.isEmpty && qParsed.qty > 0) {
+          price = qParsed.qty;
+          idx--;
+          continue;
+        }
       }
+
+      // Check rate/price cells with currency or "/unit", e.g. "KSh 15.00" or "KSh 15.00 / kgs"
+      final rateMatch = RegExp(
+        r'^(?:@|\b(?:ksh|kes|shs?)\b\.?)?\s*([\d,OoIl]+(?:\.\d{1,2})?)(?:\s*/\s*([A-Za-z]+))?$',
+        caseSensitive: false,
+      ).firstMatch(cell);
+      if (rateMatch != null &&
+          (cell.contains(RegExp(r'kes|ksh|shs|@|/', caseSensitive: false)))) {
+        final rateVal = parseOcrNumber(
+          rateMatch.group(1),
+          treatTripleDotAsThousands: false,
+        );
+        if (rateVal > 0 && price == null) {
+          price = rateVal;
+          final rUnit = (rateMatch.group(2) ?? '').trim();
+          if (rUnit.isNotEmpty &&
+              _knownUnits.contains(rUnit.toLowerCase()) &&
+              (unit == null || unit.isEmpty)) {
+            unit = normalizeOcrUnit(rUnit);
+          }
+          idx--;
+          continue;
+        }
+      }
+
       final cleanWord = cell.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
       if (unit == null &&
           !RegExp(r'\d').hasMatch(cell) &&
@@ -519,12 +697,18 @@ class SpatialOcrParser {
       break;
     }
 
-    final desc = tokens.sublist(0, idx + 1).join(' ').trim();
+    final rawJoinedDesc = tokens.sublist(startIdx, idx + 1).join(' ').trim();
+    final cleaned = sanitizeProduceDescription(rawJoinedDesc);
+    final desc = cleaned.desc;
     if (desc.isEmpty ||
         RegExp(r'^[\d\W]+$').hasMatch(desc) ||
         desc.toLowerCase() == 'subtotal' ||
         desc.toLowerCase() == 'grand total') {
       return null;
+    }
+    price ??= cleaned.embeddedPrice;
+    if (unit == null || unit.isEmpty) {
+      unit = cleaned.embeddedUnit;
     }
 
     final resolvedQty = qty ?? 1.0;

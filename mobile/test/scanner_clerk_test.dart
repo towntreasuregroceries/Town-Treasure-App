@@ -1055,5 +1055,207 @@ void main() {
       expect(result.items.first.total, 1080);
       service.dispose();
     });
+
+    test(
+        'SpatialOcrParser and reconcileWithMath strip serial numbers and embedded KSh rates from descriptions',
+        () async {
+      // Mirrors the TTG-ZCNG Hilton Garden Inn regression where serial numbers (01..05)
+      // and unit rates (KSh 15.00 .. KSh 50.00 / kgs) leaked into item descriptions.
+      final tableBoxes = <OcrTextBox>[
+        _skewedBox('Receipt No: TTG-ZCNG', 650, 120, 260, 26, angleDeg: 0),
+        _skewedBox('Order Date: 19/11/2026', 650, 160, 250, 24, angleDeg: 0),
+        _skewedBox('BILLED TO:', 640, 210, 130, 22, angleDeg: 0),
+        _skewedBox('Hilton Garden Inn', 660, 245, 240, 26, angleDeg: 0),
+        _skewedBox('#', 80, 310, 30, 22, angleDeg: 0),
+        _skewedBox('ITEM', 220, 310, 100, 22, angleDeg: 0),
+        _skewedBox('QTY', 500, 310, 80, 22, angleDeg: 0),
+        _skewedBox('TOTAL', 720, 310, 100, 22, angleDeg: 0),
+        // Separate Rate cell before Qty:
+        _skewedBox('01', 80, 360, 36, 24, angleDeg: 0),
+        _skewedBox('Dhania', 180, 360, 110, 24, angleDeg: 0),
+        _skewedBox('KSh 15.00', 320, 360, 110, 24, angleDeg: 0),
+        _skewedBox('50.0 kgs', 500, 360, 110, 24, angleDeg: 0),
+        _skewedBox('KSh 750.00', 720, 360, 130, 24, angleDeg: 0),
+        // Horizontally merged item + rate:
+        _skewedBox('02', 80, 410, 36, 24, angleDeg: 0),
+        _skewedBox('Parsley KSh 30.00', 220, 410, 210, 24, angleDeg: 0),
+        _skewedBox('7.0 kgs', 500, 410, 100, 24, angleDeg: 0),
+        _skewedBox('KSh 210.00', 720, 410, 130, 24, angleDeg: 0),
+        // Merged serial + item + rate:
+        _skewedBox('03 Cherry tomato KSh 100.00', 220, 460, 290, 24, angleDeg: 0),
+        _skewedBox('2.0 kgs', 500, 460, 100, 24, angleDeg: 0),
+        _skewedBox('KSh 200.00', 720, 460, 130, 24, angleDeg: 0),
+        // Currency rate with slash unit subtitle:
+        _skewedBox('04', 80, 510, 36, 24, angleDeg: 0),
+        _skewedBox('Mushroom', 190, 510, 130, 24, angleDeg: 0),
+        _skewedBox('KSh 350.00 / kgs', 340, 510, 150, 24, angleDeg: 0),
+        _skewedBox('4.0 kgs', 500, 510, 100, 24, angleDeg: 0),
+        _skewedBox('KSh 1,400.00', 720, 510, 140, 24, angleDeg: 0),
+        // Double whitespace wrap case:
+        _skewedBox('05', 80, 560, 36, 24, angleDeg: 0),
+        _skewedBox('White Cabbage KSh 50.00', 230, 560, 260, 24, angleDeg: 0),
+        _skewedBox('30.0 kgs', 500, 560, 110, 24, angleDeg: 0),
+        _skewedBox('KSh 1,500.00', 720, 560, 140, 24, angleDeg: 0),
+      ];
+
+      final service = OcrConsensusService(
+        geminiApiKey: '',
+        paddleOcr: _FakePaddleOcrGateway(tableBoxes),
+        textRecognizer: _FakeTextRecognizer([]),
+      );
+
+      final result = await service.processDocket([
+        OcrImagePage(
+          dataUrl: 'data:image/jpeg;base64,${base64Encode([1, 2, 3])}',
+          filePath: 'hilton_receipt.jpg',
+          bytes: Uint8List.fromList([1, 2, 3]),
+        ),
+      ]);
+
+      expect(result.restaurantName, 'Hilton Garden Inn');
+      expect(result.invoiceNumber, 'TTG-ZCNG');
+      expect(result.date, '2026-11-19');
+      expect(result.items.length, 5);
+      expect(
+        result.items.map((i) => i.desc).toList(),
+        ['Dhania', 'Parsley', 'Cherry tomato', 'Mushroom', 'White Cabbage'],
+      );
+      expect(result.items[0].qty, 50);
+      expect(result.items[0].sellPrice, 15);
+      expect(result.items[0].total, 750);
+      expect(result.items[3].sellPrice, 350);
+      expect(result.items[3].total, 1400);
+
+      // Also verify Gemini / Arbiter cleanup guard directly in reconcileWithMath:
+      final arbitrated = OcrConsensusService.reconcileWithMath(
+        geminiData: {
+          'restaurant_name': 'Hilton Garden Inn',
+          'invoice_number': 'TTG-ZCNG',
+          'invoice_date': '2026-11-19',
+          'items': [
+            {
+              'desc': '01 Dhania KSh 15.00',
+              'qty': 50.0,
+              'unit': 'kgs',
+              'price': 0.0,
+              'total': 750.0,
+            },
+            {
+              'desc': '03 Cherry tomato KSh 100.00 / kgs',
+              'qty': 2.0,
+              'unit': 'kgs',
+              'price': 100.0,
+              'total': 200.0,
+            },
+          ],
+        },
+      );
+      expect(arbitrated.items[0].desc, 'Dhania');
+      expect(arbitrated.items[0].sellPrice, 15);
+      expect(arbitrated.items[1].desc, 'Cherry tomato');
+
+      service.dispose();
+    });
+
+    test(
+        'Offline PP-OCRv5 boxes from Invoice_TTG-A8ESK6_The_Golden_Crest_Hotel.pdf parse exact items, split header, text date, and European/spaced decimals',
+        () async {
+      OcrTextBox pdfBox(
+        String text,
+        double cx,
+        double cy,
+        double w,
+        double h,
+      ) =>
+          OcrTextBox(
+            text: text,
+            confidence: 0.96,
+            centerX: cx,
+            centerY: cy,
+            width: w,
+            height: h,
+            angle: 0,
+            left: cx - w / 2,
+            top: cy - h / 2,
+            right: cx + w / 2,
+            bottom: cy + h / 2,
+          );
+
+      // Exact boxes extracted offline by PP-OCRv5 ONNX from the uploaded PDF
+      final pdfOcrBoxes = <OcrTextBox>[
+        pdfBox('INVOICE', 233.8, 373.9, 281.1, 33.2),
+        pdfBox('Receipt No:', 1133.4, 364.0, 153.8, 15.0),
+        pdfBox('TTG-A8ESK6', 1310.6, 364.0, 167.3, 14.8),
+        pdfBox('Order Date:', 1133.4, 403.5, 149.3, 15.0),
+        pdfBox('12 May 2026', 1316.1, 403.0, 158.2, 16.9),
+        pdfBox('FROM:', 139.6, 501.6, 96.4, 21.1),
+        pdfBox('BILLED TO:', 1317.3, 502.1, 149.3, 15.0),
+        pdfBox('Town Treasure Limited', 248.2, 546.0, 310.9, 16.5),
+        pdfBox('The Golden Crest Hotel', 1236.4, 546.0, 312.2, 14.0),
+        pdfBox('SL.', 142.9, 786.1, 64.4, 58.2),
+        pdfBox('ITEM DESCRIPTION', 336.8, 786.1, 233.5, 11.8),
+        pdfBox('UNIT PRICE', 682.5, 785.0, 147.1, 15.1),
+        pdfBox('QUANTITY', 936.2, 785.0, 131.3, 15.3),
+        pdfBox('TOTAL', 1158.8, 785.0, 88.0, 16.3),
+        pdfBox('01', 148.5, 877.1, 40.3, 26.6),
+        pdfBox('Yellow beans', 294.7, 877.1, 151.6, 15.0),
+        pdfBox('KSh 150.00', 766.7, 877.1, 138.1, 15.2),
+        pdfBox('120 kgs', 973.8, 878.2, 99.1, 21.0),
+        pdfBox('KSh 18.000,00', 1285.1, 877.1, 169.5, 14.8),
+        pdfBox('02', 149.6, 954.9, 43.8, 30.0),
+        pdfBox('Onions', 261.5, 954.9, 90.2, 19.5),
+        pdfBox('KSh 135.00', 766.7, 953.8, 138.1, 15.2),
+        pdfBox('70 kgs', 973.8, 955.5, 91.2, 24.2),
+        pdfBox('KSh 9.450.00', 1291.8, 953.8, 156.1, 14.9),
+        pdfBox('03', 148.5, 1031.7, 40.7, 30.2),
+        pdfBox('Potatoes', 270.4, 1033.0, 107.9, 17.3),
+        pdfBox('KSh 100.00', 765.5, 1030.6, 135.8, 15.2),
+        pdfBox('120 kgs', 974.9, 1032.5, 101.5, 21.5),
+        pdfBox('KSh 12.000 00', 1285.1, 1030.6, 169.5, 14.8),
+        pdfBox('04', 149.6, 1108.4, 36.8, 23.2),
+        pdfBox('Rice', 248.2, 1108.4, 61.1, 21.2),
+        pdfBox('KSh 110.00', 765.6, 1108.1, 137.2, 16.4),
+        pdfBox('134 kgs', 974.0, 1109.7, 100.0, 22.6),
+        pdfBox('KSh 14 740 00', 1285.1, 1108.4, 166.6, 12.1),
+        pdfBox('Town re', 448.5, 1217.7, 529.5, 60.5),
+        pdfBox('Sub Total:', 991.6, 1235.6, 129.4, 18.3),
+        pdfBox('KSh 54.190.00', 1282.9, 1234.5, 169.5, 14.8),
+        pdfBox('Grand Total:', 979.4, 1304.7, 151.6, 15.0),
+        pdfBox('KSh 54.190.00', 1284.0, 1302.5, 171.8, 14.8),
+        pdfBox('DATE: 14 MaV 2026', 1212.0, 1777.2, 188.9, 12.0),
+        pdfBox('Thank vou, The Golden Crest Hotel, for Shopping with us',
+            387.8, 2058.4, 577.7, 13.1),
+      ];
+
+      final service = OcrConsensusService(
+        geminiApiKey: '',
+        paddleOcr: _FakePaddleOcrGateway(pdfOcrBoxes),
+        textRecognizer: _FakeTextRecognizer([]),
+      );
+
+      final result = await service.processDocket([
+        OcrImagePage(
+          dataUrl: 'data:image/jpeg;base64,${base64Encode([1, 2, 3])}',
+          filePath: 'Invoice_TTG-A8ESK6_The_Golden_Crest_Hotel.png',
+          bytes: Uint8List.fromList([1, 2, 3]),
+        ),
+      ]);
+
+      expect(result.restaurantName, 'The Golden Crest Hotel');
+      expect(result.invoiceNumber, 'TTG-A8ESK6');
+      expect(result.date, '2026-05-12');
+      expect(result.items.length, 4);
+      expect(
+        result.items.map((i) => i.desc).toList(),
+        ['Yellow beans', 'Onions', 'Potatoes', 'Rice'],
+      );
+      expect(result.items.map((i) => i.qty).toList(), [120, 70, 120, 134]);
+      expect(result.items.map((i) => i.sellPrice).toList(), [150, 135, 100, 110]);
+      expect(result.items.map((i) => i.total).toList(),
+          [18000, 9450, 12000, 14740]);
+      expect(result.subtotal, 54190);
+      expect(result.grandTotal, 54190);
+      service.dispose();
+    });
   });
 }

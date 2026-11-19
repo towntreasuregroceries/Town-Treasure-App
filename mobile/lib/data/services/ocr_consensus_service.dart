@@ -813,11 +813,18 @@ class OcrConsensusService {
 
     final items = rawItems.map((it) {
       final descRaw = (it['desc'] ?? it['name'] ?? 'Produce Item').toString().trim();
-      final desc = descRaw.isEmpty ? 'Produce Item' : descRaw;
+      final sanitizedDesc = SpatialOcrParser.sanitizeProduceDescription(descRaw);
+      final desc = sanitizedDesc.desc.isNotEmpty
+          ? sanitizedDesc.desc
+          : (descRaw.isEmpty ? 'Produce Item' : descRaw);
       var qty = AppHelpers.parseDouble(it['qty'], 1);
       var price = AppHelpers.parseDouble(it['price'] ?? it['sellPrice']);
+      if (price == 0 && (sanitizedDesc.embeddedPrice ?? 0) > 0) {
+        price = sanitizedDesc.embeddedPrice!;
+      }
       var total = AppHelpers.parseDouble(it['total']);
-      final unit = normalizeUnit((it['unit'] ?? 'kgs').toString());
+      final rawUnit = (it['unit'] ?? sanitizedDesc.embeddedUnit ?? 'kgs').toString();
+      final unit = normalizeUnit(rawUnit);
 
       // Mathematical Arbitration: line Total is highest-clarity anchor.
       if (qty > 0 && total > 0) {
@@ -972,7 +979,7 @@ class OcrConsensusService {
     final items = <Map<String, dynamic>>[];
 
     final invPattern = RegExp(
-      r'(?:DKT|INV|TTG)[-#:\s]*[A-Z0-9-]+|(?:DOCKET|INVOICE)\s*(?:NO\.?|#)\s*:?\s*([A-Z0-9-]+)',
+      r'\b(?:DKT|INV|TTG|TTM)[-#:]\s*[A-Z0-9-]+|\b(?:DKT|INV|TTG|TTM)\s+\d[A-Z0-9-]*|(?:DOCKET|INVOICE|RECEIPT)\s*(?:NO\.?|#)\s*:?\s*([A-Z0-9-]+)',
       caseSensitive: false,
     );
     final clientLabelPattern = RegExp(
@@ -1217,6 +1224,7 @@ CRITICAL INSTRUCTIONS:
 - For each row, QTY * UNIT PRICE = TOTAL.
 - Do NOT vertically shift unit prices into adjacent rows.
 - Read the line totals in the rightmost column carefully.
+- Put ONLY the clean produce item name in "desc" (e.g. "Dhania", NEVER include leading row serial numbers like "01" or prices like "KSh 15.00" or "KSh 15.00 / kgs" in "desc").
 - Extract the Customer / Restaurant name, Invoice #, Date, Subtotal, Delivery Cost, and Grand Total.
 - Common Kenyan units: bags, bunches, pnts (punnets), pcs (pieces), heads, kg, kgs, crates, trays, boxes, litres.
 
