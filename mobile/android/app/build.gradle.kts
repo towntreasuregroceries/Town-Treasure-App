@@ -32,6 +32,24 @@ android {
         versionName = flutter.versionName
     }
 
+    buildFeatures {
+        resValues = true
+    }
+
+    flavorDimensions += "app"
+    productFlavors {
+        create("owner") {
+            dimension = "app"
+            applicationId = "com.towntreasuregroceries.town_treasure_groceries"
+            resValue("string", "app_name", "Town Treasure Groceries")
+        }
+        create("clerk") {
+            dimension = "app"
+            applicationId = "com.towntreasuregroceries.clerk"
+            resValue("string", "app_name", "Town Treasure Clerk")
+        }
+    }
+
     signingConfigs {
         if (keystorePropertiesFile.exists()) {
             create("release") {

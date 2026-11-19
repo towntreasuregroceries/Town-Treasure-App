@@ -117,6 +117,7 @@ class ClerkViewModel extends ChangeNotifier {
         _audit = duplicateDetector;
 
   static const String keyClerkInviteToken = 'ttg_clerk_invite_token';
+  static const String keyClerkInviteMeta = 'ttg_clerk_invite_meta';
   static const String keyClerkName = 'ttg_clerk_name';
   static const String keyClerkSubmissionKey = 'ttg_clerk_submission_key';
   static const String defaultClerkWebBaseUrl =
@@ -198,6 +199,11 @@ class ClerkViewModel extends ChangeNotifier {
   String _savedClerkName = '';
   String _inviteOwnerName = 'account owner';
   String _inviteOwnerEmail = '';
+  DateTime? _inviteExpiresAt;
+  DateTime? _inviteIdleExpiresAt;
+  DateTime? _inviteEffectiveExpiresAt;
+  bool _inviteVerified = false;
+  String? _inviteTokenError;
   List<StagingDocket> _clerkHistory = [];
   bool _isLoadingClerkHistory = false;
   String? _clerkHistoryError;
@@ -208,6 +214,16 @@ class ClerkViewModel extends ChangeNotifier {
   String get savedClerkName => _savedClerkName;
   String get inviteOwnerName => _inviteOwnerName;
   String get inviteOwnerEmail => _inviteOwnerEmail;
+  DateTime? get inviteExpiresAt => _inviteExpiresAt;
+  DateTime? get inviteIdleExpiresAt => _inviteIdleExpiresAt;
+  DateTime? get inviteEffectiveExpiresAt => _inviteEffectiveExpiresAt;
+  bool get isInviteVerified => _inviteVerified;
+  bool get isInviteExpired =>
+      _inviteEffectiveExpiresAt != null &&
+      !_inviteEffectiveExpiresAt!.isAfter(DateTime.now());
+  String? get inviteTokenError => _inviteTokenError;
+  bool get canSubmitWithToken =>
+      hasClerkInvite && _inviteVerified && !isInviteExpired;
   List<StagingDocket> get clerkHistory => List.unmodifiable(_clerkHistory);
   List<StagingDocket> get clerkReturnedDockets =>
       _clerkHistory.where((d) => d.isRejected).toList();
@@ -680,13 +696,60 @@ class ClerkViewModel extends ChangeNotifier {
     if (initialInviteToken != null && initialInviteToken.trim().isNotEmpty) {
       _clerkInviteToken = parseInviteTokenInput(initialInviteToken);
       await _storage.setRaw(keyClerkInviteToken, _clerkInviteToken);
+      _inviteVerified = false;
+      _inviteExpiresAt = null;
+      _inviteIdleExpiresAt = null;
+      _inviteEffectiveExpiresAt = null;
     } else {
       _clerkInviteToken = (await _storage.getRaw(keyClerkInviteToken)) ?? '';
+      await _loadCachedInviteMeta();
     }
     notifyListeners();
     if (_clerkInviteToken.isNotEmpty) {
       await loadClerkHistory();
     }
+  }
+
+  Future<void> _loadCachedInviteMeta() async {
+    final meta = await _storage.getJsonMap(keyClerkInviteMeta);
+    if (meta.isEmpty) return;
+    _inviteOwnerName =
+        (meta['owner_name'] ?? _inviteOwnerName).toString().trim();
+    _inviteOwnerEmail =
+        (meta['owner_email'] ?? _inviteOwnerEmail).toString().trim();
+    _inviteExpiresAt = DateTime.tryParse(meta['expires_at']?.toString() ?? '');
+    _inviteIdleExpiresAt = DateTime.tryParse(
+      meta['idle_expires_at']?.toString() ?? '',
+    );
+    _inviteEffectiveExpiresAt = DateTime.tryParse(
+      meta['effective_expires_at']?.toString() ?? '',
+    );
+    _inviteVerified = meta['verified'] == true && !isInviteExpired;
+    if (isInviteExpired) {
+      _inviteTokenError =
+          'This clerk token expired (30-day max or 7 days idle). Request a new token link from the owner.';
+    }
+  }
+
+  Future<void> _saveInviteMeta() async {
+    await _storage.setJson(keyClerkInviteMeta, {
+      'owner_name': _inviteOwnerName,
+      'owner_email': _inviteOwnerEmail,
+      'expires_at': _inviteExpiresAt?.toIso8601String(),
+      'idle_expires_at': _inviteIdleExpiresAt?.toIso8601String(),
+      'effective_expires_at': _inviteEffectiveExpiresAt?.toIso8601String(),
+      'verified': _inviteVerified,
+    });
+  }
+
+  static bool _isTokenAuthError(Object err) {
+    final lower = err.toString().toLowerCase();
+    return lower.contains('invalid') ||
+        lower.contains('expired') ||
+        lower.contains('revoked') ||
+        lower.contains('inactivity') ||
+        lower.contains('401') ||
+        lower.contains('ask the account owner for a new link');
   }
 
   Future<void> pairWithInviteToken(String rawInput) async {
@@ -695,9 +758,24 @@ class ClerkViewModel extends ChangeNotifier {
       throw ArgumentError('Please enter a valid clerk invite link or token.');
     }
     _clerkInviteToken = token;
+    _inviteVerified = false;
+    _inviteTokenError = null;
+    _inviteExpiresAt = null;
+    _inviteIdleExpiresAt = null;
+    _inviteEffectiveExpiresAt = null;
     await _storage.setRaw(keyClerkInviteToken, token);
     notifyListeners();
-    await loadClerkHistory();
+    try {
+      await loadClerkHistory(rethrowAuthErrors: true);
+    } catch (e) {
+      _clerkInviteToken = '';
+      _inviteVerified = false;
+      _inviteTokenError = e.toString();
+      await _storage.deleteKey(keyClerkInviteToken);
+      await _storage.deleteKey(keyClerkInviteMeta);
+      notifyListeners();
+      rethrow;
+    }
   }
 
   /// Allows an authenticated owner inside the APK to generate and immediately
@@ -714,12 +792,18 @@ class ClerkViewModel extends ChangeNotifier {
     _clerkHistoryError = null;
     _inviteOwnerName = 'account owner';
     _inviteOwnerEmail = '';
+    _inviteExpiresAt = null;
+    _inviteIdleExpiresAt = null;
+    _inviteEffectiveExpiresAt = null;
+    _inviteVerified = false;
+    _inviteTokenError = null;
     _liveDuplicateWarning = null;
     await _storage.deleteKey(keyClerkInviteToken);
+    await _storage.deleteKey(keyClerkInviteMeta);
     notifyListeners();
   }
 
-  Future<void> loadClerkHistory() async {
+  Future<void> loadClerkHistory({bool rethrowAuthErrors = false}) async {
     if (_clerkInviteToken.isEmpty) return;
     _isLoadingClerkHistory = true;
     _clerkHistoryError = null;
@@ -737,6 +821,38 @@ class ClerkViewModel extends ChangeNotifier {
       if (ownerName.isNotEmpty) _inviteOwnerName = ownerName;
       _inviteOwnerEmail = (owner['email'] ?? '').toString().trim();
 
+      final invite = result['invite'] is Map
+          ? Map<String, dynamic>.from(result['invite'] as Map)
+          : null;
+      if (invite != null) {
+        _inviteExpiresAt = DateTime.tryParse(
+          invite['expires_at']?.toString() ?? '',
+        );
+        _inviteIdleExpiresAt = DateTime.tryParse(
+          invite['idle_expires_at']?.toString() ?? '',
+        );
+        _inviteEffectiveExpiresAt = DateTime.tryParse(
+          invite['effective_expires_at']?.toString() ?? '',
+        ) ??
+            _inviteIdleExpiresAt ??
+            _inviteExpiresAt;
+      }
+
+      if (isInviteExpired) {
+        _inviteVerified = false;
+        _inviteTokenError =
+            'This clerk token expired (30-day max or 7 days idle). Request a new link from the owner.';
+        await _saveInviteMeta();
+        if (rethrowAuthErrors) {
+          throw StateError(_inviteTokenError!);
+        }
+        return;
+      }
+
+      _inviteVerified = true;
+      _inviteTokenError = null;
+      await _saveInviteMeta();
+
       final rawList = result['submissions'];
       _clerkHistory = rawList is List
           ? rawList
@@ -746,6 +862,14 @@ class ClerkViewModel extends ChangeNotifier {
               .toList()
           : <StagingDocket>[];
     } catch (e) {
+      if (_isTokenAuthError(e)) {
+        _inviteVerified = false;
+        _inviteTokenError = e.toString();
+        await _storage.deleteKey(keyClerkInviteMeta);
+        if (rethrowAuthErrors) {
+          rethrow;
+        }
+      }
       _clerkHistoryError = e.toString();
     } finally {
       _isLoadingClerkHistory = false;
@@ -850,9 +974,10 @@ class ClerkViewModel extends ChangeNotifier {
     required List<String> receiptPhotos,
     bool bypassDuplicateCheck = false,
   }) async {
-    if (_clerkInviteToken.isEmpty) {
+    if (!canSubmitWithToken) {
       return ClerkSubmitResult.failure(
-        'This portal needs a valid private clerk invite link. Ask the account owner for a new one.',
+        _inviteTokenError ??
+            'A verified, active clerk invite token (valid 30 days max / 7 days idle) is required before sending.',
       );
     }
     final cleanClerk = clerkName.trim();

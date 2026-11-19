@@ -19,6 +19,7 @@ import 'package:town_treasure_groceries/data/services/ocr_consensus_service.dart
 import 'package:town_treasure_groceries/data/services/supabase_service.dart';
 import 'package:town_treasure_groceries/domain/models/models.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
+import 'package:town_treasure_groceries/ui/features/clerk/clerk_portal_screen.dart';
 import 'package:town_treasure_groceries/ui/features/clerk/clerk_submissions_screen.dart';
 import 'package:town_treasure_groceries/ui/features/clerk/clerk_view_model.dart';
 import 'package:town_treasure_groceries/ui/features/scanner/docket_scanner_sheet.dart';
@@ -871,6 +872,70 @@ void main() {
       );
       expect(second.isSuccess, isTrue);
       expect(vm.clerkHistory.length, 2);
+    });
+
+    test('rejects pairing and blocks docket submission when token is missing, invalid, or idle-expired',
+        () async {
+      // Cannot submit while unpaired
+      final unpaired = await vm.submitClerkDocket(
+        clerkName: 'Faith',
+        restaurantName: 'Kempinski',
+        invoiceDate: '2026-11-19',
+        items: const [
+          InvoiceLineItem(
+            desc: 'Tomatoes',
+            qty: 5,
+            unit: 'kgs',
+            buyPrice: 0,
+            sellPrice: 100,
+            total: 500,
+          ),
+        ],
+        deliveryCost: 0,
+        otherCost: 0,
+        notes: '',
+        receiptPhotos: const [],
+      );
+      expect(unpaired.isSuccess, isFalse);
+      expect(unpaired.error, contains('token'));
+
+      // Invalid/expired token throws cleanly on pairWithInviteToken and leaves state unpaired
+      await expectLater(
+        () => vm.pairWithInviteToken('invalid_expired_token_value'),
+        throwsA(anything),
+      );
+      expect(vm.canSubmitWithToken, isFalse);
+      expect(vm.hasClerkInvite, isFalse);
+    });
+
+    testWidgets('standalone Clerk App locks submission behind token gate until paired with valid token',
+        (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: ClerkPortalScreen(
+            viewModel: vm,
+            standaloneClerkApp: true,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Standalone branding & lock banner visible, intake form hidden until paired
+      expect(find.text('Town Treasure Clerk'), findsOneWidget);
+      expect(find.byKey(const Key('banner_clerk_token_gate')), findsOneWidget);
+      expect(find.text('Delivery Docket Intake'), findsNothing);
+
+      // Pair with valid active token -> unlocks intake + compact produce ledger
+      await tester.runAsync(
+        () => vm.pairWithInviteToken(supabase.activeInviteToken),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('banner_clerk_token_gate')), findsNothing);
+      expect(find.text('Delivery Docket Intake'), findsOneWidget);
+      expect(find.text('Produce Items (1)'), findsOneWidget);
+      expect(find.byKey(const Key('btn_clerk_submit_docket')), findsOneWidget);
     });
   });
 

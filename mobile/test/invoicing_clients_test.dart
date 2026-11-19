@@ -839,6 +839,55 @@ void main() {
       expect(nov2.status, 'paid');
       expect(oct1.status, 'pending'); // Untouched because filtered out!
     });
+
+    testWidgets('InvoiceEditorScreen Compact Ledger fits multi-item invoices cleanly and toggles to Cards',
+        (tester) async {
+      final env = await _createTestVault();
+      final vault = env.vault;
+      await vault.setRestaurants([
+        const Restaurant(id: 'r1', name: 'Kempinski'),
+      ]);
+
+      final manyItems = List.generate(
+        8,
+        (i) => InvoiceLineItem(
+          desc: 'Produce Item ${i + 1}',
+          qty: (i + 1).toDouble(),
+          unit: 'kgs',
+          buyPrice: 50,
+          sellPrice: 100,
+          total: (i + 1) * 100.0,
+        ),
+      );
+
+      await tester.pumpWidget(
+        _wrapWithProviders(
+          vault,
+          InvoiceEditorScreen(
+            prefillRestaurantId: 'r1',
+            prefillItems: manyItems,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Starts in Compact Ledger mode showing Line Items count and multiple items simultaneously
+      expect(find.byKey(const Key('compact_items_ledger')), findsOneWidget);
+      expect(find.text('Line Items (8)'), findsOneWidget);
+      expect(find.text('Produce Item 1'), findsOneWidget);
+      expect(find.text('Produce Item 6'), findsOneWidget);
+
+      // Toggle to detailed Cards mode
+      await tester.tap(find.text('Cards'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('compact_items_ledger')), findsNothing);
+      expect(find.text('Item Description *'), findsWidgets);
+
+      // Toggle back to Compact
+      await tester.tap(find.text('Compact'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('compact_items_ledger')), findsOneWidget);
+    });
   });
 
   group('InvoicePdfBuilder', () {

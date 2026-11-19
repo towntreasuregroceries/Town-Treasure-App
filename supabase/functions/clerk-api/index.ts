@@ -116,16 +116,90 @@ async function getOwnerFromJwt(request: Request) {
   return data.user;
 }
 
-async function resolveInvite(token: unknown) {
-  if (typeof token !== 'string' || token.length < 40 || token.length > 100) return null;
+const MAX_INVITE_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
+const IDLE_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000;
+
+type InviteResolution =
+  | {
+      ok: true;
+      invite: Record<string, unknown> & {
+        id: string;
+        owner_user_id: string;
+        owner_email: string | null;
+        owner_name: string | null;
+        expires_at: string;
+        last_activity_at: string;
+        idle_expires_at: string;
+        effective_expires_at: string;
+      };
+    }
+  | { ok: false; error: string };
+
+async function resolveInvite(token: unknown): Promise<InviteResolution> {
+  if (typeof token !== 'string' || token.length < 40 || token.length > 100) {
+    return {
+      ok: false,
+      error: 'This clerk link is invalid or expired. Ask the account owner for a new link.',
+    };
+  }
   const tokenHash = await hashToken(token);
   const { data, error } = await admin
     .from('clerk_invites')
     .select('id, owner_user_id, owner_email, owner_name, expires_at, revoked_at')
     .eq('token_hash', tokenHash)
     .maybeSingle();
-  if (error || !data || data.revoked_at || Date.parse(data.expires_at) <= Date.now()) return null;
-  return data;
+  if (error || !data || data.revoked_at) {
+    return {
+      ok: false,
+      error: 'This clerk link is invalid or has been revoked. Ask the account owner for a new link.',
+    };
+  }
+
+  const nowMs = Date.now();
+  const expiresMs = Date.parse(data.expires_at);
+  if (!Number.isFinite(expiresMs) || expiresMs <= nowMs) {
+    return {
+      ok: false,
+      error: 'This 30-day clerk token has expired. Ask the account owner for a new link.',
+    };
+  }
+
+  const issuedAtMs = expiresMs - MAX_INVITE_LIFETIME_MS;
+  let lastActivityMs = issuedAtMs;
+
+  const { data: recentSubs } = await admin
+    .from('staged_invoices')
+    .select('updated_at, created_at')
+    .eq('submitted_by_invite_id', data.id)
+    .order('updated_at', { ascending: false });
+
+  if (Array.isArray(recentSubs) && recentSubs.length > 0) {
+    for (const row of recentSubs) {
+      const subMs = Date.parse(String(row?.updated_at ?? row?.created_at ?? ''));
+      if (Number.isFinite(subMs) && subMs > lastActivityMs) {
+        lastActivityMs = subMs;
+      }
+    }
+  }
+
+  const idleExpiresMs = lastActivityMs + IDLE_TIMEOUT_MS;
+  if (idleExpiresMs <= nowMs) {
+    return {
+      ok: false,
+      error: 'This clerk token expired after 7 days of inactivity. Ask the account owner for a new link.',
+    };
+  }
+
+  const effectiveExpiresMs = Math.min(expiresMs, idleExpiresMs);
+  return {
+    ok: true,
+    invite: {
+      ...data,
+      last_activity_at: new Date(lastActivityMs).toISOString(),
+      idle_expires_at: new Date(idleExpiresMs).toISOString(),
+      effective_expires_at: new Date(effectiveExpiresMs).toISOString(),
+    },
+  };
 }
 
 Deno.serve(async request => {
@@ -146,7 +220,9 @@ Deno.serve(async request => {
       const ownerName = cleanText(user.user_metadata?.full_name ?? user.user_metadata?.name, 120)
         || cleanText(user.email?.split('@')[0], 120)
         || 'Account owner';
-      const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+      const nowMs = Date.now();
+      const expiresAt = new Date(nowMs + MAX_INVITE_LIFETIME_MS).toISOString();
+      const idleExpiresAt = new Date(nowMs + IDLE_TIMEOUT_MS).toISOString();
       const { data, error } = await admin.from('clerk_invites').insert({
         owner_user_id: user.id,
         token_hash: tokenHash,
@@ -164,11 +240,22 @@ Deno.serve(async request => {
         await admin.from('clerk_invites').delete().eq('id', data.id);
         throw revokeError;
       }
-      return reply(200, { token, invite: data });
+      return reply(200, {
+        token,
+        invite: {
+          ...data,
+          last_activity_at: new Date(nowMs).toISOString(),
+          idle_expires_at: idleExpiresAt,
+          effective_expires_at: idleExpiresAt,
+          max_lifetime_days: 30,
+          idle_timeout_days: 7,
+        },
+      });
     }
 
-    const invite = await resolveInvite(body.invite_token);
-    if (!invite) return reply(401, { error: 'This clerk link is invalid or expired. Ask the account owner for a new link.' });
+    const resolution = await resolveInvite(body.invite_token);
+    if (!resolution.ok) return reply(401, { error: resolution.error });
+    const invite = resolution.invite;
 
     const sanitizeForClerk = (row: Record<string, unknown>) => {
       const { total_buy: _tb, ...rest } = row;
@@ -198,6 +285,14 @@ Deno.serve(async request => {
       if (error) throw error;
       return reply(200, {
         owner: { name: invite.owner_name, email: invite.owner_email },
+        invite: {
+          expires_at: invite.expires_at,
+          last_activity_at: invite.last_activity_at,
+          idle_expires_at: invite.idle_expires_at,
+          effective_expires_at: invite.effective_expires_at,
+          max_lifetime_days: 30,
+          idle_timeout_days: 7,
+        },
         submissions: (data ?? []).slice(0, 100).map(row => sanitizeForClerk(row as Record<string, unknown>)),
       });
     }

@@ -54,17 +54,24 @@ class _ClerkSubmissionsScreenState extends State<ClerkSubmissionsScreen> {
     super.dispose();
   }
 
+  String _buildInviteShareMessage(ClerkInviteLink invite) {
+    return 'Hi! Here is your secure Town Treasure Clerk Token for submitting dockets to ${invite.ownerName}\'s review inbox.\n\n'
+        'Clerk App Token:\n${invite.token}\n\n'
+        'Or open Web Portal:\n${invite.url}\n\n'
+        'Security Note: Valid up to 30 days max and expires automatically after 7 days of inactivity (older tokens were revoked).';
+  }
+
   Future<void> _copyClerkInviteLink() async {
     setState(() => _isGeneratingInvite = true);
     try {
       final invite = await widget.viewModel.createClerkInviteLink();
-      await Clipboard.setData(ClipboardData(text: invite.url));
+      await Clipboard.setData(ClipboardData(text: invite.token));
       if (!mounted) return;
       _showInviteDialog(invite);
     } catch (e) {
       if (!mounted) return;
       _showSnack(
-        'Could not create a secure Clerk Link: ${UserFriendlyError.format(e)}',
+        'Could not create a secure Clerk Token: ${UserFriendlyError.format(e)}',
         color: AppTheme.danger,
       );
     } finally {
@@ -72,35 +79,37 @@ class _ClerkSubmissionsScreenState extends State<ClerkSubmissionsScreen> {
     }
   }
 
+  Future<void> _shareInviteMessage(ClerkInviteLink invite) async {
+    final text = _buildInviteShareMessage(invite);
+    final launched = await AppLockGuard.runWithoutRelock(() async {
+      final directUri = Uri.parse(
+        'whatsapp://send?text=${Uri.encodeComponent(text)}',
+      );
+      if (await launchUrl(directUri, mode: LaunchMode.externalApplication)) {
+        return true;
+      }
+      final webUri = Uri.parse(
+        'https://wa.me/?text=${Uri.encodeComponent(text)}',
+      );
+      return launchUrl(webUri, mode: LaunchMode.externalApplication);
+    });
+
+    if (!launched) {
+      await AppLockGuard.runWithoutRelock(
+        () => Share.share(text, subject: 'Town Treasure Clerk Invite Token'),
+      );
+    }
+  }
+
   Future<void> _shareClerkPortalWhatsApp() async {
     setState(() => _isGeneratingInvite = true);
     try {
       final invite = await widget.viewModel.createClerkInviteLink();
-      final text =
-          'Hi! Open this secure Town Treasure Groceries Clerk Portal link in your phone browser to submit dockets for ${invite.ownerName}\'s review (no app download needed). This link expires after 30 days; older links are no longer valid:\n\n${invite.url}';
-
-      final launched = await AppLockGuard.runWithoutRelock(() async {
-        final directUri = Uri.parse(
-          'whatsapp://send?text=${Uri.encodeComponent(text)}',
-        );
-        if (await launchUrl(directUri, mode: LaunchMode.externalApplication)) {
-          return true;
-        }
-        final webUri = Uri.parse(
-          'https://wa.me/?text=${Uri.encodeComponent(text)}',
-        );
-        return launchUrl(webUri, mode: LaunchMode.externalApplication);
-      });
-
-      if (!launched) {
-        await AppLockGuard.runWithoutRelock(
-          () => Share.share(text, subject: 'Town Treasure Clerk Portal Link'),
-        );
-      }
+      await _shareInviteMessage(invite);
     } catch (e) {
       if (!mounted) return;
       _showSnack(
-        'Could not create a secure Clerk Link: ${UserFriendlyError.format(e)}',
+        'Could not create a secure Clerk Token: ${UserFriendlyError.format(e)}',
         color: AppTheme.danger,
       );
     } finally {
@@ -114,53 +123,78 @@ class _ClerkSubmissionsScreenState extends State<ClerkSubmissionsScreen> {
       builder: (ctx) => AlertDialog(
         title: const Row(
           children: [
-            Icon(Icons.link_outlined, color: AppTheme.forestGreen),
+            Icon(Icons.vpn_key_outlined, color: AppTheme.forestGreen),
             SizedBox(width: 8),
-            Expanded(child: Text('Secure Clerk Invite Created')),
+            Expanded(child: Text('Clerk Token Ready')),
           ],
         ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'The portal link was copied to your clipboard. Previous clerk links were revoked; this link expires in 30 days.',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'MOBILE APP INVITE TOKEN',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: AppTheme.slateMuted,
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Token copied to your clipboard. Previous clerk tokens were revoked. This token is valid for 30 days max and expires after 7 days of inactivity.',
+                style: TextStyle(fontSize: 13),
               ),
-            ),
-            const SizedBox(height: 4),
-            SelectableText(
-              invite.token,
-              style: const TextStyle(
-                fontFamily: 'monospace',
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
+              const SizedBox(height: 12),
+              const Text(
+                'TOWN TREASURE CLERK APP TOKEN',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: AppTheme.slateMuted,
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: 4),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceSage,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppTheme.borderSubtle),
+                ),
+                child: SelectableText(
+                  invite.token,
+                  style: const TextStyle(
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
         actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: invite.url));
+              if (ctx.mounted) {
+                Navigator.of(ctx).pop();
+                _showSnack('Web portal link copied to clipboard.');
+              }
+            },
+            child: const Text('Copy Web Link'),
+          ),
           TextButton(
             onPressed: () async {
               await Clipboard.setData(ClipboardData(text: invite.token));
               if (ctx.mounted) {
                 Navigator.of(ctx).pop();
-                _showSnack('Raw invite token copied to clipboard.');
+                _showSnack('Clerk token copied to clipboard.');
               }
             },
-            child: const Text('Copy Token Only'),
+            child: const Text('Copy Token'),
           ),
-          FilledButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Done'),
+          FilledButton.icon(
+            onPressed: () async {
+              Navigator.of(ctx).pop();
+              await _shareInviteMessage(invite);
+            },
+            icon: const Icon(Icons.share_outlined, size: 17),
+            label: const Text('Share'),
           ),
         ],
       ),
@@ -314,10 +348,11 @@ class _ClerkSubmissionsScreenState extends State<ClerkSubmissionsScreen> {
                       runSpacing: 8,
                       children: [
                         OutlinedButton.icon(
+                          key: const Key('btn_generate_clerk_token'),
                           onPressed:
                               _isGeneratingInvite ? null : _copyClerkInviteLink,
-                          icon: const Icon(Icons.link_outlined, size: 18),
-                          label: const Text('Copy Clerk Link'),
+                          icon: const Icon(Icons.vpn_key_outlined, size: 18),
+                          label: const Text('Generate & Share Token'),
                         ),
                         FilledButton.icon(
                           onPressed: _isGeneratingInvite

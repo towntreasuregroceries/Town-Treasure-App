@@ -1,8 +1,8 @@
 {
-  "version": "1.1.4",
-  "buildNumber": 2008,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.1.4/TownTreasureGroceries.apk",
-  "sha256": "b37ae3043350599c33dbfdea4d57a7a936c88177c6b620ffaaf2d7775c29dbcf",
-  "releaseNotes": "v1.1.4+8: Added monthly invoice filter & multi-select batch Mark as Paid / Batch Print on Invoices; built Universal Print & Dispatch Center (Android System/Mopria/USB Print, Direct Wi-Fi/LAN IPP port 631, Raw TCP port 9100, 80mm/58mm ESC/POS thermal receipts, network subnet printer auto-scanner, and printer app bridge); added Town Treasure branded in-app PDF viewer with pinch/double-tap zoom and page strip requiring zero external PDF apps.",
+  "version": "1.1.5",
+  "buildNumber": 2009,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.1.5/TownTreasureGroceries.apk",
+  "sha256": "d264d439bffa241cfb0209c010ad738e6cc80ffea2ed8facb0c0cf76339b07e5",
+  "releaseNotes": "v1.1.5+9: Launched standalone Town Treasure Clerk app (TownTreasureClerk.apk) with strict 30-day max / 7-day idle token gating; added 1-tap Generate & Share Clerk Token in the Owner app; added Compact Multi-Item Ledger density fitting 6-8+ items per screen on Invoice & Clerk editors; fixed DatabaseException(database_closed 1) SQLite concurrency with WorkManager background checks.",
   "mandatory": false
 }

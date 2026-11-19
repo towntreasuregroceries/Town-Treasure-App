@@ -97,16 +97,34 @@ class LocalStorageService {
   final SecureKeyStore _secureStore;
   final Future<Database> Function()? _databaseOpener;
   Database? _db;
+  Future<Database>? _openingDb;
 
   Future<Database> _getDb() async {
-    if (_db != null && _db!.isOpen) return _db!;
+    final current = _db;
+    if (current != null && current.isOpen) return current;
+    final pending = _openingDb;
+    if (pending != null) return pending;
+
+    final completerFuture = _openDatabaseFresh();
+    _openingDb = completerFuture;
+    try {
+      final db = await completerFuture;
+      _db = db;
+      return db;
+    } finally {
+      if (identical(_openingDb, completerFuture)) {
+        _openingDb = null;
+      }
+    }
+  }
+
+  Future<Database> _openDatabaseFresh() async {
     if (_databaseOpener != null) {
-      _db = await _databaseOpener();
-      return _db!;
+      return _databaseOpener();
     }
     final dbPath = await getDatabasesPath();
     final fullPath = p.join(dbPath, 'ttg_vault_cache.db');
-    _db = await openDatabase(
+    return openDatabase(
       fullPath,
       version: 1,
       onCreate: (db, version) async {
@@ -119,7 +137,22 @@ class LocalStorageService {
         ''');
       },
     );
-    return _db!;
+  }
+
+  Future<T> _runWithDb<T>(Future<T> Function(Database db) action) async {
+    try {
+      final db = await _getDb();
+      return await action(db);
+    } on DatabaseException catch (e) {
+      if (e.isDatabaseClosedError() ||
+          e.toString().toLowerCase().contains('database_closed')) {
+        _db = null;
+        _openingDb = null;
+        final reopened = await _getDb();
+        return action(reopened);
+      }
+      rethrow;
+    }
   }
 
   /// Ensures the `kv_store` table exists (helpful for injected test databases).
@@ -191,34 +224,37 @@ class LocalStorageService {
   // --- SQLite Key-Value Store ---
 
   Future<String?> getRaw(String key) async {
-    final db = await _getDb();
-    final rows = await db.query(
-      'kv_store',
-      columns: ['value'],
-      where: 'key = ?',
-      whereArgs: [key],
-      limit: 1,
-    );
-    if (rows.isEmpty) return null;
-    return rows.first['value']?.toString();
+    return _runWithDb((db) async {
+      final rows = await db.query(
+        'kv_store',
+        columns: ['value'],
+        where: 'key = ?',
+        whereArgs: [key],
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      return rows.first['value']?.toString();
+    });
   }
 
   Future<void> setRaw(String key, String value) async {
-    final db = await _getDb();
-    await db.insert(
-      'kv_store',
-      {
-        'key': key,
-        'value': value,
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await _runWithDb((db) async {
+      await db.insert(
+        'kv_store',
+        {
+          'key': key,
+          'value': value,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+    });
   }
 
   Future<void> deleteKey(String key) async {
-    final db = await _getDb();
-    await db.delete('kv_store', where: 'key = ?', whereArgs: [key]);
+    await _runWithDb((db) async {
+      await db.delete('kv_store', where: 'key = ?', whereArgs: [key]);
+    });
   }
 
   Future<List<Map<String, dynamic>>> getJsonList(String key) async {
@@ -273,22 +309,24 @@ class LocalStorageService {
       setJson(keySavedPrinter, value);
 
   Future<void> clearVaultData() async {
-    final db = await _getDb();
-    final batch = db.batch();
-    for (final key in allVaultDataKeys) {
-      batch.delete('kv_store', where: 'key = ?', whereArgs: [key]);
-    }
-    await batch.commit(noResult: true);
+    await _runWithDb((db) async {
+      final batch = db.batch();
+      for (final key in allVaultDataKeys) {
+        batch.delete('kv_store', where: 'key = ?', whereArgs: [key]);
+      }
+      await batch.commit(noResult: true);
+    });
   }
 
   /// Comprehensive sign-out cleanup matching `supabase-config.js` `signOut()`.
   Future<void> clearAllOnSignOut() async {
-    final db = await _getDb();
-    final batch = db.batch();
-    for (final key in [...allVaultDataKeys, ...allStagingKeys]) {
-      batch.delete('kv_store', where: 'key = ?', whereArgs: [key]);
-    }
-    await batch.commit(noResult: true);
+    await _runWithDb((db) async {
+      final batch = db.batch();
+      for (final key in [...allVaultDataKeys, ...allStagingKeys]) {
+        batch.delete('kv_store', where: 'key = ?', whereArgs: [key]);
+      }
+      await batch.commit(noResult: true);
+    });
     await clearAuthMetadata();
   }
 

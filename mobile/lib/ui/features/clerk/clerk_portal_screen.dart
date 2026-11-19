@@ -44,11 +44,13 @@ class ClerkPortalScreen extends StatefulWidget {
     required this.viewModel,
     this.initialInviteToken,
     this.allowOwnerQuickPair = false,
+    this.standaloneClerkApp = false,
   });
 
   final ClerkViewModel viewModel;
   final String? initialInviteToken;
   final bool allowOwnerQuickPair;
+  final bool standaloneClerkApp;
 
   @override
   State<ClerkPortalScreen> createState() => _ClerkPortalScreenState();
@@ -106,6 +108,7 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
   String _ocrStatus = '';
   bool _isSubmitting = false;
   bool _isPairing = false;
+  bool _compactItems = true;
   StagingDocket? _lastSubmittedRecord;
   Timer? _liveDupDebounce;
 
@@ -693,27 +696,62 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
     final oth = double.tryParse(_otherController.text.trim()) ?? 0;
     final grandTotal = subtotal + del + oth;
 
+    final canSend = vm.canSubmitWithToken;
+
     return Scaffold(
       backgroundColor: AppTheme.surfaceSage,
       appBar: AppBar(
-        title: const Text('Clerk Intake Portal'),
+        title: Text(
+          widget.standaloneClerkApp
+              ? 'Town Treasure Clerk'
+              : 'Clerk Intake Portal',
+        ),
         actions: [
           if (vm.hasClerkInvite)
             IconButton(
-              tooltip: 'Refresh History',
+              tooltip: 'Refresh History & Verify Token',
               onPressed: vm.isLoadingClerkHistory ? null : vm.loadClerkHistory,
               icon: const Icon(Icons.refresh),
             ),
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(14),
         children: [
           // 1. Invite Token Pairing / Verified Route Banner
-          if (!vm.hasClerkInvite)
+          if (!canSend)
             _buildPairingCard(vm)
           else
             _buildRoutingBanner(vm),
+
+          if (widget.standaloneClerkApp && !canSend) ...[
+            const SizedBox(height: 14),
+            Container(
+              key: const Key('banner_clerk_token_gate'),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: AppTheme.warningSurface,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppTheme.warning),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.lock_clock_outlined, color: AppTheme.warning),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Docket sending is locked until you pair a valid owner token (expires after 30 days max or 7 days of inactivity).',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.slateInk,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
 
           // 2. Submission Success Banner with 1-Tap WhatsApp Notify
           if (_lastSubmittedRecord != null) ...[
@@ -793,8 +831,9 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
 
           const SizedBox(height: 14),
 
-          // 5. Docket Form Card
-          Card(
+          // 5. Docket Form Card (hidden behind token gate in standalone Clerk app when unpaired/expired)
+          if (!widget.standaloneClerkApp || canSend)
+            Card(
             child: Padding(
               padding: const EdgeInsets.all(16),
               child: Column(
@@ -1096,7 +1135,220 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
 
                   const SizedBox(height: 14),
 
-                  // Line Items
+                  // Line Items header + Compact/Cards density toggle
+                  Row(
+                    children: [
+                      Text(
+                        'Produce Items (${_rows.length})',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.slateInk,
+                        ),
+                      ),
+                      const Spacer(),
+                      SegmentedButton<bool>(
+                        style: SegmentedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          textStyle: const TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        segments: const [
+                          ButtonSegment<bool>(value: true, label: Text('Compact')),
+                          ButtonSegment<bool>(value: false, label: Text('Cards')),
+                        ],
+                        selected: {_compactItems},
+                        onSelectionChanged: (sel) {
+                          if (sel.isNotEmpty) {
+                            setState(() => _compactItems = sel.first);
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  if (_compactItems)
+                    Container(
+                      decoration: BoxDecoration(
+                        color: AppTheme.surfaceCard,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppTheme.borderSubtle),
+                      ),
+                      child: Column(
+                        children: [
+                          for (var i = 0; i < _rows.length; i++) ...[
+                            if (i > 0) const Divider(height: 1),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 7,
+                              ),
+                              child: Column(
+                                children: [
+                                  Row(
+                                    children: [
+                                      CircleAvatar(
+                                        radius: 10,
+                                        backgroundColor: AppTheme.sageTint,
+                                        child: Text(
+                                          '${i + 1}',
+                                          style: const TextStyle(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w800,
+                                            color: AppTheme.forestGreenDeep,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: TextField(
+                                          controller: _rows[i].descController,
+                                          style: const TextStyle(
+                                            fontSize: 13.5,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                          onChanged: (_) =>
+                                              _scheduleLiveDuplicateCheck(),
+                                          decoration: const InputDecoration(
+                                            hintText: 'Produce item *',
+                                            isDense: true,
+                                            contentPadding:
+                                                EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 4,
+                                            ),
+                                            border: UnderlineInputBorder(),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        'KES ${_moneyFmt.format((double.tryParse(_rows[i].qtyController.text.trim()) ?? 0) * (double.tryParse(_rows[i].priceController.text.trim()) ?? 0))}',
+                                        style: const TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppTheme.forestGreenDeep,
+                                        ),
+                                      ),
+                                      if (_rows.length > 1)
+                                        SizedBox(
+                                          width: 26,
+                                          height: 26,
+                                          child: IconButton(
+                                            padding: EdgeInsets.zero,
+                                            onPressed: () => _removeLineRow(i),
+                                            icon: const Icon(
+                                              Icons.close,
+                                              color: AppTheme.danger,
+                                              size: 16,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        flex: 2,
+                                        child: TextField(
+                                          controller: _rows[i].qtyController,
+                                          style: const TextStyle(fontSize: 12.5),
+                                          keyboardType: const TextInputType
+                                              .numberWithOptions(decimal: true),
+                                          onChanged: (_) {
+                                            setState(() {});
+                                            _scheduleLiveDuplicateCheck();
+                                          },
+                                          decoration: const InputDecoration(
+                                            labelText: 'Qty',
+                                            isDense: true,
+                                            contentPadding:
+                                                EdgeInsets.symmetric(
+                                              horizontal: 7,
+                                              vertical: 6,
+                                            ),
+                                            border: OutlineInputBorder(),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        flex: 3,
+                                        child: DropdownButtonFormField<String>(
+                                          initialValue: _rows[i].unit,
+                                          isDense: true,
+                                          isExpanded: true,
+                                          style: const TextStyle(
+                                            fontSize: 12.5,
+                                            color: AppTheme.slateInk,
+                                          ),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Unit',
+                                            isDense: true,
+                                            contentPadding:
+                                                EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 6,
+                                            ),
+                                            border: OutlineInputBorder(),
+                                          ),
+                                          items: OcrConsensusService
+                                              .docketDropdownUnits
+                                              .map(
+                                                (u) => DropdownMenuItem(
+                                                  value: u,
+                                                  child: Text(
+                                                    u,
+                                                    overflow:
+                                                        TextOverflow.ellipsis,
+                                                  ),
+                                                ),
+                                              )
+                                              .toList(),
+                                          onChanged: (v) {
+                                            if (v != null) {
+                                              setState(() => _rows[i].unit = v);
+                                            }
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        flex: 3,
+                                        child: TextField(
+                                          controller: _rows[i].priceController,
+                                          style: const TextStyle(fontSize: 12.5),
+                                          keyboardType: const TextInputType
+                                              .numberWithOptions(decimal: true),
+                                          onChanged: (_) {
+                                            setState(() {});
+                                            _scheduleLiveDuplicateCheck();
+                                          },
+                                          decoration: const InputDecoration(
+                                            labelText: 'Price',
+                                            isDense: true,
+                                            contentPadding:
+                                                EdgeInsets.symmetric(
+                                              horizontal: 7,
+                                              vertical: 6,
+                                            ),
+                                            border: OutlineInputBorder(),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    )
+                  else
                   ...List.generate(_rows.length, (i) {
                     final row = _rows[i];
                     final qty =
@@ -1334,16 +1586,19 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
-                      onPressed: (!vm.hasClerkInvite || _isSubmitting)
+                      key: const Key('btn_clerk_submit_docket'),
+                      onPressed: (!vm.canSubmitWithToken || _isSubmitting)
                           ? null
                           : () => _submitDocket(),
                       icon: const Icon(Icons.send_outlined),
                       label: Text(
                         _isSubmitting
                             ? 'Verifying & Submitting...'
-                            : (_editingDocketId != null
-                                ? 'Resubmit Corrected Docket for Approval'
-                                : 'Submit Docket for ${vm.inviteOwnerName}\'s Approval'),
+                            : (!vm.canSubmitWithToken
+                                ? 'Pair Valid Token Required to Send'
+                                : (_editingDocketId != null
+                                    ? 'Resubmit Corrected Docket for Approval'
+                                    : 'Submit Docket for ${vm.inviteOwnerName}\'s Approval')),
                       ),
                     ),
                   ),
@@ -1362,30 +1617,45 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
   }
 
   Widget _buildPairingCard(ClerkViewModel vm) {
+    final hasError =
+        vm.isInviteExpired || (vm.inviteTokenError?.isNotEmpty ?? false);
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Row(
+            Row(
               children: [
-                Icon(Icons.vpn_key_outlined, color: AppTheme.forestGreen),
-                SizedBox(width: 8),
-                Text(
-                  'Pair with Owner Invite Token',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                    color: AppTheme.slateInk,
+                Icon(
+                  hasError ? Icons.timer_off_outlined : Icons.vpn_key_outlined,
+                  color: hasError ? AppTheme.danger : AppTheme.forestGreen,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    vm.isInviteExpired
+                        ? 'Clerk Token Expired - Pair Fresh Link'
+                        : 'Pair with Owner Invite Token',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      color: hasError ? AppTheme.danger : AppTheme.slateInk,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 6),
-            const Text(
-              'Paste the secure Clerk Link or invite token shared by the account owner to submit dockets directly to their review inbox.',
-              style: TextStyle(fontSize: 12, color: AppTheme.slateMuted),
+            Text(
+              vm.inviteTokenError != null && vm.inviteTokenError!.isNotEmpty
+                  ? vm.inviteTokenError!
+                  : 'Paste the private invite link or token from the account owner. Tokens remain valid for up to 30 days and auto-expire after 7 days of inactivity.',
+              style: TextStyle(
+                fontSize: 12,
+                color: hasError ? AppTheme.danger : AppTheme.slateMuted,
+                fontWeight: hasError ? FontWeight.w600 : FontWeight.w400,
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -1420,6 +1690,15 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
   }
 
   Widget _buildRoutingBanner(ClerkViewModel vm) {
+    final fmt = DateFormat('dd MMM yyyy');
+    final eff = vm.inviteEffectiveExpiresAt;
+    final maxExp = vm.inviteExpiresAt;
+    final expiryLine = eff != null
+        ? 'Active until ${fmt.format(eff.toLocal())} (7d idle${maxExp != null ? ' / 30d max ${fmt.format(maxExp.toLocal())}' : ''})'
+        : (vm.inviteOwnerEmail.isNotEmpty
+            ? '${vm.inviteOwnerEmail} | Verified Route (30d max / 7d idle)'
+            : 'Maker-Checker Protection Active (30d max / 7d idle)');
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -1450,9 +1729,7 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
                   ),
                 ),
                 Text(
-                  vm.inviteOwnerEmail.isNotEmpty
-                      ? '${vm.inviteOwnerEmail} | Verified Route'
-                      : 'Maker-Checker Protection Active',
+                  expiryLine,
                   style: const TextStyle(
                     fontSize: 12,
                     color: AppTheme.forestGreen,
@@ -1539,7 +1816,7 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
                   ),
                 ),
                 TextButton(
-                  onPressed: vm.hasClerkInvite ? vm.loadClerkHistory : null,
+                  onPressed: vm.canSubmitWithToken ? vm.loadClerkHistory : null,
                   child: const Text('Refresh'),
                 ),
               ],
@@ -1551,12 +1828,12 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
                 style: const TextStyle(fontSize: 12, color: AppTheme.danger),
               ),
             ],
-            if (!vm.hasClerkInvite)
+            if (!vm.canSubmitWithToken)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 20),
                 child: Center(
                   child: Text(
-                    'Pair an invite token above to view your submission history.',
+                    'Pair a valid invite token above to view your submission history.',
                     style: TextStyle(fontSize: 13, color: AppTheme.slateMuted),
                   ),
                 ),

@@ -126,6 +126,81 @@ test('clerk-api strips wholesale buy costs from list responses and enforces hour
   assert.equal(rateRes.status, 429);
 });
 
+test('clerk-api enforces both 7-day idle expiry and 30-day maximum lifetime', async () => {
+  const dayMs = 24 * 60 * 60 * 1000;
+  const issuedAtMs = Date.now() - 10 * dayMs; // Created 10 days ago -> 30d expiresAt still +20d away
+  let latestSubmissionAt = null;
+  let expiresAt = new Date(issuedAtMs + 30 * dayMs).toISOString();
+
+  const admin = {
+    from(table) {
+      return {
+        select() { return this; },
+        eq() { return this; },
+        gte() { return Promise.resolve({ count: 0, error: null }); },
+        async maybeSingle() {
+          if (table === 'clerk_invites') {
+            return {
+              data: {
+                id: 'inv-1',
+                owner_user_id: 'owner-1',
+                owner_name: 'Owner',
+                owner_email: 'o@example.com',
+                expires_at: expiresAt,
+                revoked_at: null
+              },
+              error: null
+            };
+          }
+          return { data: null, error: null };
+        },
+        async order() {
+          return {
+            data: latestSubmissionAt ? [{ updated_at: latestSubmissionAt, created_at: latestSubmissionAt }] : [],
+            error: null
+          };
+        }
+      };
+    }
+  };
+  let handler;
+  const ctx = vm.createContext({
+    createClient: () => admin, crypto: webcrypto, TextEncoder, Response, Request, console: quiet, btoa,
+    Deno: { env: { get: () => 'configured' }, serve: fn => { handler = fn; } }
+  });
+  const code = source('supabase/functions/clerk-api/index.ts').replace(/^import .*;\r?\n/, '');
+  vm.runInContext(stripTypeScriptTypes(code), ctx);
+
+  // 1. Created 10 days ago with 0 submissions -> idle > 7 days -> REJECTED (401)
+  const idleRes = await handler(new Request('https://example.test', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'list', invite_token: 'y'.repeat(45), include_photos: false })
+  }));
+  assert.equal(idleRes.status, 401);
+  assert.match((await idleRes.json()).error, /7 days of inactivity/i);
+
+  // 2. Same 10-day-old token, but clerk submitted 3 days ago -> ALLOWED (200)
+  latestSubmissionAt = new Date(Date.now() - 3 * dayMs).toISOString();
+  const activeRes = await handler(new Request('https://example.test', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'list', invite_token: 'y'.repeat(45), include_photos: false })
+  }));
+  assert.equal(activeRes.status, 200);
+  const activeJson = await activeRes.json();
+  assert.ok(activeJson.invite.idle_expires_at);
+  assert.ok(activeJson.invite.effective_expires_at);
+
+  // 3. Even if active yesterday, once 30-day expires_at passes -> REJECTED (401)
+  expiresAt = new Date(Date.now() - 1000).toISOString();
+  latestSubmissionAt = new Date(Date.now() - dayMs).toISOString();
+  const maxAgeRes = await handler(new Request('https://example.test', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'list', invite_token: 'y'.repeat(45), include_photos: false })
+  }));
+  assert.equal(maxAgeRes.status, 401);
+  assert.match((await maxAgeRes.json()).error, /30-day/i);
+});
+
 test('signUp fails closed when public registration is disabled', async () => {
   const ctx = vm.createContext({
     window: {},

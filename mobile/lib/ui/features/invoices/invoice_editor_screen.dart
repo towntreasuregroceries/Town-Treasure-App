@@ -45,6 +45,8 @@ class _InvoiceEditorScreenState extends State<InvoiceEditorScreen> {
   RestaurantsViewModel? _restVm;
   bool _initialized = false;
   int _itemsRevision = 0;
+  bool _compactItemView = true;
+  bool _opsExpanded = false;
 
   late final TextEditingController _dateCtrl;
   late final TextEditingController _dueDateCtrl;
@@ -95,6 +97,9 @@ class _InvoiceEditorScreenState extends State<InvoiceEditorScreen> {
         _vm.deliveryCost > 0 ? _formatNumInput(_vm.deliveryCost) : '';
     _otherCtrl.text = _vm.otherCost > 0 ? _formatNumInput(_vm.otherCost) : '';
     _notesCtrl.text = _vm.notes;
+    if (_vm.deliveryCost > 0 || _vm.otherCost > 0 || _vm.notes.trim().isNotEmpty) {
+      _opsExpanded = true;
+    }
     _itemsRevision++;
   }
 
@@ -491,137 +496,585 @@ class _InvoiceEditorScreenState extends State<InvoiceEditorScreen> {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
+              const SizedBox(height: 10),
+              // Compact action strip + View density toggle (Compact fits 6-8 items/screen)
+              Row(
                 children: [
-                  FilledButton.tonalIcon(
-                    onPressed: () {
-                      _vm.addLineItem();
-                    },
-                    icon: const Icon(Icons.add, size: 18),
-                    label: const Text('Add Item'),
-                  ),
-                  if (widget.onOpenScanner != null)
-                    FilledButton.tonalIcon(
-                      onPressed: _handleScanDocket,
-                      icon: const Icon(Icons.document_scanner_outlined, size: 18),
-                      label: const Text('Scan Docket'),
+                  Expanded(
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: [
+                        FilledButton.tonalIcon(
+                          style: FilledButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: _vm.addLineItem,
+                          icon: const Icon(Icons.add, size: 17),
+                          label: const Text('Add Item'),
+                        ),
+                        if (widget.onOpenScanner != null)
+                          FilledButton.tonalIcon(
+                            style: FilledButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            onPressed: _handleScanDocket,
+                            icon: const Icon(
+                              Icons.document_scanner_outlined,
+                              size: 17,
+                            ),
+                            label: const Text('Scan Docket'),
+                          ),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: _openCsvImportModal,
+                          icon: const Icon(Icons.upload_file_outlined, size: 17),
+                          label: const Text('Import CSV'),
+                        ),
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                          ),
+                          onPressed: _exportCsv,
+                          icon: const Icon(Icons.download_outlined, size: 17),
+                          label: const Text('Export CSV'),
+                        ),
+                      ],
                     ),
-                  OutlinedButton.icon(
-                    onPressed: _openCsvImportModal,
-                    icon: const Icon(Icons.upload_file_outlined, size: 18),
-                    label: const Text('Import CSV'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _exportCsv,
-                    icon: const Icon(Icons.download_outlined, size: 18),
-                    label: const Text('Export CSV'),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              ...List.generate(_vm.items.length, (index) {
-                final item = _vm.items[index];
-                return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
-                  child: _LineItemEditorCard(
-                    key: ValueKey('item_${_itemsRevision}_$index'),
-                    index: index,
-                    item: item,
-                    canRemove: _vm.items.length > 1,
-                    onChanged: ({
-                      String? desc,
-                      double? qty,
-                      String? unit,
-                      double? buyPrice,
-                      double? sellPrice,
-                    }) {
-                      _vm.updateLineItem(
-                        index,
-                        desc: desc,
-                        qty: qty,
-                        unit: unit,
-                        buyPrice: buyPrice,
-                        sellPrice: sellPrice,
-                      );
-                    },
-                    onRemove: () {
-                      _vm.removeLineItem(index);
-                      setState(() => _itemsRevision++);
+              const SizedBox(height: 10),
+              Row(
+                children: [
+                  Text(
+                    'Line Items (${_vm.items.length})',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.slateInk,
+                        ),
+                  ),
+                  const Spacer(),
+                  SegmentedButton<bool>(
+                    key: const Key('btn_toggle_item_density'),
+                    style: SegmentedButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                      textStyle: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    segments: const [
+                      ButtonSegment<bool>(
+                        value: true,
+                        label: Text('Compact'),
+                        icon: Icon(Icons.view_agenda_outlined, size: 15),
+                      ),
+                      ButtonSegment<bool>(
+                        value: false,
+                        label: Text('Cards'),
+                        icon: Icon(Icons.view_stream_outlined, size: 15),
+                      ),
+                    ],
+                    selected: {_compactItemView},
+                    onSelectionChanged: (sel) {
+                      if (sel.isNotEmpty) {
+                        setState(() => _compactItemView = sel.first);
+                      }
                     },
                   ),
-                );
-              }),
-              const SizedBox(height: 4),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(14),
+                ],
+              ),
+              const SizedBox(height: 8),
+              if (_compactItemView)
+                Card(
+                  key: const Key('compact_items_ledger'),
+                  margin: EdgeInsets.zero,
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      Text(
-                        'Operational Costs & Notes',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: AppTheme.slateInk,
-                            ),
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              controller: _deliveryCtrl,
-                              keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true,
-                              ),
-                              decoration: const InputDecoration(
-                                labelText: 'Delivery Cost (KES)',
-                                hintText: '0.00',
-                              ),
-                              onChanged: (v) => _vm.setEditorDeliveryCost(
-                                double.tryParse(v.trim()) ?? 0,
-                              ),
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: TextFormField(
-                              controller: _otherCtrl,
-                              keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true,
-                              ),
-                              decoration: const InputDecoration(
-                                labelText: 'Other Ops Cost (KES)',
-                                hintText: '0.00',
-                              ),
-                              onChanged: (v) => _vm.setEditorOtherCost(
-                                double.tryParse(v.trim()) ?? 0,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      TextFormField(
-                        controller: _notesCtrl,
-                        maxLines: 2,
-                        decoration: const InputDecoration(
-                          labelText: 'Notes / Dispatch Remarks',
-                          hintText: 'Optional delivery notes...',
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
                         ),
-                        onChanged: _vm.setEditorNotes,
+                        decoration: BoxDecoration(
+                          color: AppTheme.sageTint.withValues(alpha: 0.55),
+                          borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(14),
+                          ),
+                        ),
+                        child: const Row(
+                          children: [
+                            Expanded(
+                              flex: 3,
+                              child: Text(
+                                'ITEM / QTY / UNIT',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.forestGreenDeep,
+                                ),
+                              ),
+                            ),
+                            Expanded(
+                              flex: 2,
+                              child: Text(
+                                'BUY / SELL / TOTAL',
+                                textAlign: TextAlign.right,
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: AppTheme.forestGreenDeep,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      for (var index = 0; index < _vm.items.length; index++) ...[
+                        if (index > 0) const Divider(height: 1),
+                        _CompactLineItemRow(
+                          key: ValueKey('compact_item_${_itemsRevision}_$index'),
+                          index: index,
+                          item: _vm.items[index],
+                          canRemove: _vm.items.length > 1,
+                          onChanged: ({
+                            String? desc,
+                            double? qty,
+                            String? unit,
+                            double? buyPrice,
+                            double? sellPrice,
+                          }) {
+                            _vm.updateLineItem(
+                              index,
+                              desc: desc,
+                              qty: qty,
+                              unit: unit,
+                              buyPrice: buyPrice,
+                              sellPrice: sellPrice,
+                            );
+                          },
+                          onRemove: () {
+                            _vm.removeLineItem(index);
+                            setState(() => _itemsRevision++);
+                          },
+                        ),
+                      ],
+                      const Divider(height: 1),
+                      InkWell(
+                        key: const Key('btn_inline_add_item'),
+                        borderRadius: const BorderRadius.vertical(
+                          bottom: Radius.circular(14),
+                        ),
+                        onTap: _vm.addLineItem,
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 10),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.add_circle_outline,
+                                size: 17,
+                                color: AppTheme.forestGreen,
+                              ),
+                              SizedBox(width: 6),
+                              Text(
+                                'Add Another Line Item',
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 13,
+                                  color: AppTheme.forestGreen,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ],
                   ),
+                )
+              else
+                ...List.generate(_vm.items.length, (index) {
+                  final item = _vm.items[index];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: _LineItemEditorCard(
+                      key: ValueKey('item_${_itemsRevision}_$index'),
+                      index: index,
+                      item: item,
+                      canRemove: _vm.items.length > 1,
+                      onChanged: ({
+                        String? desc,
+                        double? qty,
+                        String? unit,
+                        double? buyPrice,
+                        double? sellPrice,
+                      }) {
+                        _vm.updateLineItem(
+                          index,
+                          desc: desc,
+                          qty: qty,
+                          unit: unit,
+                          buyPrice: buyPrice,
+                          sellPrice: sellPrice,
+                        );
+                      },
+                      onRemove: () {
+                        _vm.removeLineItem(index);
+                        setState(() => _itemsRevision++);
+                      },
+                    ),
+                  );
+                }),
+              const SizedBox(height: 10),
+              Card(
+                child: Column(
+                  children: [
+                    InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => setState(() => _opsExpanded = !_opsExpanded),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _opsExpanded
+                                    ? 'Operational Costs & Notes'
+                                    : 'Ops Costs & Notes (KES ${InvoiceFormatters.formatMoney(_vm.opsCost)})',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleSmall
+                                    ?.copyWith(
+                                      fontWeight: FontWeight.w700,
+                                      color: AppTheme.slateInk,
+                                    ),
+                              ),
+                            ),
+                            Icon(
+                              _opsExpanded
+                                  ? Icons.expand_less
+                                  : Icons.expand_more,
+                              color: AppTheme.slateMuted,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    if (_opsExpanded)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 0, 14, 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _deliveryCtrl,
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                    decoration: const InputDecoration(
+                                      labelText: 'Delivery Cost (KES)',
+                                      hintText: '0.00',
+                                      isDense: true,
+                                    ),
+                                    onChanged: (v) => _vm.setEditorDeliveryCost(
+                                      double.tryParse(v.trim()) ?? 0,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _otherCtrl,
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                      decimal: true,
+                                    ),
+                                    decoration: const InputDecoration(
+                                      labelText: 'Other Ops Cost (KES)',
+                                      hintText: '0.00',
+                                      isDense: true,
+                                    ),
+                                    onChanged: (v) => _vm.setEditorOtherCost(
+                                      double.tryParse(v.trim()) ?? 0,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            TextFormField(
+                              controller: _notesCtrl,
+                              maxLines: 2,
+                              decoration: const InputDecoration(
+                                labelText: 'Notes / Dispatch Remarks',
+                                hintText: 'Optional delivery notes...',
+                                isDense: true,
+                              ),
+                              onChanged: _vm.setEditorNotes,
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ],
           ),
         );
       },
+    );
+  }
+}
+
+class _CompactLineItemRow extends StatefulWidget {
+  const _CompactLineItemRow({
+    super.key,
+    required this.index,
+    required this.item,
+    required this.canRemove,
+    required this.onChanged,
+    required this.onRemove,
+  });
+
+  final int index;
+  final InvoiceLineItem item;
+  final bool canRemove;
+  final void Function({
+    String? desc,
+    double? qty,
+    String? unit,
+    double? buyPrice,
+    double? sellPrice,
+  }) onChanged;
+  final VoidCallback onRemove;
+
+  @override
+  State<_CompactLineItemRow> createState() => _CompactLineItemRowState();
+}
+
+class _CompactLineItemRowState extends State<_CompactLineItemRow> {
+  late final TextEditingController _descCtrl;
+  late final TextEditingController _qtyCtrl;
+  late final TextEditingController _buyCtrl;
+  late final TextEditingController _sellCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _descCtrl = TextEditingController(text: widget.item.desc);
+    _qtyCtrl = TextEditingController(text: _fmtVal(widget.item.qty));
+    _buyCtrl = TextEditingController(
+      text: widget.item.buyPrice > 0 ? _fmtVal(widget.item.buyPrice) : '',
+    );
+    _sellCtrl = TextEditingController(
+      text: widget.item.sellPrice > 0 ? _fmtVal(widget.item.sellPrice) : '',
+    );
+  }
+
+  String _fmtVal(double v) =>
+      v == v.roundToDouble() ? v.toInt().toString() : v.toString();
+
+  @override
+  void dispose() {
+    _descCtrl.dispose();
+    _qtyCtrl.dispose();
+    _buyCtrl.dispose();
+    _sellCtrl.dispose();
+    super.dispose();
+  }
+
+  static const InputDecoration _compactCellDecoration = InputDecoration(
+    isDense: true,
+    contentPadding: EdgeInsets.symmetric(horizontal: 7, vertical: 6),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.all(Radius.circular(7)),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final unitOptions = <String>{
+      ...InvoiceFormatters.supportedUnits,
+      widget.item.unit,
+    }.toList();
+    final lineTotal = widget.item.qty * widget.item.sellPrice;
+    final lineProfit = lineTotal - (widget.item.qty * widget.item.buyPrice);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 20,
+                height: 20,
+                alignment: Alignment.center,
+                decoration: const BoxDecoration(
+                  color: AppTheme.sageTint,
+                  shape: BoxShape.circle,
+                ),
+                child: Text(
+                  '${widget.index + 1}',
+                  style: const TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.forestGreenDeep,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: TextFormField(
+                  controller: _descCtrl,
+                  textCapitalization: TextCapitalization.words,
+                  style: const TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    hintText: 'Produce description *',
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 5,
+                    ),
+                    border: UnderlineInputBorder(),
+                  ),
+                  onChanged: (v) => widget.onChanged(desc: v),
+                ),
+              ),
+              const SizedBox(width: 6),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    'KES ${InvoiceFormatters.formatMoney(lineTotal)}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: AppTheme.slateInk,
+                    ),
+                  ),
+                  Text(
+                    '${lineProfit >= 0 ? '+' : ''}${InvoiceFormatters.formatMoney(lineProfit)}',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: lineProfit >= 0
+                          ? AppTheme.forestGreen
+                          : AppTheme.danger,
+                    ),
+                  ),
+                ],
+              ),
+              if (widget.canRemove)
+                SizedBox(
+                  width: 26,
+                  height: 26,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    tooltip: 'Remove item',
+                    onPressed: widget.onRemove,
+                    icon: const Icon(
+                      Icons.close,
+                      color: AppTheme.danger,
+                      size: 16,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              Expanded(
+                flex: 2,
+                child: TextFormField(
+                  controller: _qtyCtrl,
+                  style: const TextStyle(fontSize: 12.5),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: _compactCellDecoration.copyWith(
+                    labelText: 'Qty',
+                  ),
+                  onChanged: (v) =>
+                      widget.onChanged(qty: double.tryParse(v.trim()) ?? 0),
+                ),
+              ),
+              const SizedBox(width: 5),
+              Expanded(
+                flex: 3,
+                child: DropdownButtonFormField<String>(
+                  initialValue: widget.item.unit,
+                  isExpanded: true,
+                  isDense: true,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    color: AppTheme.slateInk,
+                  ),
+                  decoration: _compactCellDecoration.copyWith(
+                    labelText: 'Unit',
+                  ),
+                  items: unitOptions
+                      .map(
+                        (u) => DropdownMenuItem(
+                          value: u,
+                          child: Text(u, overflow: TextOverflow.ellipsis),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) => widget.onChanged(unit: v),
+                ),
+              ),
+              const SizedBox(width: 5),
+              Expanded(
+                flex: 2,
+                child: TextFormField(
+                  controller: _buyCtrl,
+                  style: const TextStyle(fontSize: 12.5),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: _compactCellDecoration.copyWith(
+                    labelText: 'Buy',
+                    hintText: '0',
+                  ),
+                  onChanged: (v) => widget.onChanged(
+                    buyPrice: double.tryParse(v.trim()) ?? 0,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 5),
+              Expanded(
+                flex: 2,
+                child: TextFormField(
+                  controller: _sellCtrl,
+                  style: const TextStyle(fontSize: 12.5),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: _compactCellDecoration.copyWith(
+                    labelText: 'Sell',
+                    hintText: '0',
+                  ),
+                  onChanged: (v) => widget.onChanged(
+                    sellPrice: double.tryParse(v.trim()) ?? 0,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

@@ -58,7 +58,7 @@ void ttgBackgroundCallbackDispatcher() {
         );
         vault.dispose();
       } finally {
-        await storage.close();
+        // Keep the shared SQLite handle open so foreground VaultRepository never hits database_closed.
       }
     } catch (_) {
       // Background failures are silently retried on the next 30-min WorkManager window.
