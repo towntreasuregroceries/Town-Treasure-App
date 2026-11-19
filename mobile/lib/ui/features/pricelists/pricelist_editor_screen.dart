@@ -218,6 +218,7 @@ class _PriceListEditorScreenState extends State<PriceListEditorScreen> {
   }
 
   Future<void> _handleSave({bool bypassDuplicateCheck = false}) async {
+    if (_saving) return;
     setState(() => _saving = true);
     final result = await _vm.publishPriceList(
       _buildDraftModel(),
@@ -408,9 +409,9 @@ class _PriceListEditorScreenState extends State<PriceListEditorScreen> {
                     ),
                   )
                 : const Icon(Icons.save_outlined, color: Colors.white),
-            label: const Text(
-              'Save',
-              style: TextStyle(
+            label: Text(
+              _saving ? 'Saving...' : 'Save',
+              style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
               ),
@@ -608,8 +609,17 @@ class _PriceListEditorScreenState extends State<PriceListEditorScreen> {
             width: double.infinity,
             child: FilledButton.icon(
               onPressed: _saving ? null : () => _handleSave(),
-              icon: const Icon(Icons.check_circle_outline),
-              label: const Text('Save Price List'),
+              icon: _saving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : const Icon(Icons.check_circle_outline),
+              label: Text(_saving ? 'Saving...' : 'Save Price List'),
             ),
           ),
         ],

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -62,6 +63,15 @@ class _InMemoryLocalStorage extends LocalStorageService {
 
   @override
   Future<void> close() async {}
+}
+
+class _DelayedSnapshotSupabaseGateway extends FakeSupabaseGateway {
+  final Completer<int?> snapshotCompleter = Completer<int?>();
+
+  @override
+  Future<int?> readVaultRevision(String userId) {
+    return snapshotCompleter.future;
+  }
 }
 
 Future<({VaultRepository vault, FakeSupabaseGateway supabase, CryptoService crypto})>
@@ -514,6 +524,69 @@ void main() {
       expect(find.text('Total: KES 1,800.00'), findsOneWidget);
       expect(find.textContaining('Profit: KES 800.00'), findsOneWidget);
     });
+
+    testWidgets(
+        'InvoiceEditorScreen Save button disables immediately with Saving indicator during slow network check',
+        (tester) async {
+      final storage = _InMemoryLocalStorage();
+      final supabase = _DelayedSnapshotSupabaseGateway();
+      final crypto = CryptoService();
+      const user = AuthUserInfo(id: 'owner-1', email: 'owner@ttg.co.ke');
+      supabase.user = user;
+      await storage.setUserId(user.id);
+      await storage.setE2eKey(CryptoService.bytesToJwk(List<int>.filled(32, 7)));
+      final vault = VaultRepository(
+        cryptoService: crypto,
+        localStorage: storage,
+        supabase: supabase,
+        syncDebounceDuration: const Duration(milliseconds: 20),
+      );
+      addTearDown(vault.dispose);
+      await vault.setRestaurants([
+        const Restaurant(id: 'r1', name: 'Kempinski'),
+      ], sync: false);
+
+      await tester.pumpWidget(
+        _wrapWithProviders(
+          vault,
+          const InvoiceEditorScreen(
+            prefillRestaurantId: 'r1',
+            prefillItems: [
+              InvoiceLineItem(
+                desc: 'Roma Tomatoes',
+                qty: 5,
+                unit: 'crates',
+                buyPrice: 2000,
+                sellPrice: 3000,
+                total: 15000,
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final saveBtnFinder = find.byKey(const Key('btn_save_invoice'));
+      expect(saveBtnFinder, findsOneWidget);
+      expect(find.text('Save Invoice'), findsOneWidget);
+
+      await tester.tap(saveBtnFinder);
+      await tester.pump();
+
+      // Immediately locks button and updates label before slow remote call completes.
+      expect(find.text('Saving...'), findsOneWidget);
+      final btnWidget = tester.widget<FilledButton>(saveBtnFinder);
+      expect(btnWidget.onPressed, isNull);
+
+      await tester.runAsync(() async {
+        supabase.snapshotCompleter.complete(null);
+        for (var i = 0; i < 40 && vault.invoices.isEmpty; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      });
+      await tester.pumpAndSettle();
+      expect(vault.invoices.length, 1);
+    }, timeout: const Timeout(Duration(seconds: 20)));
 
     testWidgets('InvoiceDetailScreen shows KRA PIN and Paid/Unpaid toggle confirmation',
         (tester) async {

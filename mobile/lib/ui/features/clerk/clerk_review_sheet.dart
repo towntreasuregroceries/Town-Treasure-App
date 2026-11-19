@@ -90,6 +90,7 @@ class _ClerkReviewSheetState extends State<ClerkReviewSheet> {
   late TextEditingController _otherController;
   final List<_EditableReviewRow> _rows = [];
   int _activePhotoIndex = 0;
+  bool _isSubmitting = false;
 
   @override
   void initState() {
@@ -217,18 +218,26 @@ class _ClerkReviewSheetState extends State<ClerkReviewSheet> {
   }
 
   Future<void> _handleApprove() async {
-    final items = _collectItems();
-    final del = double.tryParse(_deliveryController.text.trim()) ?? 0;
-    final oth = double.tryParse(_otherController.text.trim()) ?? 0;
-    final outcome = await widget.viewModel.approveActiveReview(
-      restaurantName: _restaurantController.text,
-      invoiceDate: _dateController.text,
-      items: items,
-      deliveryCost: del,
-      otherCost: oth,
-    );
-    if (!mounted) return;
-    await _handleApprovalOutcome(outcome, items, del, oth);
+    if (_isSubmitting) return;
+    setState(() => _isSubmitting = true);
+    try {
+      final items = _collectItems();
+      final del = double.tryParse(_deliveryController.text.trim()) ?? 0;
+      final oth = double.tryParse(_otherController.text.trim()) ?? 0;
+      final outcome = await widget.viewModel.approveActiveReview(
+        restaurantName: _restaurantController.text,
+        invoiceDate: _dateController.text,
+        items: items,
+        deliveryCost: del,
+        otherCost: oth,
+      );
+      if (!mounted) return;
+      await _handleApprovalOutcome(outcome, items, del, oth);
+    } finally {
+      if (mounted) {
+        setState(() => _isSubmitting = false);
+      }
+    }
   }
 
   Future<void> _handleApprovalOutcome(
@@ -997,11 +1006,22 @@ class _ClerkReviewSheetState extends State<ClerkReviewSheet> {
                   label: const Text('Return to Clerk'),
                 ),
                 FilledButton.icon(
-                  onPressed: vm.canApproveActiveReview ? _handleApprove : null,
-                  icon: const Icon(Icons.verified_user_outlined, size: 18),
+                  onPressed: (vm.canApproveActiveReview && !_isSubmitting)
+                      ? _handleApprove
+                      : null,
+                  icon: (_isSubmitting || vm.isProcessingReview)
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.verified_user_outlined, size: 18),
                   label: Text(
-                    vm.isProcessingReview
-                        ? 'Encrypting...'
+                    (_isSubmitting || vm.isProcessingReview)
+                        ? 'Saving & Encrypting...'
                         : 'Approve & Encrypt',
                   ),
                 ),

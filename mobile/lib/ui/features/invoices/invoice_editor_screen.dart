@@ -900,6 +900,7 @@ class _StickyTotalsBar extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               FilledButton.icon(
+                key: const Key('btn_save_invoice'),
                 onPressed: isSaving ? null : onSave,
                 icon: isSaving
                     ? const SizedBox(
@@ -911,7 +912,7 @@ class _StickyTotalsBar extends StatelessWidget {
                         ),
                       )
                     : const Icon(Icons.check_circle_outline, size: 18),
-                label: const Text('Save Invoice'),
+                label: Text(isSaving ? 'Saving...' : 'Save Invoice'),
               ),
             ],
           ),

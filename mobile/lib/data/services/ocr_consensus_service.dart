@@ -249,7 +249,7 @@ class OcrConsensusService {
         _staticApiKey = geminiApiKey;
 
   static const List<String> models = [
-    'gemini-3.5-flash-lite',
+    'gemini-3-flash-preview',
     'gemini-2.5-flash',
     'gemini-flash-lite-latest',
   ];
@@ -440,10 +440,11 @@ class OcrConsensusService {
     Map<String, dynamic>? geminiResult;
     Object? lastError;
 
-    // Engine 1: Cloud Vision (only when online & API key configured; fail fast offline)
+    // Engine 1: Cloud Vision (same multi-tier fallback as web ocr-consensus.js; fail fast only if truly offline)
     if (apiKey.isNotEmpty) {
       final dataUrls = pages.map((p) => p.dataUrl).toList();
-      for (final model in models) {
+      for (var i = 0; i < models.length; i++) {
+        final model = models[i];
         try {
           onProgress?.call('Scanning produce lines & pricing (Cloud Vision Pass)...');
           final candidate = await _runGeminiDocketVision(dataUrls, model, apiKey);
@@ -452,12 +453,16 @@ class OcrConsensusService {
             geminiResult = candidate;
             break;
           }
+          lastError = StateError('Gemini model $model returned 0 items.');
         } catch (err) {
           lastError = err;
           if (_isNetworkUnavailableError(err)) {
             onProgress?.call('No internet detected — switching to bundled offline OCR...');
             break;
           }
+        }
+        if (i + 1 < models.length) {
+          await Future<void>.delayed(const Duration(milliseconds: 400));
         }
       }
     }
@@ -609,7 +614,8 @@ class OcrConsensusService {
 
     if (apiKey.isNotEmpty) {
       final dataUrls = pages.map((p) => p.dataUrl).toList();
-      for (final model in models) {
+      for (var i = 0; i < models.length; i++) {
+        final model = models[i];
         try {
           onProgress?.call('Digitizing produce catalog & commodity prices...');
           final candidate = await _runGeminiPriceListVision(dataUrls, model, apiKey);
@@ -619,12 +625,16 @@ class OcrConsensusService {
             enginesUsed.add('Town Treasure Optical Engine');
             break;
           }
+          lastError = StateError('Gemini model $model returned 0 price list items.');
         } catch (err) {
           lastError = err;
           if (_isNetworkUnavailableError(err)) {
             onProgress?.call('No internet detected — switching to offline PaddleOCR ONNX...');
             break;
           }
+        }
+        if (i + 1 < models.length) {
+          await Future<void>.delayed(const Duration(milliseconds: 400));
         }
       }
     }
@@ -1383,6 +1393,14 @@ Return ONLY JSON matching:
       });
     }
 
+    const safetySettings = [
+      {'category': 'HARM_CATEGORY_HARASSMENT', 'threshold': 'BLOCK_NONE'},
+      {'category': 'HARM_CATEGORY_HATE_SPEECH', 'threshold': 'BLOCK_NONE'},
+      {'category': 'HARM_CATEGORY_SEXUALLY_EXPLICIT', 'threshold': 'BLOCK_NONE'},
+      {'category': 'HARM_CATEGORY_DANGEROUS_CONTENT', 'threshold': 'BLOCK_NONE'},
+      {'category': 'HARM_CATEGORY_CIVIC_INTEGRITY', 'threshold': 'BLOCK_NONE'},
+    ];
+
     final payload = {
       'contents': [
         {'parts': parts},
@@ -1390,7 +1408,9 @@ Return ONLY JSON matching:
       'generationConfig': {
         'responseMimeType': 'application/json',
         'temperature': 0.1,
+        'maxOutputTokens': 8192,
       },
+      'safetySettings': safetySettings,
     };
 
     final uri = Uri.parse(
@@ -1402,7 +1422,7 @@ Return ONLY JSON matching:
           headers: const {'Content-Type': 'application/json'},
           body: jsonEncode(payload),
         )
-        .timeout(const Duration(seconds: 9));
+        .timeout(const Duration(seconds: 30));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('API error (${response.statusCode}): ${response.body}');
@@ -1412,13 +1432,29 @@ Return ONLY JSON matching:
     if (decoded is! Map) {
       throw const FormatException('Invalid JSON payload from vision model.');
     }
+    final promptFeedback = decoded['promptFeedback'];
+    if (promptFeedback is Map && promptFeedback['blockReason'] != null) {
+      throw StateError(
+        'Vision prompt blocked (${promptFeedback['blockReason']}) on $modelName.',
+      );
+    }
     final candidates = decoded['candidates'];
     if (candidates is! List || candidates.isEmpty) {
-      throw StateError('Empty candidates from vision model.');
+      throw StateError('Empty candidates from vision model ($modelName).');
     }
-    final text = candidates.first?['content']?['parts']?[0]?['text']?.toString();
+    final firstCandidate = candidates.first;
+    final candidateMap = firstCandidate is Map ? firstCandidate : null;
+    final finishReason = candidateMap?['finishReason']?.toString();
+    final contentMap = candidateMap?['content'];
+    final partsList = contentMap is Map ? contentMap['parts'] : null;
+    final firstPart =
+        partsList is List && partsList.isNotEmpty ? partsList.first : null;
+    final text = firstPart is Map ? firstPart['text']?.toString() : null;
     if (text == null || text.trim().isEmpty) {
-      throw StateError('Empty response from vision model.');
+      final suffix = finishReason != null && finishReason.isNotEmpty
+          ? ' (finishReason: $finishReason)'
+          : '';
+      throw StateError('Empty response from vision model ($modelName)$suffix.');
     }
 
     final cleaned = _stripJsonCodeFence(text);
@@ -1473,13 +1509,14 @@ Return ONLY JSON matching:
   }
 
   static bool _isNetworkUnavailableError(Object err) {
-    if (err is SocketException || err is TimeoutException) return true;
+    // Only treat real transport/DNS failures as offline; a single slow model
+    // TimeoutException should still allow the next Gemini model in the list.
+    if (err is SocketException) return true;
     final lower = err.toString().toLowerCase();
     return lower.contains('socketexception') ||
         lower.contains('failed host lookup') ||
         lower.contains('network is unreachable') ||
-        lower.contains('connection timed out') ||
-        lower.contains('timed out') ||
+        lower.contains('connection refused') ||
         lower.contains('clientexception');
   }
 

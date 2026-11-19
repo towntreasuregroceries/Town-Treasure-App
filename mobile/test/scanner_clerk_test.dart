@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
@@ -411,6 +412,90 @@ void main() {
       expect(res.items[1].unit, 'crates');
       expect(res.items[2].isHeader, isTrue);
       expect(res.items[3].category, 'fruits');
+    });
+
+    test(
+        'sends BLOCK_NONE safetySettings and retries next Gemini model on TimeoutException or safety block',
+        () async {
+      final calledUrls = <String>[];
+      final sentPayloads = <Map<String, dynamic>>[];
+
+      final mockClient = MockClient((req) async {
+        calledUrls.add(req.url.toString());
+        sentPayloads.add(jsonDecode(req.body) as Map<String, dynamic>);
+        if (calledUrls.length == 1) {
+          throw TimeoutException('Model 1 timed out');
+        }
+        if (calledUrls.length == 2) {
+          return http.Response(
+            jsonEncode({
+              'promptFeedback': {'blockReason': 'SAFETY'},
+              'candidates': [],
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'candidates': [
+              {
+                'finishReason': 'STOP',
+                'content': {
+                  'parts': [
+                    {
+                      'text': jsonEncode({
+                        'restaurant_name': 'Kempinski',
+                        'invoice_date': '2026-11-19',
+                        'items': [
+                          {
+                            'desc': 'White Cabbage',
+                            'qty': 13,
+                            'unit': 'kgs',
+                            'price': 1112,
+                            'total': 14456,
+                          },
+                        ],
+                        'subtotal': 14456,
+                        'delivery_cost': 0,
+                        'grand_total': 14456,
+                      }),
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+          200,
+        );
+      });
+
+      final service = OcrConsensusService(
+        httpClient: mockClient,
+        geminiApiKey: 'test-gemini-key',
+      );
+
+      final result = await service.processDocket([
+        const OcrImagePage(
+          dataUrl: 'data:image/jpeg;base64,/9j/4AAQ',
+        ),
+      ]);
+
+      expect(calledUrls.length, 3);
+      expect(calledUrls[0], contains(OcrConsensusService.models[0]));
+      expect(calledUrls[1], contains(OcrConsensusService.models[1]));
+      expect(calledUrls[2], contains(OcrConsensusService.models[2]));
+
+      final safety = sentPayloads.first['safetySettings'] as List<dynamic>;
+      expect(safety.length, 5);
+      expect(
+        safety.every((s) => (s as Map)['threshold'] == 'BLOCK_NONE'),
+        isTrue,
+      );
+
+      expect(result.confidence, 99);
+      expect(result.enginesUsed, contains('Town Treasure Optical Engine'));
+      expect(result.items.length, 1);
+      expect(result.items.first.sellPrice, 1112);
     });
   });
 

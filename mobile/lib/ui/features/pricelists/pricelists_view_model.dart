@@ -728,7 +728,7 @@ class PriceListsViewModel extends ChangeNotifier {
       sync: false,
     );
     await _vault.markRecordDeleted('priceLists', id, sync: false);
-    return _vault.syncNow();
+    return _boundedSync();
   }
 
   Future<bool> restorePriceList(String id) async {
@@ -742,7 +742,17 @@ class PriceListsViewModel extends ChangeNotifier {
       sync: false,
     );
     await _vault.markRecordRestored('priceLists', id, sync: false);
-    return _vault.syncNow();
+    return _boundedSync();
+  }
+
+  Future<bool> _boundedSync() {
+    return _vault.syncNow().timeout(
+      const Duration(seconds: 6),
+      onTimeout: () {
+        _vault.scheduleSync();
+        return false;
+      },
+    );
   }
 
   /// Splits items by category header rows matching `buildPriceListPreview`.

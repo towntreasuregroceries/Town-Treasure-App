@@ -478,13 +478,23 @@ class InvoicesViewModel extends ChangeNotifier {
       );
     }
 
-    final synced = await _vault.syncNow();
+    final synced = await _boundedSync();
     return ActionOutcome(
       ok: true,
       synced: synced,
       message: synced
           ? 'The invoice draft was saved and synced to the account.'
           : 'The draft is saved on this device, but cloud sync was not confirmed.',
+    );
+  }
+
+  Future<bool> _boundedSync() {
+    return _vault.syncNow().timeout(
+      const Duration(seconds: 6),
+      onTimeout: () {
+        _vault.scheduleSync();
+        return false;
+      },
     );
   }
 
@@ -519,7 +529,7 @@ class InvoicesViewModel extends ChangeNotifier {
     if (_editingInvoiceId == id) {
       resetEditor();
     }
-    final synced = await _vault.syncNow();
+    final synced = await _boundedSync();
     return ActionOutcome(
       ok: true,
       synced: synced,
@@ -534,6 +544,12 @@ class InvoicesViewModel extends ChangeNotifier {
   Future<SaveInvoiceResult> saveInvoice({
     bool bypassDuplicateCheck = false,
   }) async {
+    if (_isSaving) {
+      return const SaveInvoiceResult(
+        outcome: SaveInvoiceOutcome.validationError,
+        message: 'Save is already in progress. Please wait...',
+      );
+    }
     if (_restaurantId.isEmpty) {
       return const SaveInvoiceResult(
         outcome: SaveInvoiceOutcome.validationError,
@@ -609,59 +625,63 @@ class InvoicesViewModel extends ChangeNotifier {
         ? findInvoiceById(_editingInvoiceId!)
         : null;
 
-    // Smart Audit Ledger Collision Guard
-    if ((_editingInvoiceId == null || (existingRecord?.isDraft ?? false)) &&
-        !bypassDuplicateCheck) {
-      await _vault.syncNow();
-      final snapshot = await _vault.getRemoteInvoiceSnapshot();
-      if (!snapshot.ok) {
-        return const SaveInvoiceResult(
-          outcome: SaveInvoiceOutcome.duplicateCheckUnavailable,
-          message:
-              'The current server invoice list could not be verified, so the duplicate check is unavailable. Saving now may create a repeat invoice if this delivery was already entered on another device.',
-        );
-      }
-
-      Invoice? matched;
-      DuplicateScore? bestScore;
-      for (final ex in snapshot.invoices) {
-        if (ex.id == _editingInvoiceId) continue;
-        if (!Restaurant.invoiceBelongsToRestaurant(
-          ex,
-          rest,
-          _vault.restaurants,
-        )) {
-          continue;
-        }
-        final score = InvoiceDuplicateGuard.calculateHeuristicScore(
-          candidateRestaurantName: rest.name,
-          candidateDate: invDateVal,
-          candidateTotalSell: calcSell,
-          candidateItems: cleanedItems,
-          existing: ex,
-        );
-        if (bestScore == null || score.score > bestScore.score) {
-          bestScore = score;
-          matched = ex;
-        }
-      }
-
-      if (matched != null &&
-          bestScore != null &&
-          InvoiceDuplicateGuard.isHighConfidenceDuplicate(bestScore)) {
-        return SaveInvoiceResult(
-          outcome: SaveInvoiceOutcome.duplicateDetected,
-          matchedDuplicate: matched,
-          matchingItemsCount: bestScore.matchingItemsCount,
-          message:
-              'Possible duplicate: Invoice #${matched.number} for ${rest.name} on ${matched.date} looks very similar.',
-        );
-      }
-    }
-
     _isSaving = true;
     notifyListeners();
     try {
+      // Smart Audit Ledger Collision Guard
+      if ((_editingInvoiceId == null || (existingRecord?.isDraft ?? false)) &&
+          !bypassDuplicateCheck) {
+        final snapshot = await _vault
+            .getRemoteInvoiceSnapshot()
+            .timeout(
+              const Duration(seconds: 6),
+              onTimeout: () => const RemoteInvoiceSnapshot(ok: false),
+            );
+        if (!snapshot.ok) {
+          return const SaveInvoiceResult(
+            outcome: SaveInvoiceOutcome.duplicateCheckUnavailable,
+            message:
+                'The current server invoice list could not be verified, so the duplicate check is unavailable. Saving now may create a repeat invoice if this delivery was already entered on another device.',
+          );
+        }
+
+        Invoice? matched;
+        DuplicateScore? bestScore;
+        for (final ex in snapshot.invoices) {
+          if (ex.id == _editingInvoiceId) continue;
+          if (!Restaurant.invoiceBelongsToRestaurant(
+            ex,
+            rest,
+            _vault.restaurants,
+          )) {
+            continue;
+          }
+          final score = InvoiceDuplicateGuard.calculateHeuristicScore(
+            candidateRestaurantName: rest.name,
+            candidateDate: invDateVal,
+            candidateTotalSell: calcSell,
+            candidateItems: cleanedItems,
+            existing: ex,
+          );
+          if (bestScore == null || score.score > bestScore.score) {
+            bestScore = score;
+            matched = ex;
+          }
+        }
+
+        if (matched != null &&
+            bestScore != null &&
+            InvoiceDuplicateGuard.isHighConfidenceDuplicate(bestScore)) {
+          return SaveInvoiceResult(
+            outcome: SaveInvoiceOutcome.duplicateDetected,
+            matchedDuplicate: matched,
+            matchingItemsCount: bestScore.matchingItemsCount,
+            message:
+                'Possible duplicate: Invoice #${matched.number} for ${rest.name} on ${matched.date} looks very similar.',
+          );
+        }
+      }
+
       _autoSaveTimer?.cancel();
       final now = DateTime.now().toUtc().toIso8601String();
       final invId = _editingInvoiceId ?? AppHelpers.genId();
@@ -751,7 +771,7 @@ class InvoicesViewModel extends ChangeNotifier {
       }
       await _vault.setExpenses(nextExpenses, sync: false);
 
-      final synced = await _vault.syncNow();
+      final synced = await _boundedSync();
       resetEditor();
       return SaveInvoiceResult(
         outcome: SaveInvoiceOutcome.saved,
@@ -787,7 +807,7 @@ class InvoicesViewModel extends ChangeNotifier {
     );
     list[idx] = updated;
     await _vault.setInvoices(list, sync: false);
-    final synced = await _vault.syncNow();
+    final synced = await _boundedSync();
     return ActionOutcome(
       ok: true,
       synced: synced,
@@ -813,7 +833,7 @@ class InvoicesViewModel extends ChangeNotifier {
     );
     list[idx] = updated;
     await _vault.setInvoices(list, sync: false);
-    final synced = await _vault.syncNow();
+    final synced = await _boundedSync();
     return ActionOutcome(
       ok: true,
       synced: synced,
@@ -864,7 +884,7 @@ class InvoicesViewModel extends ChangeNotifier {
       resetEditor();
     }
 
-    final synced = await _vault.syncNow();
+    final synced = await _boundedSync();
     return ActionOutcome(
       ok: true,
       synced: synced,
