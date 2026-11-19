@@ -15,6 +15,7 @@ import 'ui/core/app_shell.dart';
 import 'ui/core/theme/app_theme.dart';
 import 'ui/features/auth/auth_screen.dart';
 import 'ui/features/auth/auth_view_model.dart';
+import 'ui/features/dashboard/background_update_worker.dart';
 import 'ui/features/dashboard/signature_scanner_sheet.dart';
 
 Future<void> main() async {
@@ -47,6 +48,8 @@ Future<void> main() async {
   final remoteUpdateService = RemoteUpdateService();
   final ocrService = OcrConsensusService();
   final duplicateDetectorService = DuplicateDetectorService();
+
+  await BackgroundUpdateWorker.initializeAndSchedule();
 
   runApp(
     TownTreasureApp(

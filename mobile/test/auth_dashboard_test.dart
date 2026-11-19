@@ -22,6 +22,7 @@ import 'package:town_treasure_groceries/ui/features/dashboard/change_password_di
 import 'package:town_treasure_groceries/ui/features/dashboard/dashboard_screen.dart';
 import 'package:town_treasure_groceries/ui/features/dashboard/dashboard_view_model.dart';
 import 'package:town_treasure_groceries/ui/features/dashboard/excel_exporter.dart';
+import 'package:town_treasure_groceries/ui/features/dashboard/notification_center_sheet.dart';
 import 'package:town_treasure_groceries/ui/features/dashboard/overdue_notification_service.dart';
 import 'package:town_treasure_groceries/ui/features/dashboard/signature_scanner_sheet.dart';
 import 'package:town_treasure_groceries/ui/features/dashboard/update_checker_sheet.dart';
@@ -96,13 +97,16 @@ class FakeBiometricGateway implements BiometricGateway {
   Future<bool> isDeviceSupported() async => supported;
 }
 
-class FakeOverdueNotificationGateway implements OverdueNotificationGateway {
+class FakeOverdueNotificationGateway
+    implements OverdueNotificationGateway, SmartNotificationGateway {
   bool permissionGranted = true;
   int initCalls = 0;
   int showCalls = 0;
   int cancelCalls = 0;
   int? lastOverdueCount;
   int? lastPendingCount;
+  final List<({NotificationCategory category, String title, String body})>
+      categoryCalls = [];
 
   @override
   Future<bool> initializeAndRequestPermission() async {
@@ -121,6 +125,15 @@ class FakeOverdueNotificationGateway implements OverdueNotificationGateway {
   }
 
   @override
+  Future<void> showCategoryNotification({
+    required NotificationCategory category,
+    required String title,
+    required String body,
+  }) async {
+    categoryCalls.add((category: category, title: title, body: body));
+  }
+
+  @override
   Future<void> cancelAll() async {
     cancelCalls++;
   }
@@ -129,9 +142,11 @@ class FakeOverdueNotificationGateway implements OverdueNotificationGateway {
 class FakeRemoteUpdateService extends RemoteUpdateService {
   FakeRemoteUpdateService({
     required this.result,
+    this.throwError,
   });
 
   final UpdateCheckResult result;
+  final Object? throwError;
   int checkCalls = 0;
   int installCalls = 0;
   String? lastManifestUrl;
@@ -141,6 +156,9 @@ class FakeRemoteUpdateService extends RemoteUpdateService {
   Future<UpdateCheckResult> checkForUpdate(String manifestUrl) async {
     checkCalls++;
     lastManifestUrl = manifestUrl;
+    if (throwError != null) {
+      throw throwError!;
+    }
     return result;
   }
 
@@ -945,6 +963,212 @@ void main() {
         find.textContaining('Installer opened after safety verification.'),
         findsOneWidget,
       );
+    });
+
+    test(
+        'DashboardViewModel silent auto-update check notifies once per build and handles offline cleanly',
+        () async {
+      final f = await _createFixture();
+      addTearDown(f.storage.close);
+      addTearDown(f.vault.dispose);
+
+      const manifest = AppUpdateManifest(
+        version: '1.1.0',
+        buildNumber: 4,
+        apkUrl: 'https://updates.example.com/ttg-1.1.0.apk',
+        sha256:
+            '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        releaseNotes: 'Hybrid PP-OCRv5 offline scanning and smart alerts.',
+      );
+      final notifications = FakeOverdueNotificationGateway();
+      final updateService = FakeRemoteUpdateService(
+        result: const UpdateCheckResult(
+          updateAvailable: true,
+          currentVersion: '1.0.2',
+          currentBuildNumber: 3,
+          manifest: manifest,
+        ),
+      );
+
+      var now = DateTime(2026, 11, 19, 9, 0);
+      final vm = DashboardViewModel(
+        vaultRepository: f.vault,
+        authRepository: f.auth,
+        stagingRepository: f.staging,
+        localStorage: f.storage,
+        notificationGateway: notifications,
+        smartNotificationGateway: notifications,
+        updateService: updateService,
+        updateManifestUrl: 'https://updates.example.com/app-update.json',
+        clock: () => now,
+      );
+      addTearDown(vm.dispose);
+
+      await vm.initialize(syncRemote: false);
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(updateService.checkCalls, 1);
+      expect(vm.hasUpdateAvailable, isTrue);
+      expect(vm.availableUpdate?.manifest?.version, '1.1.0');
+      expect(
+        notifications.categoryCalls
+            .where((c) => c.category == NotificationCategory.appUpdates)
+            .length,
+        1,
+      );
+
+      // Re-checking within 12h interval skips network call unless forced.
+      now = now.add(const Duration(hours: 2));
+      await vm.runSilentUpdateCheck();
+      expect(updateService.checkCalls, 1);
+
+      // Forced re-check on the same buildNumber does not duplicate OS alert.
+      await vm.runSilentUpdateCheck(force: true);
+      expect(updateService.checkCalls, 2);
+      expect(
+        notifications.categoryCalls
+            .where((c) => c.category == NotificationCategory.appUpdates)
+            .length,
+        1,
+      );
+
+      // Offline failure during silent update check is gracefully suppressed.
+      final offlineUpdate = FakeRemoteUpdateService(
+        result: const UpdateCheckResult(
+          updateAvailable: false,
+          currentVersion: '1.0.2',
+          currentBuildNumber: 3,
+        ),
+        throwError: const SocketException('Network unreachable'),
+      );
+      final vmOffline = DashboardViewModel(
+        vaultRepository: f.vault,
+        authRepository: f.auth,
+        stagingRepository: f.staging,
+        localStorage: f.storage,
+        updateService: offlineUpdate,
+        clock: () => now.add(const Duration(days: 1)),
+      );
+      addTearDown(vmOffline.dispose);
+      await vmOffline.runSilentUpdateCheck(force: true);
+      expect(vmOffline.errorMessage, isNull);
+    });
+
+    testWidgets(
+        'DashboardScreen shows Update banner and NotificationCenterSheet toggles smart alerts',
+        (tester) async {
+      final f = await _createFixture();
+      addTearDown(f.storage.close);
+      addTearDown(f.vault.dispose);
+
+      await f.vault.setStaff([
+        const Staff(
+          id: 'st-1',
+          name: 'Grace Wanjiku',
+          role: 'Packer',
+          salary: 18000,
+          payDay: '1',
+          status: 'active',
+        ),
+      ], sync: false);
+      await f.vault.setInvoices([
+        const Invoice(
+          id: 'inv-old',
+          number: 'TTG-900',
+          restaurantId: 'r1',
+          restaurantName: 'Kempinski Hotel',
+          date: '2026-09-01',
+          dueDate: '2026-09-15',
+          totalSell: 12000,
+          totalBuy: 9000,
+          profit: 3000,
+          status: 'pending',
+        ),
+      ], sync: false);
+
+      const manifest = AppUpdateManifest(
+        version: '1.1.0',
+        buildNumber: 4,
+        apkUrl: 'https://updates.example.com/ttg-1.1.0.apk',
+        sha256:
+            '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        releaseNotes: 'Hybrid local OCR and Smart Notification Center.',
+      );
+      final notifications = FakeOverdueNotificationGateway();
+      final updateService = FakeRemoteUpdateService(
+        result: const UpdateCheckResult(
+          updateAvailable: true,
+          currentVersion: '1.0.2',
+          currentBuildNumber: 3,
+          manifest: manifest,
+        ),
+      );
+
+      final vm = DashboardViewModel(
+        vaultRepository: f.vault,
+        authRepository: f.auth,
+        stagingRepository: f.staging,
+        localStorage: f.storage,
+        notificationGateway: notifications,
+        smartNotificationGateway: notifications,
+        updateService: updateService,
+        clock: () => DateTime(2026, 11, 2),
+      );
+      addTearDown(vm.dispose);
+
+      var invoicesOpened = false;
+      var statementsOpened = false;
+      int? openedExpenseTab;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: DashboardScreen(
+            viewModel: vm,
+            updateService: updateService,
+            onOpenInvoicesTab: () => invoicesOpened = true,
+            onOpenExpensesHub: (tab) => openedExpenseTab = tab,
+            onOpenStatements: () => statementsOpened = true,
+            autoInitialize: false,
+          ),
+        ),
+      );
+      await vm.initialize(syncRemote: false);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('banner_update_available')), findsOneWidget);
+      expect(find.textContaining('Update Available (v1.1.0)'), findsOneWidget);
+
+      await _tapKey(tester, const Key('btn_dashboard_notify_toggle'));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(NotificationCenterSheet), findsOneWidget);
+      expect(find.text('Smart Notification Center'), findsOneWidget);
+      expect(find.textContaining('Staff Salary Due'), findsOneWidget);
+      expect(find.textContaining('Monthly Client Statements Ready'), findsOneWidget);
+
+      final appUpdatesToggle = find.byKey(const Key('pref_app_updates'));
+      await tester.scrollUntilVisible(
+        appUpdatesToggle,
+        250,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.tap(appUpdatesToggle);
+      await tester.pumpAndSettle();
+      expect(vm.notificationPrefs.appUpdatesEnabled, isFalse);
+
+      // Scroll back to top of alert feed and tap Statements action to verify deep link.
+      final statementsAction = find.widgetWithText(FilledButton, 'Statements');
+      await tester.scrollUntilVisible(
+        statementsAction,
+        -250,
+        scrollable: find.byType(Scrollable).last,
+      );
+      await tester.tap(statementsAction);
+      await tester.pumpAndSettle();
+
+      expect(statementsOpened, isTrue);
+      expect(invoicesOpened, isFalse);
+      expect(openedExpenseTab, isNull);
     });
   });
 }

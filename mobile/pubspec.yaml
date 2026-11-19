@@ -2,7 +2,7 @@ name: town_treasure_groceries
 description: "Town Treasure Groceries mobile application for invoice, ledger, payroll, price list, and clerk staging management."
 publish_to: 'none'
 
-version: 1.0.2+3
+version: 1.1.0+4
 
 environment:
   sdk: ^3.13.2
@@ -35,6 +35,7 @@ dependencies:
   excel: ^4.0.6
   flutter_local_notifications: ^17.2.2
   url_launcher: ^6.3.0
+  workmanager: ^0.10.10
 
 dev_dependencies:
   flutter_test:
@@ -49,3 +50,6 @@ flutter:
     - assets/logo.jpg
     - assets/stamp.png
     - assets/favicon.png
+    - assets/ocr/det.onnx
+    - assets/ocr/rec.onnx
+    - assets/ocr/dict.txt

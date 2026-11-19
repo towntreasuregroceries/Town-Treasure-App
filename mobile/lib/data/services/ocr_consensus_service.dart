@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
@@ -7,6 +9,9 @@ import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
 import '../../domain/models/models.dart';
+import 'paddle_ocr_spatial_parser.dart';
+
+export 'paddle_ocr_spatial_parser.dart';
 
 /// Abstraction over Google ML Kit on-device text recognition for testability.
 abstract class OcrTextRecognizerGateway {
@@ -14,8 +19,14 @@ abstract class OcrTextRecognizerGateway {
   Future<void> close();
 }
 
-/// Live Google ML Kit Latin script text recognizer.
-class MlKitTextRecognizerGateway implements OcrTextRecognizerGateway {
+/// Optional 2D layout capability for recognizers exposing bounding-box coordinates.
+abstract class OcrSpatialRecognizerGateway {
+  Future<List<OcrTextBox>> recognizeBoxesFromFile(String filePath);
+}
+
+/// Live Google ML Kit Latin script text recognizer with 2D bounding-box support.
+class MlKitTextRecognizerGateway
+    implements OcrTextRecognizerGateway, OcrSpatialRecognizerGateway {
   MlKitTextRecognizerGateway([TextRecognizer? recognizer])
       : _injectedRecognizer = recognizer;
 
@@ -34,6 +45,36 @@ class MlKitTextRecognizerGateway implements OcrTextRecognizerGateway {
     final inputImage = InputImage.fromFilePath(filePath);
     final recognized = await _getRecognizer().processImage(inputImage);
     return recognized.text;
+  }
+
+  @override
+  Future<List<OcrTextBox>> recognizeBoxesFromFile(String filePath) async {
+    final inputImage = InputImage.fromFilePath(filePath);
+    final recognized = await _getRecognizer().processImage(inputImage);
+    final boxes = <OcrTextBox>[];
+    for (final block in recognized.blocks) {
+      for (final line in block.lines) {
+        final txt = line.text.trim();
+        if (txt.isEmpty) continue;
+        final rect = line.boundingBox;
+        boxes.add(
+          OcrTextBox(
+            text: txt,
+            confidence: line.confidence ?? 0.85,
+            centerX: rect.center.dx,
+            centerY: rect.center.dy,
+            width: rect.width,
+            height: rect.height,
+            angle: line.angle ?? 0,
+            left: rect.left,
+            top: rect.top,
+            right: rect.right,
+            bottom: rect.bottom,
+          ),
+        );
+      }
+    }
+    return boxes;
   }
 
   @override
@@ -161,11 +202,13 @@ class OcrConsensusService {
   OcrConsensusService({
     http.Client? httpClient,
     OcrTextRecognizerGateway? textRecognizer,
+    PaddleOcrGateway? paddleOcr,
     ImagePickerGateway? imagePicker,
     String? geminiApiKey,
     this.apiKeyProvider,
   })  : _http = httpClient ?? http.Client(),
         _textRecognizer = textRecognizer ?? MlKitTextRecognizerGateway(),
+        _paddleOcr = paddleOcr ?? MethodChannelPaddleOcrGateway(),
         _imagePicker = imagePicker ?? DeviceImagePickerGateway(),
         _staticApiKey = geminiApiKey;
 
@@ -219,6 +262,7 @@ class OcrConsensusService {
 
   final http.Client _http;
   final OcrTextRecognizerGateway _textRecognizer;
+  final PaddleOcrGateway _paddleOcr;
   final ImagePickerGateway _imagePicker;
   final String? _staticApiKey;
   final String? Function()? apiKeyProvider;
@@ -334,12 +378,12 @@ class OcrConsensusService {
     Map<String, dynamic>? geminiResult;
     Object? lastError;
 
-    // Engine 1: Optional Cloud Vision (only when API key is configured)
+    // Engine 1: Cloud Vision (only when online & API key configured; fail fast offline)
     if (apiKey.isNotEmpty) {
       final dataUrls = pages.map((p) => p.dataUrl).toList();
       for (final model in models) {
         try {
-          onProgress?.call('Scanning produce lines & pricing (High-Precision Pass)...');
+          onProgress?.call('Scanning produce lines & pricing (Cloud Vision Pass)...');
           final candidate = await _runGeminiDocketVision(dataUrls, model, apiKey);
           final items = candidate['items'];
           if (items is List && items.isNotEmpty) {
@@ -348,17 +392,61 @@ class OcrConsensusService {
           }
         } catch (err) {
           lastError = err;
+          if (_isNetworkUnavailableError(err)) {
+            onProgress?.call('No internet detected — switching to bundled offline OCR...');
+            break;
+          }
         }
       }
     }
 
-    // Engine 2: On-Device Google ML Kit Text Recognition across pages with file paths
+    // Engine 2: Bundled Offline Primary — PaddleOCR PP-OCRv5 ONNX + 2D Spatial Parser
+    final filePages =
+        pages.where((p) => p.filePath != null && p.filePath!.isNotEmpty).toList();
+    Map<String, dynamic>? paddleParsed;
+    final paddleTextChunks = <String>[];
+    if (geminiResult == null && filePages.isNotEmpty) {
+      onProgress?.call('Running offline PaddleOCR PP-OCRv5 ONNX engine...');
+      final pagePayloads = <Map<String, dynamic>>[];
+      for (final page in filePages) {
+        try {
+          final boxes = await _paddleOcr.recognizeBoxesFromFile(page.filePath!);
+          if (boxes.isNotEmpty) {
+            final rows = SpatialOcrParser.reconstructDeskewedRows(boxes);
+            final txt = SpatialOcrParser.rowsToPlainText(rows);
+            if (txt.isNotEmpty) paddleTextChunks.add(txt);
+            pagePayloads.add(SpatialOcrParser.parseBoxesToDocket(boxes));
+          }
+        } catch (err) {
+          lastError ??= err;
+        }
+      }
+      if (pagePayloads.isNotEmpty) {
+        paddleParsed = _mergeDocketPagePayloads(pagePayloads);
+      }
+    }
+
+    // Engine 3: Offline Redundancy — Google ML Kit 2D Bounding Boxes / Text
     final mlKitTexts = <String>[];
-    final filePages = pages.where((p) => p.filePath != null && p.filePath!.isNotEmpty).toList();
-    if (filePages.isNotEmpty) {
+    final mlKitPagePayloads = <Map<String, dynamic>>[];
+    if (filePages.isNotEmpty &&
+        (geminiResult == null ||
+            (paddleParsed == null ||
+                (paddleParsed['items'] as List?)?.isEmpty == true))) {
       onProgress?.call('Cross-checking with on-device Google ML Kit recognition...');
       for (final page in filePages) {
         try {
+          if (_textRecognizer is OcrSpatialRecognizerGateway) {
+            final spatial = _textRecognizer as OcrSpatialRecognizerGateway;
+            final boxes = await spatial.recognizeBoxesFromFile(page.filePath!);
+            if (boxes.isNotEmpty) {
+              final rows = SpatialOcrParser.reconstructDeskewedRows(boxes);
+              final txt = SpatialOcrParser.rowsToPlainText(rows);
+              if (txt.isNotEmpty) mlKitTexts.add(txt);
+              mlKitPagePayloads.add(SpatialOcrParser.parseBoxesToDocket(boxes));
+              continue;
+            }
+          }
           final txt = await _textRecognizer.recognizeTextFromFile(page.filePath!);
           if (txt.trim().isNotEmpty) {
             mlKitTexts.add(txt.trim());
@@ -370,14 +458,23 @@ class OcrConsensusService {
     }
 
     final combinedMlKitText = mlKitTexts.join('\n--- PAGE BREAK ---\n');
-    final mlKitParsed = combinedMlKitText.trim().isNotEmpty
-        ? parseRawTextToDocket(combinedMlKitText)
-        : null;
+    final mlKitParsed = mlKitPagePayloads.isNotEmpty &&
+            mlKitPagePayloads.any((p) => (p['items'] as List?)?.isNotEmpty == true)
+        ? _mergeDocketPagePayloads(mlKitPagePayloads)
+        : (combinedMlKitText.trim().isNotEmpty
+            ? parseRawTextToDocket(combinedMlKitText)
+            : null);
+
+    final paddleHasItems =
+        (paddleParsed?['items'] as List?)?.isNotEmpty == true;
+    final offlineData = paddleHasItems ? paddleParsed : mlKitParsed;
+    final offlineRawText = paddleTextChunks.isNotEmpty
+        ? paddleTextChunks.join('\n--- PAGE BREAK ---\n')
+        : combinedMlKitText;
 
     if (geminiResult == null &&
-        (mlKitParsed == null ||
-            ((mlKitParsed['items'] as List?)?.isEmpty ?? true &&
-                combinedMlKitText.trim().isEmpty))) {
+        (offlineData == null ||
+            ((offlineData['items'] as List?)?.isEmpty ?? true))) {
       final detail = lastError?.toString().toLowerCase() ?? '';
       if (detail.contains('socket') ||
           detail.contains('network') ||
@@ -392,12 +489,17 @@ class OcrConsensusService {
       );
     }
 
-    // Engine 3: Deterministic Mathematical Invariant Validator & Discrepancy Arbiter
+    // Engine 4: Deterministic Mathematical Invariant Validator & Discrepancy Arbiter
     onProgress?.call('Running Deterministic Mathematical Arbiter & checksum verification...');
     final consensus = reconcileWithMath(
       geminiData: geminiResult,
-      mlKitData: mlKitParsed,
-      rawMlKitText: combinedMlKitText,
+      mlKitData: offlineData,
+      rawMlKitText: offlineRawText,
+      offlineEngineLabel: paddleHasItems
+          ? 'PaddleOCR PP-OCRv5 ONNX (Offline)'
+          : (offlineData != null || combinedMlKitText.trim().isNotEmpty
+              ? 'Google ML Kit On-Device'
+              : null),
       pageCount: pageCount,
     );
 
@@ -419,7 +521,7 @@ class OcrConsensusService {
       receiptPhoto: photoUrls.isNotEmpty ? photoUrls.first : null,
       receiptPhotos: photoUrls,
       pageCount: pageCount,
-      rawMlKitText: combinedMlKitText,
+      rawMlKitText: offlineRawText,
     );
   }
 
@@ -457,15 +559,64 @@ class OcrConsensusService {
           }
         } catch (err) {
           lastError = err;
+          if (_isNetworkUnavailableError(err)) {
+            onProgress?.call('No internet detected — switching to offline PaddleOCR ONNX...');
+            break;
+          }
+        }
+      }
+    }
+
+    if (extractionResult == null) {
+      final filePages =
+          pages.where((p) => p.filePath != null && p.filePath!.isNotEmpty).toList();
+      if (filePages.isNotEmpty) {
+        onProgress?.call('Running offline PaddleOCR PP-OCRv5 ONNX on price list...');
+        final combinedItems = <Map<String, dynamic>>[];
+        for (final page in filePages) {
+          try {
+            final boxes = await _paddleOcr.recognizeBoxesFromFile(page.filePath!);
+            if (boxes.isNotEmpty) {
+              final parsed = SpatialOcrParser.parseBoxesToPriceList(boxes);
+              final pageItems = parsed['items'];
+              if (pageItems is List && pageItems.isNotEmpty) {
+                combinedItems.addAll(pageItems.whereType<Map>().map((e) => Map<String, dynamic>.from(e)));
+              }
+            }
+          } catch (err) {
+            lastError ??= err;
+          }
+        }
+        if (combinedItems.isNotEmpty) {
+          extractionResult = {
+            'name': 'Scanned Price List',
+            'subtitle': 'Food Supplies (Veg and Fruits)',
+            'effectiveDate': AppHelpers.normalizeAppDate(DateTime.now()),
+            'items': combinedItems,
+          };
+          enginesUsed.add('PaddleOCR PP-OCRv5 ONNX (Offline)');
         }
       }
     }
 
     if (extractionResult == null) {
       final mlKitTexts = <String>[];
+      final spatialItems = <Map<String, dynamic>>[];
       for (final page in pages) {
         if (page.filePath != null && page.filePath!.isNotEmpty) {
           try {
+            if (_textRecognizer is OcrSpatialRecognizerGateway) {
+              final spatial = _textRecognizer as OcrSpatialRecognizerGateway;
+              final boxes = await spatial.recognizeBoxesFromFile(page.filePath!);
+              if (boxes.isNotEmpty) {
+                final parsed = SpatialOcrParser.parseBoxesToPriceList(boxes);
+                final list = parsed['items'];
+                if (list is List && list.isNotEmpty) {
+                  spatialItems.addAll(list.whereType<Map>().map((e) => Map<String, dynamic>.from(e)));
+                  continue;
+                }
+              }
+            }
             final txt = await _textRecognizer.recognizeTextFromFile(page.filePath!);
             if (txt.trim().isNotEmpty) mlKitTexts.add(txt.trim());
           } catch (err) {
@@ -473,7 +624,15 @@ class OcrConsensusService {
           }
         }
       }
-      if (mlKitTexts.isNotEmpty) {
+      if (spatialItems.isNotEmpty) {
+        extractionResult = {
+          'name': 'Scanned Price List',
+          'subtitle': 'Food Supplies (Veg and Fruits)',
+          'effectiveDate': AppHelpers.normalizeAppDate(DateTime.now()),
+          'items': spatialItems,
+        };
+        enginesUsed.add('Google ML Kit On-Device');
+      } else if (mlKitTexts.isNotEmpty) {
         extractionResult = parseRawTextToPriceList(mlKitTexts.join('\n'));
         enginesUsed.add('Google ML Kit On-Device');
       }
@@ -557,7 +716,7 @@ class OcrConsensusService {
           unit = 'pieces';
         } else if (unit == 'crate') {
           unit = 'crates';
-        } else if (unit == 'bag') {
+        } else if (unit == 'bag' || unit == 'baq' || unit == 'baqs') {
           unit = 'bags';
         } else if (unit == 'punnet' || unit == 'punnets') {
           unit = 'pnts';
@@ -626,12 +785,13 @@ class OcrConsensusService {
     Map<String, dynamic>? geminiData,
     Map<String, dynamic>? mlKitData,
     String rawMlKitText = '',
+    String? offlineEngineLabel,
     int pageCount = 1,
   }) {
     final enginesUsed = <String>[];
     if (geminiData != null) enginesUsed.add('Town Treasure Optical Engine');
     if (mlKitData != null || rawMlKitText.trim().isNotEmpty) {
-      enginesUsed.add('Google ML Kit On-Device');
+      enginesUsed.add(offlineEngineLabel ?? 'Google ML Kit On-Device');
     }
     enginesUsed.add('Math Invariant Arbiter');
 
@@ -654,16 +814,26 @@ class OcrConsensusService {
     final items = rawItems.map((it) {
       final descRaw = (it['desc'] ?? it['name'] ?? 'Produce Item').toString().trim();
       final desc = descRaw.isEmpty ? 'Produce Item' : descRaw;
-      final qty = AppHelpers.parseDouble(it['qty'], 1);
+      var qty = AppHelpers.parseDouble(it['qty'], 1);
       var price = AppHelpers.parseDouble(it['price'] ?? it['sellPrice']);
       var total = AppHelpers.parseDouble(it['total']);
       final unit = normalizeUnit((it['unit'] ?? 'kgs').toString());
 
-      // Mathematical Arbitration: line Total and Qty carry highest handwriting clarity.
+      // Mathematical Arbitration: line Total is highest-clarity anchor.
       if (qty > 0 && total > 0) {
-        final mathPrice = ((total / qty) * 100).roundToDouble() / 100;
-        if (price == 0 || (qty * price - total).abs() > 0.5) {
-          price = mathPrice;
+        if (price > 0 && (qty * price - total).abs() > 0.5) {
+          final candidateQty = total / price;
+          // Catch table-border digit prepend (e.g. "115" * 40 != 600 -> 15 * 40 == 600)
+          if (candidateQty >= 1 &&
+              (candidateQty - candidateQty.roundToDouble()).abs() < 0.001 &&
+              qty == qty.roundToDouble() &&
+              qty.toInt().toString().contains(candidateQty.round().toString())) {
+            qty = candidateQty.roundToDouble();
+          } else {
+            price = ((total / qty) * 100).roundToDouble() / 100;
+          }
+        } else if (price == 0) {
+          price = ((total / qty) * 100).roundToDouble() / 100;
         }
       } else if (qty > 0 && price > 0 && total == 0) {
         total = ((qty * price) * 100).roundToDouble() / 100;
@@ -745,7 +915,12 @@ class OcrConsensusService {
   static String normalizeUnit(String rawUnit) {
     final unit = rawUnit.toLowerCase().trim();
     if (unit.isEmpty) return 'kgs';
-    if (unit.startsWith('bunch') || unit == 'bchs') return 'bunches';
+    if (unit == 'baq' || unit == 'baqs' || unit == 'bag' || unit == 'bags') {
+      return 'bags';
+    }
+    if (unit.startsWith('bunch') || unit == 'bchs' || unit == 'bunche') {
+      return 'bunches';
+    }
     if (unit.startsWith('pnt') || unit.startsWith('punnet')) return 'pnts';
     if (unit.startsWith('head')) return 'heads';
     if (unit.startsWith('pc') || unit == 'piece') return 'pcs';
@@ -1151,11 +1326,13 @@ Return ONLY JSON matching:
     final uri = Uri.parse(
       'https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey',
     );
-    final response = await _http.post(
-      uri,
-      headers: const {'Content-Type': 'application/json'},
-      body: jsonEncode(payload),
-    );
+    final response = await _http
+        .post(
+          uri,
+          headers: const {'Content-Type': 'application/json'},
+          body: jsonEncode(payload),
+        )
+        .timeout(const Duration(seconds: 9));
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('API error (${response.statusCode}): ${response.body}');
@@ -1225,7 +1402,62 @@ Return ONLY JSON matching:
     return double.tryParse(clean) ?? 0;
   }
 
+  static bool _isNetworkUnavailableError(Object err) {
+    if (err is SocketException || err is TimeoutException) return true;
+    final lower = err.toString().toLowerCase();
+    return lower.contains('socketexception') ||
+        lower.contains('failed host lookup') ||
+        lower.contains('network is unreachable') ||
+        lower.contains('connection timed out') ||
+        lower.contains('timed out') ||
+        lower.contains('clientexception');
+  }
+
+  static Map<String, dynamic> _mergeDocketPagePayloads(
+    List<Map<String, dynamic>> payloads,
+  ) {
+    var restaurantName = '';
+    var invoiceNumber = '';
+    var invoiceDate = '';
+    var deliveryCost = 0.0;
+    var otherCost = 0.0;
+    var subtotal = 0.0;
+    final mergedItems = <Map<String, dynamic>>[];
+
+    for (final p in payloads) {
+      final rn = (p['restaurant_name'] ?? '').toString().trim();
+      if (restaurantName.isEmpty && rn.isNotEmpty) restaurantName = rn;
+      final inv = (p['invoice_number'] ?? '').toString().trim();
+      if (invoiceNumber.isEmpty && inv.isNotEmpty) invoiceNumber = inv;
+      final dt = (p['invoice_date'] ?? '').toString().trim();
+      if (invoiceDate.isEmpty && dt.isNotEmpty) invoiceDate = dt;
+      final dc = AppHelpers.parseDouble(p['delivery_cost']);
+      if (dc > 0) deliveryCost = dc;
+      final oc = AppHelpers.parseDouble(p['other_cost']);
+      if (oc > 0) otherCost = oc;
+      final sub = AppHelpers.parseDouble(p['subtotal']);
+      if (sub > 0) subtotal = sub;
+      final items = p['items'];
+      if (items is List) {
+        mergedItems.addAll(
+          items.whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
+        );
+      }
+    }
+
+    return {
+      'restaurant_name': restaurantName,
+      'invoice_number': invoiceNumber,
+      'invoice_date': invoiceDate,
+      'items': mergedItems,
+      'delivery_cost': deliveryCost,
+      'other_cost': otherCost,
+      'subtotal': subtotal,
+    };
+  }
+
   Future<void> dispose() async {
     await _textRecognizer.close();
+    await _paddleOcr.close();
   }
 }

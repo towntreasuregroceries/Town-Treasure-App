@@ -10,6 +10,7 @@ import '../../../domain/models/models.dart';
 import '../../core/theme/app_theme.dart';
 import 'change_password_dialog.dart';
 import 'dashboard_view_model.dart';
+import 'notification_center_sheet.dart';
 import 'signature_scanner_sheet.dart';
 import 'update_checker_sheet.dart';
 
@@ -34,6 +35,9 @@ class DashboardScreen extends StatefulWidget {
     this.updateManifestUrl =
         'https://towntreasuregroceries.github.io/Town-Treasure-App/app-update.json',
     this.onOpenClerkInbox,
+    this.onOpenInvoicesTab,
+    this.onOpenExpensesHub,
+    this.onOpenStatements,
     this.onOpenInvoice,
     this.onCreateInvoice,
     this.onSignedOut,
@@ -45,6 +49,9 @@ class DashboardScreen extends StatefulWidget {
   final RemoteUpdateService? updateService;
   final String updateManifestUrl;
   final VoidCallback? onOpenClerkInbox;
+  final VoidCallback? onOpenInvoicesTab;
+  final void Function(int tabIndex)? onOpenExpensesHub;
+  final VoidCallback? onOpenStatements;
   final void Function(Invoice invoice)? onOpenInvoice;
   final VoidCallback? onCreateInvoice;
   final VoidCallback? onSignedOut;
@@ -78,6 +85,8 @@ class _DashboardScreenState extends State<DashboardScreen>
         authRepository: context.read<AuthRepository>(),
         stagingRepository: context.read<StagingRepository>(),
         localStorage: _tryRead<LocalStorageService>(context),
+        updateService: widget.updateService ?? _tryRead<RemoteUpdateService>(context),
+        updateManifestUrl: widget.updateManifestUrl,
       );
       _ownsViewModel = true;
     }
@@ -193,6 +202,22 @@ class _DashboardScreenState extends State<DashboardScreen>
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
+                  AnimatedSize(
+                    duration: AppMotion.standard,
+                    curve: AppMotion.standardCurve,
+                    child: _vm.hasUpdateAvailable &&
+                            _vm.availableUpdate?.manifest != null
+                        ? Padding(
+                            padding: const EdgeInsets.only(bottom: 16),
+                            child: _UpdateAvailableBanner(
+                              version: _vm.availableUpdate!.manifest!.version,
+                              releaseNotes:
+                                  _vm.availableUpdate!.manifest!.releaseNotes,
+                              onOpenUpdater: _openUpdateChecker,
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
                   AnimatedSize(
                     duration: AppMotion.standard,
                     curve: AppMotion.standardCurve,
@@ -312,18 +337,22 @@ class _DashboardScreenState extends State<DashboardScreen>
       actions: [
         IconButton(
           key: const Key('btn_dashboard_notify_toggle'),
-          tooltip: _vm.overdueNotificationsEnabled
-              ? 'Overdue alerts enabled'
-              : 'Enable overdue alerts',
-          onPressed: () =>
-              _vm.toggleOverdueNotifications(!_vm.overdueNotificationsEnabled),
-          icon: Icon(
-            _vm.overdueNotificationsEnabled
-                ? Icons.notifications_active
-                : Icons.notifications_none_outlined,
-            color: _vm.overdueNotificationsEnabled
-                ? const Color(0xFFBBF7D0)
-                : Colors.white,
+          tooltip: 'Notification Center (${_vm.activeAlerts.length})',
+          onPressed: _openNotificationCenter,
+          icon: Badge.count(
+            count: _vm.activeAlerts.length,
+            isLabelVisible: _vm.activeAlerts.isNotEmpty,
+            backgroundColor: _vm.hasUpdateAvailable
+                ? AppTheme.info
+                : AppTheme.warning,
+            child: Icon(
+              _vm.activeAlerts.isNotEmpty || _vm.overdueNotificationsEnabled
+                  ? Icons.notifications_active
+                  : Icons.notifications_none_outlined,
+              color: _vm.overdueNotificationsEnabled || _vm.activeAlerts.isNotEmpty
+                  ? const Color(0xFFBBF7D0)
+                  : Colors.white,
+            ),
           ),
         ),
         IconButton(
@@ -396,11 +425,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                       ? Icons.notifications_active_outlined
                       : Icons.notifications_off_outlined,
                 ),
-                title: Text(
-                  _vm.overdueNotificationsEnabled
-                      ? 'Disable Overdue Alerts'
-                      : 'Enable Overdue Alerts',
-                ),
+                title: const Text('Notification Center'),
               ),
             ),
             PopupMenuItem(
@@ -461,7 +486,7 @@ class _DashboardScreenState extends State<DashboardScreen>
       case _DashboardMenuAction.exportExcel:
         await _vm.exportFullExcel();
       case _DashboardMenuAction.notifications:
-        await _vm.toggleOverdueNotifications(!_vm.overdueNotificationsEnabled);
+        await _openNotificationCenter();
       case _DashboardMenuAction.biometrics:
         await _vm.toggleBiometricLock(!_vm.biometricEnabled);
       case _DashboardMenuAction.changePassword:
@@ -516,6 +541,18 @@ class _DashboardScreenState extends State<DashboardScreen>
     );
   }
 
+  Future<void> _openNotificationCenter() async {
+    await NotificationCenterSheet.show(
+      context,
+      viewModel: _vm,
+      onCheckUpdates: _openUpdateChecker,
+      onOpenClerkInbox: widget.onOpenClerkInbox,
+      onOpenInvoices: widget.onOpenInvoicesTab,
+      onOpenExpenses: widget.onOpenExpensesHub,
+      onOpenStatements: widget.onOpenStatements,
+    );
+  }
+
   Future<void> _confirmAndSignOut() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -543,6 +580,87 @@ class _DashboardScreenState extends State<DashboardScreen>
         widget.onSignedOut?.call();
       }
     }
+  }
+}
+
+class _UpdateAvailableBanner extends StatelessWidget {
+  const _UpdateAvailableBanner({
+    required this.version,
+    required this.releaseNotes,
+    required this.onOpenUpdater,
+  });
+
+  final String version;
+  final String releaseNotes;
+  final VoidCallback onOpenUpdater;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('banner_update_available'),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.infoSurface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppTheme.info.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: AppTheme.info.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.system_update_outlined,
+              color: AppTheme.info,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Update Available (v$version)',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.slateInk,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  releaseNotes.isNotEmpty
+                      ? releaseNotes
+                      : 'A newer signed release is ready to install.',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.slateMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          FilledButton.tonal(
+            key: const Key('btn_open_update_banner'),
+            onPressed: onOpenUpdater,
+            style: FilledButton.styleFrom(
+              backgroundColor: AppTheme.info,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Update'),
+          ),
+        ],
+      ),
+    );
   }
 }
 

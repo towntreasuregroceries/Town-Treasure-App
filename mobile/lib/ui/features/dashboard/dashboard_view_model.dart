@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
@@ -7,9 +9,11 @@ import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/staging_repository.dart';
 import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/local_storage_service.dart';
+import '../../../data/services/remote_update_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
 import '../../core/user_friendly_error.dart';
+import 'background_update_worker.dart';
 import 'excel_exporter.dart';
 import 'overdue_notification_service.dart';
 
@@ -47,6 +51,9 @@ class DashboardViewModel extends ChangeNotifier {
     required StagingRepository stagingRepository,
     LocalStorageService? localStorage,
     OverdueNotificationGateway? notificationGateway,
+    SmartNotificationGateway? smartNotificationGateway,
+    this._updateService,
+    this._updateManifestUrl = ttgDefaultManifestUrl,
     ExcelExporter? excelExporter,
     DateTime Function()? clock,
   })  : _vault = vaultRepository,
@@ -55,6 +62,7 @@ class DashboardViewModel extends ChangeNotifier {
         _storage = localStorage,
         _notifications =
             notificationGateway ?? FlutterLocalOverdueNotificationGateway(),
+        _explicitSmartNotifications = smartNotificationGateway,
         _excelExporter = excelExporter ?? ExcelExporter(),
         _clock = clock ?? DateTime.now {
     _vault.addListener(_onDependencyChanged);
@@ -64,20 +72,37 @@ class DashboardViewModel extends ChangeNotifier {
 
   static const String keyOverdueNotifications = 'ttg_overdue_notifications';
   static const String keyLastPendingNotificationAt = 'ttg_last_pending_notif_at';
+  static const String keyLastUpdateCheckAt = 'ttg_last_update_check_at';
+  static const String keyLastNotifiedClerkSig = 'ttg_last_notified_clerk_sig';
+  static const String keyLastNotifiedPayrollMonth = 'ttg_last_notified_payroll_month';
+  static const String keyLastNotifiedRecurringMonth = 'ttg_last_notified_recurring_month';
+  static const String keyLastNotifiedStatementMonth = 'ttg_last_notified_statement_month';
   static const Duration pendingNotificationCooldown = Duration(hours: 24);
+  static const Duration silentUpdateCheckInterval = Duration(hours: 12);
 
   final VaultRepository _vault;
   final AuthRepository _auth;
   final StagingRepository _staging;
   final LocalStorageService? _storage;
   final OverdueNotificationGateway _notifications;
+  final SmartNotificationGateway? _explicitSmartNotifications;
+  final RemoteUpdateService? _updateService;
+  final String _updateManifestUrl;
   final ExcelExporter _excelExporter;
   final DateTime Function() _clock;
+
+  SmartNotificationGateway? get _smartNotifications {
+    if (_explicitSmartNotifications != null) return _explicitSmartNotifications;
+    final n = _notifications;
+    return n is SmartNotificationGateway ? n as SmartNotificationGateway : null;
+  }
 
   bool _isLoading = false;
   bool _isSyncing = false;
   bool _isExporting = false;
   bool _overdueNotificationsEnabled = false;
+  NotificationPreferences _notificationPrefs = const NotificationPreferences();
+  UpdateCheckResult? _availableUpdate;
   bool _biometricEnabled = false;
   bool _canUseBiometrics = false;
   String? _userEmail;
@@ -88,6 +113,9 @@ class DashboardViewModel extends ChangeNotifier {
   bool get isSyncing => _isSyncing || _vault.isSyncing;
   bool get isExporting => _isExporting;
   bool get overdueNotificationsEnabled => _overdueNotificationsEnabled;
+  NotificationPreferences get notificationPrefs => _notificationPrefs;
+  UpdateCheckResult? get availableUpdate => _availableUpdate;
+  bool get hasUpdateAvailable => _availableUpdate?.updateAvailable == true;
   bool get biometricEnabled => _biometricEnabled;
   bool get canUseBiometrics => _canUseBiometrics;
   String? get userEmail => _userEmail;
@@ -95,6 +123,165 @@ class DashboardViewModel extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   int get pendingClerkCount => _staging.pendingCount;
   VaultSettings get vaultSettings => _vault.settings;
+
+  /// Actionable feed of live business, sync, and update alerts for the
+  /// Smart Notification Center.
+  List<NotificationAlertItem> get activeAlerts {
+    final alerts = <NotificationAlertItem>[];
+    final now = _clock();
+    final thisMonth = DateFormat('yyyy-MM').format(now);
+    final update = _availableUpdate;
+
+    if (update != null && update.updateAvailable && update.manifest != null) {
+      alerts.add(
+        NotificationAlertItem(
+          category: NotificationCategory.appUpdates,
+          title: 'App Update v${update.manifest!.version} Available',
+          body: update.manifest!.releaseNotes.trim().isNotEmpty
+              ? update.manifest!.releaseNotes.trim()
+              : 'Tap Update to download and install the verified release.',
+          severity: NotificationSeverity.info,
+          actionLabel: 'Update',
+        ),
+      );
+    }
+
+    if (pendingClerkCount > 0) {
+      alerts.add(
+        NotificationAlertItem(
+          category: NotificationCategory.clerkSubmissions,
+          title:
+              '$pendingClerkCount Clerk Docket${pendingClerkCount == 1 ? '' : 's'} Pending Review',
+          body: 'Submitted delivery dockets are waiting in your Clerks Inbox.',
+          severity: NotificationSeverity.warning,
+          actionLabel: 'Review',
+        ),
+      );
+    }
+
+    final nonDrafts = _vault.invoices.where((i) => !i.isDraft).toList();
+    final overdueInvoices = nonDrafts.where((i) {
+      if (i.status == 'paid') return false;
+      if (i.status == 'overdue') return true;
+      final due = AppHelpers.parseAppDate(i.dueDate);
+      if (due != null && due.isBefore(now)) return true;
+      final invDate = AppHelpers.parseAppDate(i.date);
+      return invDate != null && now.difference(invDate).inDays > 30;
+    }).toList();
+
+    if (overdueInvoices.isNotEmpty) {
+      final overdueAmt =
+          overdueInvoices.fold<double>(0, (s, i) => s + i.totalSell);
+      alerts.add(
+        NotificationAlertItem(
+          category: NotificationCategory.overdueInvoices,
+          title:
+              '${overdueInvoices.length} Overdue Invoice${overdueInvoices.length == 1 ? '' : 's'}',
+          body:
+              'KES ${formatMoney(overdueAmt)} overdue (>30 days or past due date).',
+          severity: NotificationSeverity.urgent,
+          actionLabel: 'View',
+        ),
+      );
+    } else if (metrics.pendingBillsCount > 0) {
+      alerts.add(
+        NotificationAlertItem(
+          category: NotificationCategory.overdueInvoices,
+          title: '${metrics.pendingBillsCount} Pending Bills Awaiting Settlement',
+          body:
+              'Total unsettled amount: KES ${formatMoney(metrics.pendingBillsAmount)}.',
+          severity: NotificationSeverity.info,
+          actionLabel: 'View',
+        ),
+      );
+    }
+
+    final unpaidSalaries = _dueUnpaidStaff(now, thisMonth);
+    if (unpaidSalaries.isNotEmpty) {
+      final totalSal = unpaidSalaries.fold<double>(0, (s, x) => s + x.salary);
+      alerts.add(
+        NotificationAlertItem(
+          category: NotificationCategory.payrollDue,
+          title:
+              '${unpaidSalaries.length} Staff Salar${unpaidSalaries.length == 1 ? 'y' : 'ies'} Due',
+          body:
+              '${unpaidSalaries.map((s) => s.name).join(', ')} - KES ${formatMoney(totalSal)} due this month.',
+          severity: NotificationSeverity.urgent,
+          actionLabel: 'Payroll',
+        ),
+      );
+    }
+
+    final recurringDue = _dueRecurringExpenses(now, thisMonth);
+    if (recurringDue.isNotEmpty) {
+      final totalRec = recurringDue.fold<double>(0, (s, r) => s + r.amount);
+      alerts.add(
+        NotificationAlertItem(
+          category: NotificationCategory.recurringBills,
+          title:
+              '${recurringDue.length} Recurring Bill${recurringDue.length == 1 ? '' : 's'} Due',
+          body:
+              '${recurringDue.map((r) => r.desc).join(', ')} (KES ${formatMoney(totalRec)}).',
+          severity: NotificationSeverity.warning,
+          actionLabel: 'Pay',
+        ),
+      );
+    }
+
+    if (_vault.lastSyncError != null && _vault.lastSyncError!.trim().isNotEmpty) {
+      alerts.add(
+        NotificationAlertItem(
+          category: NotificationCategory.syncHealth,
+          title: 'Cloud Sync Needs Retry',
+          body: UserFriendlyError.format(
+            _vault.lastSyncError!,
+            fallback: 'Local edits are safe and waiting for internet sync.',
+          ),
+          severity: NotificationSeverity.warning,
+          actionLabel: 'Sync',
+        ),
+      );
+    }
+
+    if (now.day <= 5 && nonDrafts.isNotEmpty) {
+      alerts.add(
+        const NotificationAlertItem(
+          category: NotificationCategory.monthlyStatements,
+          title: 'Monthly Client Statements Ready',
+          body: 'Generate and share last month PDF statements with clients.',
+          severity: NotificationSeverity.info,
+          actionLabel: 'Statements',
+        ),
+      );
+    }
+
+    return alerts;
+  }
+
+  List<Staff> _dueUnpaidStaff(DateTime now, String monthKey) {
+    return _vault.staff.where((s) {
+      if (s.status != 'active') return false;
+      final paid = _vault.salaryPayments
+          .any((p) => p.staffId == s.id && p.month == monthKey);
+      if (paid) return false;
+      final payDay = int.tryParse(s.payDay) ?? 5;
+      return now.day >= payDay;
+    }).toList();
+  }
+
+  List<RecurringExpense> _dueRecurringExpenses(DateTime now, String monthKey) {
+    return _vault.recurringExpenses.where((r) {
+      final paid = _vault.expenses.any(
+        (e) =>
+            e.category == r.category &&
+            e.desc == r.desc &&
+            e.date.startsWith(monthKey),
+      );
+      if (paid) return false;
+      final dueDay = int.tryParse(r.dueDay) ?? 1;
+      return now.day >= dueDay;
+    }).toList();
+  }
 
   String get userInitials {
     final email = (_userEmail ?? '').trim();
@@ -178,10 +365,7 @@ class DashboardViewModel extends ChangeNotifier {
     _canUseBiometrics = await _auth.canUseBiometrics();
     _biometricEnabled = await _auth.isBiometricEnabled();
 
-    if (_storage != null) {
-      final rawToggle = await _storage.getRaw(keyOverdueNotifications);
-      _overdueNotificationsEnabled = rawToggle == 'true';
-    }
+    await _loadNotificationPrefs();
 
     if (syncRemote) {
       await _vault.loadFromSupabase();
@@ -189,9 +373,187 @@ class DashboardViewModel extends ChangeNotifier {
     await _staging.getPendingSubmissions();
 
     await _maybeNotifyPendingBills();
+    await _dispatchSmartNotifications();
+
+    if (_updateService != null && _notificationPrefs.appUpdatesEnabled) {
+      // Non-blocking silent check so slow networks never delay Dashboard.
+      unawaited(runSilentUpdateCheck());
+    }
 
     _isLoading = false;
     notifyListeners();
+  }
+
+  Future<void> _loadNotificationPrefs() async {
+    if (_storage == null) return;
+    final rawToggle = await _storage.getRaw(keyOverdueNotifications);
+    final legacyEnabled = rawToggle == 'true';
+    final rawPrefs = await _storage.getRaw(ttgKeyNotifPrefs);
+    if (rawPrefs != null && rawPrefs.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawPrefs);
+        if (decoded is Map) {
+          _notificationPrefs = NotificationPreferences.fromJson(
+            Map<String, dynamic>.from(decoded),
+            legacyOverdueEnabled: legacyEnabled,
+          );
+          _overdueNotificationsEnabled =
+              _notificationPrefs.overdueAlertsEnabled;
+          return;
+        }
+      } catch (_) {}
+    }
+    _overdueNotificationsEnabled = legacyEnabled;
+    _notificationPrefs = NotificationPreferences(
+      overdueAlertsEnabled: legacyEnabled,
+    );
+  }
+
+  Future<void> updateNotificationPrefs(NotificationPreferences next) async {
+    _notificationPrefs = next;
+    _overdueNotificationsEnabled = next.overdueAlertsEnabled;
+    await _storage?.setJson(ttgKeyNotifPrefs, next.toJson());
+    await _storage?.setRaw(
+      keyOverdueNotifications,
+      next.overdueAlertsEnabled ? 'true' : 'false',
+    );
+    if (next.appUpdatesEnabled ||
+        next.clerkAlertsEnabled ||
+        next.overdueAlertsEnabled ||
+        next.payrollAndBillsEnabled ||
+        next.statementAlertsEnabled) {
+      await _notifications.initializeAndRequestPermission();
+    }
+    notifyListeners();
+  }
+
+  /// Checks `app-update.json` silently without disrupting UI on errors.
+  Future<void> runSilentUpdateCheck({bool force = false}) async {
+    final updater = _updateService;
+    if (updater == null || !_notificationPrefs.appUpdatesEnabled) return;
+    if (_updateManifestUrl.trim().isEmpty) return;
+
+    final now = _clock();
+    if (!force && _storage != null) {
+      final rawLast = await _storage.getRaw(keyLastUpdateCheckAt);
+      final lastAt = DateTime.tryParse(rawLast ?? '');
+      if (lastAt != null) {
+        final elapsed = now.difference(lastAt);
+        if (!elapsed.isNegative && elapsed < silentUpdateCheckInterval) {
+          return;
+        }
+      }
+    }
+
+    try {
+      final result = await updater
+          .checkForUpdate(_updateManifestUrl)
+          .timeout(const Duration(seconds: 6));
+      await _storage?.setRaw(
+        keyLastUpdateCheckAt,
+        now.toUtc().toIso8601String(),
+      );
+      _availableUpdate = result;
+
+      final manifest = result.manifest;
+      if (result.updateAvailable && manifest != null) {
+        final rawLastBuild =
+            await _storage?.getRaw(ttgKeyLastNotifiedUpdateBuild);
+        final lastBuild = int.tryParse(rawLastBuild ?? '') ?? 0;
+        if (manifest.buildNumber > lastBuild) {
+          await _smartNotifications?.showCategoryNotification(
+            category: NotificationCategory.appUpdates,
+            title: 'App Update Available (v${manifest.version})',
+            body:
+                'Tap to download and install the latest Town Treasure Groceries release.',
+          );
+          await _storage?.setRaw(
+            ttgKeyLastNotifiedUpdateBuild,
+            manifest.buildNumber.toString(),
+          );
+        }
+      }
+      notifyListeners();
+    } catch (_) {
+      // Silent update checks never surface offline errors to the user.
+    }
+  }
+
+  Future<void> _dispatchSmartNotifications() async {
+    final smart = _smartNotifications;
+    if (smart == null) return;
+    final now = _clock();
+    final monthKey = DateFormat('yyyy-MM').format(now);
+
+    if (_notificationPrefs.clerkAlertsEnabled && pendingClerkCount > 0) {
+      final pendingIds = _staging.cachedSubmissions
+          .where((d) => d.status == 'pending')
+          .map((d) => d.id)
+          .toList()
+        ..sort();
+      final sig = pendingIds.join(',');
+      final lastSig = await _storage?.getRaw(keyLastNotifiedClerkSig) ?? '';
+      if (sig.isNotEmpty && sig != lastSig) {
+        await smart.showCategoryNotification(
+          category: NotificationCategory.clerkSubmissions,
+          title: 'New Clerk Docket${pendingClerkCount == 1 ? '' : 's'} Received',
+          body:
+              '$pendingClerkCount field docket${pendingClerkCount == 1 ? ' is' : 's are'} waiting for your approval.',
+        );
+        await _storage?.setRaw(keyLastNotifiedClerkSig, sig);
+      }
+    }
+
+    if (_notificationPrefs.payrollAndBillsEnabled) {
+      final unpaidStaff = _dueUnpaidStaff(now, monthKey);
+      if (unpaidStaff.isNotEmpty) {
+        final lastMonth =
+            await _storage?.getRaw(keyLastNotifiedPayrollMonth) ?? '';
+        if (lastMonth != monthKey) {
+          final totalSal =
+              unpaidStaff.fold<double>(0, (s, x) => s + x.salary);
+          await smart.showCategoryNotification(
+            category: NotificationCategory.payrollDue,
+            title: 'Staff Salaries Due ($monthKey)',
+            body:
+                '${unpaidStaff.length} staff salar${unpaidStaff.length == 1 ? 'y' : 'ies'} totaling KES ${formatMoney(totalSal)} due.',
+          );
+          await _storage?.setRaw(keyLastNotifiedPayrollMonth, monthKey);
+        }
+      }
+
+      final recurringDue = _dueRecurringExpenses(now, monthKey);
+      if (recurringDue.isNotEmpty) {
+        final lastMonth =
+            await _storage?.getRaw(keyLastNotifiedRecurringMonth) ?? '';
+        if (lastMonth != monthKey) {
+          final totalRec =
+              recurringDue.fold<double>(0, (s, r) => s + r.amount);
+          await smart.showCategoryNotification(
+            category: NotificationCategory.recurringBills,
+            title: 'Recurring Bills Due',
+            body:
+                '${recurringDue.length} recurring bill${recurringDue.length == 1 ? '' : 's'} (KES ${formatMoney(totalRec)}) due this month.',
+          );
+          await _storage?.setRaw(keyLastNotifiedRecurringMonth, monthKey);
+        }
+      }
+    }
+
+    if (_notificationPrefs.statementAlertsEnabled &&
+        now.day <= 5 &&
+        _vault.invoices.any((i) => !i.isDraft)) {
+      final lastStmtMonth =
+          await _storage?.getRaw(keyLastNotifiedStatementMonth) ?? '';
+      if (lastStmtMonth != monthKey) {
+        await smart.showCategoryNotification(
+          category: NotificationCategory.monthlyStatements,
+          title: 'Monthly Statements Ready to Send',
+          body: 'Send monthly account statements to hotel and restaurant clients.',
+        );
+        await _storage?.setRaw(keyLastNotifiedStatementMonth, monthKey);
+      }
+    }
   }
 
   Future<void> _maybeNotifyPendingBills({bool force = false}) async {
@@ -234,6 +596,10 @@ class DashboardViewModel extends ChangeNotifier {
     await _staging.getPendingSubmissions();
 
     await _maybeNotifyPendingBills();
+    await _dispatchSmartNotifications();
+    if (_notificationPrefs.appUpdatesEnabled) {
+      unawaited(runSilentUpdateCheck());
+    }
 
     _isSyncing = false;
     _statusMessage = synced
@@ -253,6 +619,10 @@ class DashboardViewModel extends ChangeNotifier {
 
     if (!enabled) {
       _overdueNotificationsEnabled = false;
+      _notificationPrefs = _notificationPrefs.copyWith(
+        overdueAlertsEnabled: false,
+      );
+      await _storage?.setJson(ttgKeyNotifPrefs, _notificationPrefs.toJson());
       await _storage?.setRaw(keyOverdueNotifications, 'false');
       await _storage?.setRaw(keyLastPendingNotificationAt, '');
       await _notifications.cancelAll();
@@ -264,6 +634,10 @@ class DashboardViewModel extends ChangeNotifier {
     final granted = await _notifications.initializeAndRequestPermission();
     if (!granted) {
       _overdueNotificationsEnabled = false;
+      _notificationPrefs = _notificationPrefs.copyWith(
+        overdueAlertsEnabled: false,
+      );
+      await _storage?.setJson(ttgKeyNotifPrefs, _notificationPrefs.toJson());
       await _storage?.setRaw(keyOverdueNotifications, 'false');
       _errorMessage = 'Notification permission was denied.';
       notifyListeners();
@@ -271,6 +645,10 @@ class DashboardViewModel extends ChangeNotifier {
     }
 
     _overdueNotificationsEnabled = true;
+    _notificationPrefs = _notificationPrefs.copyWith(
+      overdueAlertsEnabled: true,
+    );
+    await _storage?.setJson(ttgKeyNotifPrefs, _notificationPrefs.toJson());
     await _storage?.setRaw(keyOverdueNotifications, 'true');
 
     final m = metrics;

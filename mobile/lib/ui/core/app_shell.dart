@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -14,6 +16,7 @@ import '../features/clerk/clerk_submissions_screen.dart';
 import '../features/clerk/clerk_view_model.dart';
 import '../features/dashboard/dashboard_screen.dart';
 import '../features/dashboard/dashboard_view_model.dart';
+import '../features/dashboard/overdue_notification_service.dart';
 import '../features/dashboard/signature_scanner_sheet.dart';
 import '../features/dashboard/update_checker_sheet.dart';
 import '../features/expenses/expenses_hub_screen.dart';
@@ -78,6 +81,7 @@ class _AppShellState extends State<AppShell> {
   // Stack indices: 0 = Dashboard, 1 = Invoices, 2 = Clerks, 3 = More.
   late int _tabIndex;
   bool _vmsInitialized = false;
+  StreamSubscription<String?>? _notifTapSub;
 
   DashboardViewModel? _ownedDashboardVm;
   ClerkViewModel? _ownedClerkVm;
@@ -105,6 +109,25 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     _tabIndex = widget.initialTabIndex.clamp(0, 3);
+    _notifTapSub = FlutterLocalOverdueNotificationGateway.onNotificationTap
+        .listen(_handleNotificationTapPayload);
+  }
+
+  void _handleNotificationTapPayload(String? payload) {
+    if (!mounted || payload == null || payload.isEmpty) return;
+    if (payload == NotificationCategory.appUpdates.name) {
+      _openUpdateChecker();
+    } else if (payload == NotificationCategory.clerkSubmissions.name) {
+      _selectTab(2);
+    } else if (payload == NotificationCategory.overdueInvoices.name) {
+      _selectTab(1);
+    } else if (payload == NotificationCategory.payrollDue.name) {
+      _openExpensesHub(initialTabIndex: 1);
+    } else if (payload == NotificationCategory.recurringBills.name) {
+      _openExpensesHub(initialTabIndex: 2);
+    } else if (payload == NotificationCategory.monthlyStatements.name) {
+      _openStatements();
+    }
   }
 
   @override
@@ -122,11 +145,19 @@ class _AppShellState extends State<AppShell> {
     final duplicateDetector = context.read<DuplicateDetectorService>();
 
     if (widget.dashboardViewModel == null) {
+      RemoteUpdateService? updateService;
+      try {
+        updateService = context.read<RemoteUpdateService>();
+      } catch (_) {
+        updateService = null;
+      }
       _ownedDashboardVm = DashboardViewModel(
         vaultRepository: vault,
         authRepository: auth,
         stagingRepository: staging,
         localStorage: storage,
+        updateService: updateService,
+        updateManifestUrl: widget.updateManifestUrl,
       );
     }
     if (widget.clerkViewModel == null) {
@@ -158,6 +189,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    _notifTapSub?.cancel();
     _ownedDashboardVm?.dispose();
     _ownedClerkVm?.dispose();
     _ownedInvoicesVm?.dispose();
@@ -319,10 +351,13 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Future<void> _openExpensesHub() async {
+  Future<void> _openExpensesHub({int initialTabIndex = 0}) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => ExpensesHubScreen(viewModel: _expensesVm),
+        builder: (_) => ExpensesHubScreen(
+          viewModel: _expensesVm,
+          initialTabIndex: initialTabIndex,
+        ),
       ),
     );
   }
@@ -612,6 +647,10 @@ class _AppShellState extends State<AppShell> {
                   autoInitialize: widget.autoInitializeDashboard,
                   signatureImagePicker: widget.signatureImagePicker,
                   onOpenClerkInbox: () => _selectTab(2),
+                  onOpenInvoicesTab: () => _selectTab(1),
+                  onOpenExpensesHub: (tabIndex) =>
+                      _openExpensesHub(initialTabIndex: tabIndex),
+                  onOpenStatements: _openStatements,
                   onOpenInvoice: (inv) => _openInvoiceDetailById(inv.id),
                   onCreateInvoice: () => _openInvoiceEditor(),
                   onSignedOut: widget.onSignedOut,

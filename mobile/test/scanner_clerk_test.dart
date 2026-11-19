@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -61,6 +63,61 @@ class _FakeTextRecognizer implements OcrTextRecognizerGateway {
 
   @override
   Future<void> close() async {}
+}
+
+class _FakePaddleOcrGateway implements PaddleOcrGateway {
+  _FakePaddleOcrGateway(this.boxes);
+  final List<OcrTextBox> boxes;
+
+  @override
+  Future<List<OcrTextBox>> recognizeBoxesFromFile(String filePath) async => boxes;
+
+  @override
+  Future<void> close() async {}
+}
+
+class _FakeSpatialTextRecognizer
+    implements OcrTextRecognizerGateway, OcrSpatialRecognizerGateway {
+  _FakeSpatialTextRecognizer(this.boxes);
+  final List<OcrTextBox> boxes;
+
+  @override
+  Future<List<OcrTextBox>> recognizeBoxesFromFile(String filePath) async => boxes;
+
+  @override
+  Future<String> recognizeTextFromFile(String filePath) async => '';
+
+  @override
+  Future<void> close() async {}
+}
+
+OcrTextBox _skewedBox(
+  String text,
+  double x,
+  double y,
+  double w,
+  double h, {
+  double angleDeg = -11.3,
+  double confidence = 0.98,
+}) {
+  final rad = angleDeg * math.pi / 180.0;
+  final dx = x - 450.0;
+  final dy = y - 600.0;
+  final cx = 450.0 + dx * math.cos(rad) - dy * math.sin(rad);
+  final cy = 600.0 + dx * math.sin(rad) + dy * math.cos(rad);
+  return OcrTextBox(
+    text: text,
+    confidence: confidence,
+    centerX: cx,
+    centerY: cy,
+    width: w,
+    height: h,
+    angle: angleDeg,
+    left: cx - w / 2,
+    top: cy - h / 2,
+    right: cx + w / 2,
+    bottom: cy + h / 2,
+  );
 }
 
 class _FakeImagePicker implements ImagePickerGateway {
@@ -855,6 +912,148 @@ void main() {
 
       await storage.close();
       vault.dispose();
+    });
+
+    test(
+        'Offline PaddleOCR PP-OCRv5 + SpatialOcrParser reconstructs -11.3deg skewed handwritten docket and fails fast when offline',
+        () async {
+      var httpCalls = 0;
+      final offlineHttp = MockClient((request) async {
+        httpCalls++;
+        throw const SocketException('Network unreachable');
+      });
+
+      // Simulated -11.3deg rotated boxes matching offline PP-OCRv5 ONNX detections
+      // on test_samples/skewed_handwritten_docket.jpg (including border-digit '115' & 'baqs').
+      final rotatedBoxes = <OcrTextBox>[
+        _skewedBox('TOWN TRFASURE GROCERIES', 450, 120, 420, 34, confidence: 0.95),
+        _skewedBox('DELIVERY DOCKET # TTG-409', 440, 180, 380, 30, confidence: 0.99),
+        _skewedBox('Client: Kempinski Hotel', 260, 250, 310, 28, confidence: 0.99),
+        _skewedBox('Date: 19/11/2026.', 690, 250, 220, 28, confidence: 0.95),
+        _skewedBox('ITEM DESCRIPTION', 200, 340, 220, 24, confidence: 1.00),
+        _skewedBox('QTY', 450, 340, 90, 24, confidence: 1.00),
+        _skewedBox('UNIT PRICE', 600, 340, 140, 24, confidence: 0.99),
+        _skewedBox('TOTAL', 760, 340, 110, 24, confidence: 1.00),
+        _skewedBox('Roma Tomatoes', 200, 410, 210, 26, confidence: 0.97),
+        _skewedBox('4 crates', 450, 410, 110, 26, confidence: 0.98),
+        _skewedBox('3200', 600, 410, 90, 26, confidence: 1.00),
+        _skewedBox('12800', 760, 410, 100, 26, confidence: 0.99),
+        _skewedBox('Red Onions', 200, 480, 180, 26, confidence: 0.99),
+        _skewedBox('3 baqs', 450, 480, 100, 26, confidence: 0.95),
+        _skewedBox('4500', 600, 480, 90, 26, confidence: 1.00),
+        _skewedBox('13500', 760, 480, 100, 26, confidence: 0.99),
+        _skewedBox('Shangi Potatoes', 200, 550, 220, 26, confidence: 0.98),
+        _skewedBox('2 bags', 450, 550, 100, 26, confidence: 0.87),
+        _skewedBox('3800', 600, 550, 90, 26, confidence: 1.00),
+        _skewedBox('7600', 760, 550, 95, 26, confidence: 1.00),
+        _skewedBox('Dhania', 200, 620, 130, 26, confidence: 1.00),
+        _skewedBox('115 bunches', 450, 620, 140, 26, confidence: 0.96),
+        _skewedBox('40', 600, 620, 60, 26, confidence: 1.00),
+        _skewedBox('600', 760, 620, 75, 26, confidence: 1.00),
+        _skewedBox('Sweet Capsicum', 200, 690, 220, 26, confidence: 0.98),
+        _skewedBox('10 kgs', 450, 690, 100, 26, confidence: 0.93),
+        _skewedBox('180', 600, 690, 75, 26, confidence: 0.99),
+        _skewedBox('1800', 760, 690, 95, 26, confidence: 0.97),
+        _skewedBox('Delivery:', 600, 780, 120, 26, confidence: 1.00),
+        _skewedBox('500', 760, 780, 75, 26, confidence: 0.98),
+        _skewedBox('Grand Total: KES 36.800', 620, 850, 310, 30, confidence: 0.95),
+      ];
+
+      final service = OcrConsensusService(
+        httpClient: offlineHttp,
+        geminiApiKey: 'fake-key-offline-test',
+        paddleOcr: _FakePaddleOcrGateway(rotatedBoxes),
+        textRecognizer: _FakeTextRecognizer([]),
+      );
+
+      final result = await service.processDocket([
+        OcrImagePage(
+          dataUrl: 'data:image/jpeg;base64,${base64Encode([1, 2, 3, 4])}',
+          filePath: 'skewed_handwritten_docket.jpg',
+          bytes: Uint8List.fromList([1, 2, 3, 4]),
+        ),
+      ]);
+
+      // Fails fast after 1st SocketException instead of blocking through all models.
+      expect(httpCalls, 1);
+      expect(result.enginesUsed, contains('PaddleOCR PP-OCRv5 ONNX (Offline)'));
+      expect(result.restaurantName, 'Kempinski Hotel');
+      expect(result.invoiceNumber, 'TTG-409');
+      expect(result.date, '2026-11-19');
+      expect(result.items.length, 5);
+
+      final roma = result.items[0];
+      expect(roma.desc, 'Roma Tomatoes');
+      expect(roma.qty, 4);
+      expect(roma.unit, 'crates');
+      expect(roma.sellPrice, 3200);
+      expect(roma.total, 12800);
+
+      final redOnions = result.items[1];
+      expect(redOnions.desc, 'Red Onions');
+      expect(redOnions.qty, 3);
+      expect(redOnions.unit, 'bags');
+      expect(redOnions.sellPrice, 4500);
+      expect(redOnions.total, 13500);
+
+      final potatoes = result.items[2];
+      expect(potatoes.qty, 2);
+      expect(potatoes.unit, 'bags');
+
+      final dhania = result.items[3];
+      expect(dhania.desc, 'Dhania');
+      expect(dhania.qty, 15);
+      expect(dhania.unit, 'bunches');
+      expect(dhania.sellPrice, 40);
+      expect(dhania.total, 600);
+
+      final capsicum = result.items[4];
+      expect(capsicum.qty, 10);
+      expect(capsicum.unit, 'kgs');
+
+      expect(result.deliveryCost, 500);
+      expect(result.grandTotal, 36800);
+      service.dispose();
+    });
+
+    test(
+        'Tier 3 ML Kit 2D Spatial redundancy activates when PaddleOCR returns empty boxes',
+        () async {
+      final mlKitBoxes = <OcrTextBox>[
+        _skewedBox('Client: Sankara Suites', 240, 180, 260, 26, angleDeg: 0),
+        _skewedBox('Date: 18/10/2026', 640, 180, 200, 26, angleDeg: 0),
+        _skewedBox('Baby Spinach', 180, 300, 180, 24, angleDeg: 0),
+        _skewedBox('12 kgs', 420, 300, 90, 24, angleDeg: 0),
+        _skewedBox('90', 580, 300, 60, 24, angleDeg: 0),
+        _skewedBox('1080', 740, 300, 90, 24, angleDeg: 0),
+      ];
+
+      final service = OcrConsensusService(
+        geminiApiKey: '',
+        paddleOcr: _FakePaddleOcrGateway(const []),
+        textRecognizer: _FakeSpatialTextRecognizer(mlKitBoxes),
+      );
+
+      final result = await service.processDocket([
+        OcrImagePage(
+          dataUrl: 'data:image/jpeg;base64,${base64Encode([1, 2, 3])}',
+          filePath: 'docket_sankara_suites.jpg',
+          bytes: Uint8List.fromList([1, 2, 3]),
+        ),
+      ]);
+
+      expect(
+        result.enginesUsed,
+        contains('Google ML Kit On-Device'),
+      );
+      expect(result.restaurantName, 'Sankara Suites');
+      expect(result.date, '2026-10-18');
+      expect(result.items.length, 1);
+      expect(result.items.first.desc, 'Baby Spinach');
+      expect(result.items.first.qty, 12);
+      expect(result.items.first.sellPrice, 90);
+      expect(result.items.first.total, 1080);
+      service.dispose();
     });
   });
 }

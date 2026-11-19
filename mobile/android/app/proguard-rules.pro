@@ -7,6 +7,10 @@
 -keep class com.google_mlkit_text_recognition.** { *; }
 -keepclassmembers class com.google.mlkit.** { *; }
 
+# Keep ONNX Runtime JNI and PaddleOCR channel classes intact under R8
+-keep class ai.onnxruntime.** { *; }
+-keep class com.towntreasuregroceries.town_treasure_groceries.** { *; }
+
 # Suppress R8 missing-class warnings for unused optional non-Latin ML Kit script modules
 -dontwarn com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 -dontwarn com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions$Builder
