@@ -1,8 +1,5 @@
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
-
 import '../../domain/models/models.dart';
 
 /// A localized OCR text box in original image coordinates with deskew metadata.
@@ -53,46 +50,6 @@ class OcrTextBox {
       right: numVal('right'),
       bottom: numVal('bottom'),
     );
-  }
-}
-
-/// Platform interface for bundled offline PaddleOCR PP-OCRv5 ONNX inference.
-abstract class PaddleOcrGateway {
-  Future<List<OcrTextBox>> recognizeBoxesFromFile(String filePath);
-  Future<void> close();
-}
-
-/// Live Android MethodChannel implementation backed by `PaddleOcrPlugin.kt`.
-class MethodChannelPaddleOcrGateway implements PaddleOcrGateway {
-  MethodChannelPaddleOcrGateway([MethodChannel? channel])
-      : _channel = channel ?? const MethodChannel(_channelName);
-
-  static const String _channelName = 'com.towntreasuregroceries/paddle_ocr';
-  final MethodChannel _channel;
-
-  @override
-  Future<List<OcrTextBox>> recognizeBoxesFromFile(String filePath) async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      return const [];
-    }
-    final result = await _channel.invokeListMethod<dynamic>(
-      'recognizeFile',
-      {'filePath': filePath},
-    );
-    if (result == null) return const [];
-    return result
-        .whereType<Map>()
-        .map((m) => OcrTextBox.fromMap(m.cast<Object?, Object?>()))
-        .where((b) => b.text.isNotEmpty)
-        .toList();
-  }
-
-  @override
-  Future<void> close() async {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
-    try {
-      await _channel.invokeMethod<void>('dispose');
-    } catch (_) {}
   }
 }
 

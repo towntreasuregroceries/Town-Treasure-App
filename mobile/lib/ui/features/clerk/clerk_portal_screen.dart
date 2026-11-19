@@ -649,21 +649,38 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
     }
   }
 
-  void _resetForm({bool clearEditingOnly = false}) {
+  void _resetForm({
+    bool clearEditingOnly = false,
+    bool clearRestaurant = false,
+  }) {
     _editingDocketId = null;
     _editingRejectionReason = null;
     if (!clearEditingOnly) {
       _photoPages.clear();
+      _ocrStatus = '';
+      if (clearRestaurant) {
+        _selectedRestaurant = '';
+        _customRestController.clear();
+      }
       _deliveryController.clear();
       _otherController.clear();
       _notesController.clear();
-      for (final r in _rows) {
-        r.dispose();
-      }
-      _rows.clear();
-      _addLineRow();
+      _clearItemRows(notify: false);
+      _scheduleLiveDuplicateCheck();
     }
     setState(() {});
+  }
+
+  void _clearItemRows({bool notify = true}) {
+    for (final r in _rows) {
+      r.dispose();
+    }
+    _rows.clear();
+    _addLineRow();
+    if (notify) {
+      _scheduleLiveDuplicateCheck();
+      setState(() {});
+    }
   }
 
   Future<void> _pickDate() async {
@@ -839,20 +856,37 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Row(
+                  Row(
                     children: [
-                      Icon(
+                      const Icon(
                         Icons.assignment_outlined,
                         color: AppTheme.forestGreen,
                       ),
-                      SizedBox(width: 8),
-                      Text(
-                        'Delivery Docket Intake',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.slateInk,
+                      const SizedBox(width: 8),
+                      const Expanded(
+                        child: Text(
+                          'Delivery Docket Intake',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.slateInk,
+                          ),
                         ),
+                      ),
+                      TextButton.icon(
+                        key: const Key('btn_clerk_clear_form'),
+                        onPressed: _isSubmitting || _isRunningOcr
+                            ? null
+                            : () => _resetForm(
+                                  clearEditingOnly: false,
+                                  clearRestaurant: true,
+                                ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTheme.danger,
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        icon: const Icon(Icons.clear_all, size: 17),
+                        label: const Text('Clear All'),
                       ),
                     ],
                   ),
@@ -1135,17 +1169,30 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
 
                   const SizedBox(height: 14),
 
-                  // Line Items header + Compact/Cards density toggle
+                  // Line Items header + Clear List + Compact/Cards density toggle
                   Row(
                     children: [
-                      Text(
-                        'Produce Items (${_rows.length})',
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.slateInk,
+                      Expanded(
+                        child: Text(
+                          'Produce Items (${_rows.length})',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.slateInk,
+                          ),
                         ),
                       ),
-                      const Spacer(),
+                      TextButton.icon(
+                        key: const Key('btn_clerk_clear_items'),
+                        onPressed: _clearItemRows,
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTheme.danger,
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                        ),
+                        icon: const Icon(Icons.cleaning_services_outlined, size: 16),
+                        label: const Text('Clear List'),
+                      ),
+                      const SizedBox(width: 4),
                       SegmentedButton<bool>(
                         style: SegmentedButton.styleFrom(
                           visualDensity: VisualDensity.compact,
@@ -1537,25 +1584,28 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Subtotal: KES ${_moneyFmt.format(subtotal)}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.slateMuted,
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Subtotal: KES ${_moneyFmt.format(subtotal)}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.slateMuted,
+                                ),
                               ),
-                            ),
-                            Text(
-                              'Delivery & Other: KES ${_moneyFmt.format(del + oth)}',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppTheme.slateMuted,
+                              Text(
+                                'Delivery & Other: KES ${_moneyFmt.format(del + oth)}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.slateMuted,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
+                        const SizedBox(width: 8),
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [

@@ -26,19 +26,12 @@ class MainActivity : FlutterFragmentActivity() {
         private const val MAX_PAGE_WIDTH = 2000
     }
 
-    private var paddleOcrPlugin: PaddleOcrPlugin? = null
     private var pendingPdfResult: MethodChannel.Result? = null
     private val pdfExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        val plugin = PaddleOcrPlugin(applicationContext)
-        paddleOcrPlugin = plugin
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            PaddleOcrPlugin.CHANNEL
-        ).setMethodCallHandler(plugin)
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -140,8 +133,6 @@ class MainActivity : FlutterFragmentActivity() {
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
-        paddleOcrPlugin?.closeSessions()
-        paddleOcrPlugin = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 }

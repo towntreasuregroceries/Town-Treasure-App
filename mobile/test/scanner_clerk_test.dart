@@ -20,6 +20,7 @@ import 'package:town_treasure_groceries/data/services/supabase_service.dart';
 import 'package:town_treasure_groceries/domain/models/models.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
 import 'package:town_treasure_groceries/ui/features/clerk/clerk_portal_screen.dart';
+import 'package:town_treasure_groceries/ui/features/clerk/clerk_review_sheet.dart';
 import 'package:town_treasure_groceries/ui/features/clerk/clerk_submissions_screen.dart';
 import 'package:town_treasure_groceries/ui/features/clerk/clerk_view_model.dart';
 import 'package:town_treasure_groceries/ui/features/scanner/docket_scanner_sheet.dart';
@@ -63,17 +64,6 @@ class _FakeTextRecognizer implements OcrTextRecognizerGateway {
     _idx++;
     return out;
   }
-
-  @override
-  Future<void> close() async {}
-}
-
-class _FakePaddleOcrGateway implements PaddleOcrGateway {
-  _FakePaddleOcrGateway(this.boxes);
-  final List<OcrTextBox> boxes;
-
-  @override
-  Future<List<OcrTextBox>> recognizeBoxesFromFile(String filePath) async => boxes;
 
   @override
   Future<void> close() async {}
@@ -1075,7 +1065,7 @@ void main() {
     });
 
     test(
-        'Offline PaddleOCR PP-OCRv5 + SpatialOcrParser reconstructs -11.3deg skewed handwritten docket and fails fast when offline',
+        'Offline ML Kit Spatial + SpatialOcrParser reconstructs -11.3deg skewed handwritten docket and fails fast when offline',
         () async {
       var httpCalls = 0;
       final offlineHttp = MockClient((request) async {
@@ -1122,8 +1112,7 @@ void main() {
       final service = OcrConsensusService(
         httpClient: offlineHttp,
         geminiApiKey: 'fake-key-offline-test',
-        paddleOcr: _FakePaddleOcrGateway(rotatedBoxes),
-        textRecognizer: _FakeTextRecognizer([]),
+        textRecognizer: _FakeSpatialTextRecognizer(rotatedBoxes),
       );
 
       final result = await service.processDocket([
@@ -1136,7 +1125,7 @@ void main() {
 
       // Fails fast after 1st SocketException instead of blocking through all models.
       expect(httpCalls, 1);
-      expect(result.enginesUsed, contains('PaddleOCR PP-OCRv5 ONNX (Offline)'));
+      expect(result.enginesUsed, contains('Google ML Kit On-Device'));
       expect(result.restaurantName, 'Kempinski Hotel');
       expect(result.invoiceNumber, 'TTG-409');
       expect(result.date, '2026-11-19');
@@ -1177,7 +1166,7 @@ void main() {
     });
 
     test(
-        'Tier 3 ML Kit 2D Spatial redundancy activates when PaddleOCR returns empty boxes',
+        'Engine 2 ML Kit 2D Spatial fallback activates when Gemini is skipped or unavailable',
         () async {
       final mlKitBoxes = <OcrTextBox>[
         _skewedBox('Client: Sankara Suites', 240, 180, 260, 26, angleDeg: 0),
@@ -1190,7 +1179,6 @@ void main() {
 
       final service = OcrConsensusService(
         geminiApiKey: '',
-        paddleOcr: _FakePaddleOcrGateway(const []),
         textRecognizer: _FakeSpatialTextRecognizer(mlKitBoxes),
       );
 
@@ -1260,8 +1248,7 @@ void main() {
 
       final service = OcrConsensusService(
         geminiApiKey: '',
-        paddleOcr: _FakePaddleOcrGateway(tableBoxes),
-        textRecognizer: _FakeTextRecognizer([]),
+        textRecognizer: _FakeSpatialTextRecognizer(tableBoxes),
       );
 
       final result = await service.processDocket([
@@ -1389,8 +1376,7 @@ void main() {
 
       final service = OcrConsensusService(
         geminiApiKey: '',
-        paddleOcr: _FakePaddleOcrGateway(pdfOcrBoxes),
-        textRecognizer: _FakeTextRecognizer([]),
+        textRecognizer: _FakeSpatialTextRecognizer(pdfOcrBoxes),
       );
 
       final result = await service.processDocket([
@@ -1463,8 +1449,7 @@ void main() {
 
       final service = OcrConsensusService(
         geminiApiKey: '',
-        paddleOcr: _FakePaddleOcrGateway(handwrittenBoxes),
-        textRecognizer: _FakeTextRecognizer([]),
+        textRecognizer: _FakeSpatialTextRecognizer(handwrittenBoxes),
       );
 
       final result = await service.processDocket([
@@ -1475,7 +1460,7 @@ void main() {
         ),
       ]);
 
-      expect(result.enginesUsed, contains('PaddleOCR PP-OCRv5 ONNX (Offline)'));
+      expect(result.enginesUsed, contains('Google ML Kit On-Device'));
       expect(result.items.length, 6);
       expect(
         result.items.map((i) => i.desc).toList(),
@@ -1516,8 +1501,7 @@ void main() {
       final service = OcrConsensusService(
         geminiApiKey: '',
         pdfPicker: pdfFake,
-        paddleOcr: _FakePaddleOcrGateway(priceListBoxes),
-        textRecognizer: _FakeTextRecognizer([]),
+        textRecognizer: _FakeSpatialTextRecognizer(priceListBoxes),
       );
       OcrPriceListResult? appliedPriceList;
 
@@ -1554,6 +1538,188 @@ void main() {
         isTrue,
       );
       service.dispose();
+    });
+
+    testWidgets(
+        'ClerkPortalScreen Clear List and Clear All reset quick-added or OCR-filled items',
+        (tester) async {
+      tester.view.physicalSize = const Size(1080, 2400);
+      tester.view.devicePixelRatio = 2.0;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final storage = _InMemoryLocalStorageService();
+      final supabase = _ClerkFakeSupabaseGateway();
+      supabase.user = const AuthUserInfo(
+        id: 'owner-1',
+        email: 'veronica@towntreasure.test',
+      );
+      final vault = VaultRepository(
+        cryptoService: CryptoService(),
+        localStorage: storage,
+        supabase: supabase,
+        syncDebounceDuration: const Duration(milliseconds: 10),
+      );
+      addTearDown(vault.dispose);
+      final staging = StagingRepository(
+        supabase: supabase,
+        localStorage: storage,
+        vaultRepository: vault,
+      );
+      final vm = ClerkViewModel(
+        stagingRepository: staging,
+        vaultRepository: vault,
+        supabase: supabase,
+        localStorage: storage,
+        ocrService: OcrConsensusService(),
+        duplicateDetector: DuplicateDetectorService(),
+      );
+      addTearDown(vm.dispose);
+      await vm.pairWithInviteToken(supabase.activeInviteToken);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: ClerkPortalScreen(viewModel: vm, standaloneClerkApp: true),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Quick-add two produce items so Produce Items count increases to 3
+      await tester.tap(find.text('Red Onions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Tomatoes'));
+      await tester.pumpAndSettle();
+      expect(find.text('Produce Items (3)'), findsOneWidget);
+
+      // Tap Clear List -> resets list back to 1 empty row
+      await tester.ensureVisible(find.byKey(const Key('btn_clerk_clear_items')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('btn_clerk_clear_items')));
+      await tester.pumpAndSettle();
+      expect(find.text('Produce Items (1)'), findsOneWidget);
+
+      // Add again and test Clear All button in header
+      await tester.ensureVisible(find.text('Dhania'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Dhania'));
+      await tester.pumpAndSettle();
+      expect(find.text('Produce Items (2)'), findsOneWidget);
+
+      await tester.ensureVisible(find.byKey(const Key('btn_clerk_clear_form')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('btn_clerk_clear_form')));
+      await tester.pumpAndSettle();
+      expect(find.text('Produce Items (1)'), findsOneWidget);
+    });
+
+    testWidgets(
+        'ClerkReviewSheet closes cleanly on approval and shows Docket Approved confirmation alert',
+        (tester) async {
+      final storage = _InMemoryLocalStorageService();
+      final supabase = _ClerkFakeSupabaseGateway();
+      const user = AuthUserInfo(
+        id: 'owner-1',
+        email: 'veronica@towntreasure.test',
+      );
+      supabase.user = user;
+      await storage.setUserId(user.id);
+      await storage.setE2eKey(CryptoService.bytesToJwk(List<int>.filled(32, 9)));
+
+      final vault = VaultRepository(
+        cryptoService: CryptoService(),
+        localStorage: storage,
+        supabase: supabase,
+        syncDebounceDuration: const Duration(milliseconds: 10),
+      );
+      addTearDown(vault.dispose);
+      await vault.setRestaurants(
+        const [Restaurant(id: 'r1', name: 'The Golden Crest Hotel')],
+        sync: false,
+      );
+
+      final staging = StagingRepository(
+        supabase: supabase,
+        localStorage: storage,
+        vaultRepository: vault,
+      );
+      final vm = ClerkViewModel(
+        stagingRepository: staging,
+        vaultRepository: vault,
+        supabase: supabase,
+        localStorage: storage,
+        ocrService: OcrConsensusService(),
+        duplicateDetector: DuplicateDetectorService(),
+      );
+      addTearDown(vm.dispose);
+
+      const docket = StagingDocket(
+        id: 'stg_review_1',
+        ownerUserId: 'owner-1',
+        clerkName: 'Faith',
+        restaurantName: 'The Golden Crest Hotel',
+        invoiceDate: '2026-11-19',
+        itemsJson: [
+          InvoiceLineItem(
+            desc: 'White Cabbage',
+            qty: 10,
+            unit: 'kgs',
+            buyPrice: 30,
+            sellPrice: 50,
+            total: 500,
+          ),
+        ],
+        totalSell: 500,
+        status: 'pending',
+      );
+      supabase.stagedInvoices.add(docket.toJson());
+      await vm.loadSubmissions();
+
+      Invoice? approvedCallbackInv;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Builder(
+            builder: (ctx) => Scaffold(
+              body: ElevatedButton(
+                onPressed: () => ClerkReviewSheet.show(
+                  ctx,
+                  viewModel: vm,
+                  docket: docket,
+                  onApproved: (inv) => approvedCallbackInv = inv,
+                ),
+                child: const Text('Open Review'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Review'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Approve & Encrypt'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Approve & Encrypt'));
+      await tester.tap(find.text('Approve & Encrypt'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        for (var i = 0; i < 60 && vm.isProcessingReview; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+      });
+      await tester.pumpAndSettle();
+
+      // Sheet closed (Approve & Encrypt gone) and unmistakable confirmation alert is visible
+      expect(find.text('Approve & Encrypt'), findsNothing);
+      expect(find.text('Docket Approved'), findsOneWidget);
+      expect(find.text('View Invoice'), findsOneWidget);
+
+      await tester.tap(find.text('View Invoice'));
+      await tester.pumpAndSettle();
+      expect(approvedCallbackInv, isNotNull);
+      expect(approvedCallbackInv!.restaurantName, 'The Golden Crest Hotel');
     });
   });
 }

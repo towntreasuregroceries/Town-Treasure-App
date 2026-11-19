@@ -248,16 +248,54 @@ class _ClerkReviewSheetState extends State<ClerkReviewSheet> {
   ) async {
     switch (outcome) {
       case ApprovalSuccess(:final invoice):
-        widget.onApproved?.call(invoice);
-        ScaffoldMessenger.of(context).showSnackBar(
+        final navigator = Navigator.of(context);
+        final messenger = ScaffoldMessenger.maybeOf(context);
+        final onApproved = widget.onApproved;
+        final totalFormatted = _moneyFmt.format(invoice.totalSell);
+        // Close the review sheet FIRST so follow-up dialogs/navigation never pop the wrong route.
+        navigator.pop(true);
+        messenger?.showSnackBar(
           SnackBar(
             content: Text(
               'Invoice ${invoice.number} approved, encrypted, and saved to vault.',
             ),
             backgroundColor: AppTheme.forestGreen,
+            behavior: SnackBarBehavior.floating,
           ),
         );
-        Navigator.of(context).pop(true);
+        final parentContext = navigator.context;
+        if (parentContext.mounted) {
+          await showDialog<void>(
+            context: parentContext,
+            builder: (dlgCtx) => AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.check_circle, color: AppTheme.forestGreen),
+                  SizedBox(width: 8),
+                  Expanded(child: Text('Docket Approved')),
+                ],
+              ),
+              content: Text(
+                'Invoice ${invoice.number} for ${invoice.restaurantName} (KES $totalFormatted) has been approved, encrypted, and saved to your vault.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dlgCtx).pop(),
+                  child: const Text('Done'),
+                ),
+                if (onApproved != null)
+                  FilledButton.icon(
+                    onPressed: () {
+                      Navigator.of(dlgCtx).pop();
+                      onApproved(invoice);
+                    },
+                    icon: const Icon(Icons.receipt_long_outlined, size: 17),
+                    label: const Text('View Invoice'),
+                  ),
+              ],
+            ),
+          );
+        }
       case ApprovalBlocked(:final message):
         _showError(message);
       case ApprovalNeedsAliasMatch(

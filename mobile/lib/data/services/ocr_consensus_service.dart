@@ -236,14 +236,12 @@ class OcrConsensusService {
   OcrConsensusService({
     http.Client? httpClient,
     OcrTextRecognizerGateway? textRecognizer,
-    PaddleOcrGateway? paddleOcr,
     ImagePickerGateway? imagePicker,
     PdfPagePickerGateway? pdfPicker,
     String? geminiApiKey,
     this.apiKeyProvider,
   })  : _http = httpClient ?? http.Client(),
         _textRecognizer = textRecognizer ?? MlKitTextRecognizerGateway(),
-        _paddleOcr = paddleOcr ?? MethodChannelPaddleOcrGateway(),
         _imagePicker = imagePicker ?? DeviceImagePickerGateway(),
         _pdfPicker = pdfPicker ?? MethodChannelPdfPagePickerGateway(),
         _staticApiKey = geminiApiKey;
@@ -298,7 +296,6 @@ class OcrConsensusService {
 
   final http.Client _http;
   final OcrTextRecognizerGateway _textRecognizer;
-  final PaddleOcrGateway _paddleOcr;
   final ImagePickerGateway _imagePicker;
   final PdfPagePickerGateway _pdfPicker;
   final String? _staticApiKey;
@@ -457,7 +454,7 @@ class OcrConsensusService {
         } catch (err) {
           lastError = err;
           if (_isNetworkUnavailableError(err)) {
-            onProgress?.call('No internet detected — switching to bundled offline OCR...');
+            onProgress?.call('No internet detected — switching to on-device ML Kit OCR...');
             break;
           }
         }
@@ -467,40 +464,13 @@ class OcrConsensusService {
       }
     }
 
-    // Engine 2: Bundled Offline Primary — PaddleOCR PP-OCRv5 ONNX + 2D Spatial Parser
+    // Engine 2: On-Device Google ML Kit Cross-Check & Offline Fallback (web Tesseract equivalent)
     final filePages =
         pages.where((p) => p.filePath != null && p.filePath!.isNotEmpty).toList();
-    Map<String, dynamic>? paddleParsed;
-    final paddleTextChunks = <String>[];
-    if (geminiResult == null && filePages.isNotEmpty) {
-      onProgress?.call('Running offline PaddleOCR PP-OCRv5 ONNX engine...');
-      final pagePayloads = <Map<String, dynamic>>[];
-      for (final page in filePages) {
-        try {
-          final boxes = await _paddleOcr.recognizeBoxesFromFile(page.filePath!);
-          if (boxes.isNotEmpty) {
-            final rows = SpatialOcrParser.reconstructDeskewedRows(boxes);
-            final txt = SpatialOcrParser.rowsToPlainText(rows);
-            if (txt.isNotEmpty) paddleTextChunks.add(txt);
-            pagePayloads.add(SpatialOcrParser.parseBoxesToDocket(boxes));
-          }
-        } catch (err) {
-          lastError ??= err;
-        }
-      }
-      if (pagePayloads.isNotEmpty) {
-        paddleParsed = _mergeDocketPagePayloads(pagePayloads);
-      }
-    }
-
-    // Engine 3: Offline Redundancy — Google ML Kit 2D Bounding Boxes / Text
     final mlKitTexts = <String>[];
     final mlKitPagePayloads = <Map<String, dynamic>>[];
-    if (filePages.isNotEmpty &&
-        (geminiResult == null ||
-            (paddleParsed == null ||
-                (paddleParsed['items'] as List?)?.isEmpty == true))) {
-      onProgress?.call('Cross-checking with on-device Google ML Kit recognition...');
+    if (filePages.isNotEmpty) {
+      onProgress?.call('Running on-device Google ML Kit text recognition...');
       for (final page in filePages) {
         try {
           if (_textRecognizer is OcrSpatialRecognizerGateway) {
@@ -525,19 +495,12 @@ class OcrConsensusService {
     }
 
     final combinedMlKitText = mlKitTexts.join('\n--- PAGE BREAK ---\n');
-    final mlKitParsed = mlKitPagePayloads.isNotEmpty &&
+    final offlineData = mlKitPagePayloads.isNotEmpty &&
             mlKitPagePayloads.any((p) => (p['items'] as List?)?.isNotEmpty == true)
         ? _mergeDocketPagePayloads(mlKitPagePayloads)
         : (combinedMlKitText.trim().isNotEmpty
             ? parseRawTextToDocket(combinedMlKitText)
             : null);
-
-    final paddleHasItems =
-        (paddleParsed?['items'] as List?)?.isNotEmpty == true;
-    final offlineData = paddleHasItems ? paddleParsed : mlKitParsed;
-    final offlineRawText = paddleTextChunks.isNotEmpty
-        ? paddleTextChunks.join('\n--- PAGE BREAK ---\n')
-        : combinedMlKitText;
 
     if (geminiResult == null &&
         (offlineData == null ||
@@ -556,17 +519,15 @@ class OcrConsensusService {
       );
     }
 
-    // Engine 4: Deterministic Mathematical Invariant Validator & Discrepancy Arbiter
+    // Engine 3: Deterministic Mathematical Invariant Validator & Discrepancy Arbiter
     onProgress?.call('Running Deterministic Mathematical Arbiter & checksum verification...');
     final consensus = reconcileWithMath(
       geminiData: geminiResult,
       mlKitData: offlineData,
-      rawMlKitText: offlineRawText,
-      offlineEngineLabel: paddleHasItems
-          ? 'PaddleOCR PP-OCRv5 ONNX (Offline)'
-          : (offlineData != null || combinedMlKitText.trim().isNotEmpty
-              ? 'Google ML Kit On-Device'
-              : null),
+      rawMlKitText: combinedMlKitText,
+      offlineEngineLabel: (offlineData != null || combinedMlKitText.trim().isNotEmpty)
+          ? 'Google ML Kit On-Device'
+          : null,
       pageCount: pageCount,
     );
 
@@ -588,7 +549,7 @@ class OcrConsensusService {
       receiptPhoto: photoUrls.isNotEmpty ? photoUrls.first : null,
       receiptPhotos: photoUrls,
       pageCount: pageCount,
-      rawMlKitText: offlineRawText,
+      rawMlKitText: combinedMlKitText,
     );
   }
 
@@ -629,44 +590,12 @@ class OcrConsensusService {
         } catch (err) {
           lastError = err;
           if (_isNetworkUnavailableError(err)) {
-            onProgress?.call('No internet detected — switching to offline PaddleOCR ONNX...');
+            onProgress?.call('No internet detected — switching to Google ML Kit OCR...');
             break;
           }
         }
         if (i + 1 < models.length) {
           await Future<void>.delayed(const Duration(milliseconds: 400));
-        }
-      }
-    }
-
-    if (extractionResult == null) {
-      final filePages =
-          pages.where((p) => p.filePath != null && p.filePath!.isNotEmpty).toList();
-      if (filePages.isNotEmpty) {
-        onProgress?.call('Running offline PaddleOCR PP-OCRv5 ONNX on price list...');
-        final combinedItems = <Map<String, dynamic>>[];
-        for (final page in filePages) {
-          try {
-            final boxes = await _paddleOcr.recognizeBoxesFromFile(page.filePath!);
-            if (boxes.isNotEmpty) {
-              final parsed = SpatialOcrParser.parseBoxesToPriceList(boxes);
-              final pageItems = parsed['items'];
-              if (pageItems is List && pageItems.isNotEmpty) {
-                combinedItems.addAll(pageItems.whereType<Map>().map((e) => Map<String, dynamic>.from(e)));
-              }
-            }
-          } catch (err) {
-            lastError ??= err;
-          }
-        }
-        if (combinedItems.isNotEmpty) {
-          extractionResult = {
-            'name': 'Scanned Price List',
-            'subtitle': 'Food Supplies (Veg and Fruits)',
-            'effectiveDate': AppHelpers.normalizeAppDate(DateTime.now()),
-            'items': combinedItems,
-          };
-          enginesUsed.add('PaddleOCR PP-OCRv5 ONNX (Offline)');
         }
       }
     }
@@ -1565,6 +1494,5 @@ Return ONLY JSON matching:
 
   Future<void> dispose() async {
     await _textRecognizer.close();
-    await _paddleOcr.close();
   }
 }
