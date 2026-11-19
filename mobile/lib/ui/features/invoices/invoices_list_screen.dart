@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/services/print_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/print_options_sheet.dart';
 import 'invoice_detail_screen.dart';
 import 'invoice_editor_screen.dart';
 import 'invoice_formatters.dart';
+import 'invoice_pdf_builder.dart';
 import 'invoices_view_model.dart';
 import 'recycle_bin_screen.dart';
 
@@ -37,8 +40,117 @@ class _InvoicesListScreenState extends State<InvoicesListScreen> {
   InvoicesViewModel? _ownedVm;
   final TextEditingController _searchCtrl = TextEditingController();
   bool _draftsExpanded = true;
+  bool _selectionMode = false;
+  final Set<String> _selectedIds = <String>{};
+  bool _isBatchMarkingPaid = false;
 
   InvoicesViewModel get _vm => widget.viewModel ?? _ownedVm!;
+
+  void _enterSelectionMode([String? initialId]) {
+    setState(() {
+      _selectionMode = true;
+      if (initialId != null && initialId.isNotEmpty) {
+        _selectedIds.add(initialId);
+      }
+    });
+  }
+
+  void _exitSelectionMode() {
+    if (!_selectionMode && _selectedIds.isEmpty) return;
+    setState(() {
+      _selectionMode = false;
+      _selectedIds.clear();
+    });
+  }
+
+  void _toggleSelected(Invoice inv) {
+    if (inv.status == 'paid' || _isBatchMarkingPaid) return;
+    setState(() {
+      if (_selectedIds.contains(inv.id)) {
+        _selectedIds.remove(inv.id);
+      } else {
+        _selectedIds.add(inv.id);
+      }
+    });
+  }
+
+  void _openBatchPrintSheet(List<Invoice> selectedInvoices) {
+    if (selectedInvoices.isEmpty) return;
+    final vault = context.read<VaultRepository>();
+    showPrintOptionsSheet(
+      context,
+      document: PrintableDocument(
+        title: selectedInvoices.length == 1
+            ? 'Invoice ${selectedInvoices.first.number}'
+            : '${selectedInvoices.length} Selected Invoices',
+        filename: selectedInvoices.length == 1
+            ? InvoicePdfBuilder.pdfFilename(
+                selectedInvoices.first,
+                _vm.resolveRestaurant(selectedInvoices.first),
+              )
+            : 'Invoices_Batch_${InvoiceFormatters.todayIso()}.pdf',
+        supportsThermalRoll: true,
+        buildPdf: (format) => InvoicePdfBuilder.buildMultiInvoicePdfBytes(
+          invoices: selectedInvoices,
+          restaurants: vault.restaurants,
+          settings: vault.settings,
+          pageFormat: format,
+        ),
+        buildEscPos: (cols) => EscPosReceiptBuilder.buildInvoicesReceipt(
+          invoices: selectedInvoices,
+          restaurants: vault.restaurants,
+          lineWidth: cols,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmBatchMarkPaid(List<Invoice> selectedUnpaid) async {
+    if (selectedUnpaid.isEmpty || _isBatchMarkingPaid) return;
+    final totalAmount = selectedUnpaid.fold<double>(
+      0.0,
+      (sum, inv) => sum + inv.totalSell,
+    );
+    final count = selectedUnpaid.length;
+    final noun = count == 1 ? 'invoice' : 'invoices';
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Mark Invoices Paid'),
+        content: Text(
+          'Mark $count selected $noun totaling KES ${InvoiceFormatters.formatMoney(totalAmount)} as paid today?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Yes, Mark Paid'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    setState(() => _isBatchMarkingPaid = true);
+    try {
+      final res = await _vm.markInvoicesAsPaid(
+        selectedUnpaid.map((i) => i.id).toList(),
+      );
+      if (!mounted) return;
+      if (res.ok) {
+        _exitSelectionMode();
+      }
+      _showSnack(res.message, isError: !res.ok, isWarning: res.ok && !res.synced);
+    } finally {
+      if (mounted) {
+        setState(() => _isBatchMarkingPaid = false);
+      }
+    }
+  }
 
   @override
   void didChangeDependencies() {
@@ -178,26 +290,140 @@ class _InvoicesListScreenState extends State<InvoicesListScreen> {
         final invoices = _vm.filteredInvoices;
         final drafts = _vm.drafts;
         final rests = _vm.restaurants;
+        final months = _vm.availableMonths;
+        final selectedMonth = months.contains(_vm.filterMonth)
+            ? _vm.filterMonth
+            : '';
+        final visibleUnpaid =
+            invoices.where((inv) => inv.status != 'paid').toList();
+        final selectedVisibleUnpaid = visibleUnpaid
+            .where((inv) => _selectedIds.contains(inv.id))
+            .toList();
+        final allUnpaidSelected = visibleUnpaid.isNotEmpty &&
+            visibleUnpaid.every((inv) => _selectedIds.contains(inv.id));
+        final selectedTotal = selectedVisibleUnpaid.fold<double>(
+          0.0,
+          (sum, inv) => sum + inv.totalSell,
+        );
 
         return Scaffold(
           backgroundColor: AppTheme.surfaceSage,
           appBar: AppBar(
-            title: const Text('Invoices'),
+            leading: _selectionMode
+                ? IconButton(
+                    tooltip: 'Cancel selection',
+                    onPressed: _isBatchMarkingPaid ? null : _exitSelectionMode,
+                    icon: const Icon(Icons.close),
+                  )
+                : null,
+            title: Text(
+              _selectionMode
+                  ? '${selectedVisibleUnpaid.length} selected'
+                  : 'Invoices',
+            ),
             actions: [
-              IconButton(
-                tooltip: 'Recycle Bin',
-                onPressed: _openRecycleBin,
-                icon: const Icon(Icons.delete_sweep_outlined),
-              ),
+              if (!_selectionMode)
+                IconButton(
+                  key: const Key('btn_select_multiple_invoices'),
+                  tooltip: 'Select multiple to mark paid',
+                  onPressed: invoices.isEmpty ? null : () => _enterSelectionMode(),
+                  icon: const Icon(Icons.checklist_outlined),
+                ),
+              if (!_selectionMode)
+                IconButton(
+                  tooltip: 'Recycle Bin',
+                  onPressed: _openRecycleBin,
+                  icon: const Icon(Icons.delete_sweep_outlined),
+                ),
             ],
           ),
-          floatingActionButton: FloatingActionButton.extended(
-            backgroundColor: AppTheme.forestGreen,
-            foregroundColor: Colors.white,
-            onPressed: widget.onCreateInvoice ?? () => _openEditor(),
-            icon: const Icon(Icons.add),
-            label: const Text('New Invoice'),
-          ),
+          floatingActionButton: _selectionMode
+              ? null
+              : FloatingActionButton.extended(
+                  backgroundColor: AppTheme.forestGreen,
+                  foregroundColor: Colors.white,
+                  onPressed: widget.onCreateInvoice ?? () => _openEditor(),
+                  icon: const Icon(Icons.add),
+                  label: const Text('New Invoice'),
+                ),
+          bottomNavigationBar: _selectionMode
+              ? Container(
+                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
+                  decoration: const BoxDecoration(
+                    color: AppTheme.surfaceCard,
+                    border: Border(
+                      top: BorderSide(color: AppTheme.borderSubtle),
+                    ),
+                  ),
+                  child: SafeArea(
+                    top: false,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${selectedVisibleUnpaid.length} unpaid invoice(s) selected',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.slateInk,
+                                ),
+                              ),
+                              Text(
+                                'Total: KES ${InvoiceFormatters.formatMoney(selectedTotal)}',
+                                style: const TextStyle(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppTheme.forestGreen,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          key: const Key('btn_batch_print_invoices'),
+                          onPressed: (selectedVisibleUnpaid.isEmpty ||
+                                  _isBatchMarkingPaid)
+                              ? null
+                              : () => _openBatchPrintSheet(
+                                    selectedVisibleUnpaid,
+                                  ),
+                          icon: const Icon(Icons.print_outlined, size: 18),
+                          label: const Text('Print'),
+                        ),
+                        const SizedBox(width: 8),
+                        FilledButton.icon(
+                          key: const Key('btn_batch_mark_paid'),
+                          onPressed: (selectedVisibleUnpaid.isEmpty ||
+                                  _isBatchMarkingPaid)
+                              ? null
+                              : () => _confirmBatchMarkPaid(
+                                    selectedVisibleUnpaid,
+                                  ),
+                          icon: _isBatchMarkingPaid
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.check_circle_outline, size: 18),
+                          label: Text(
+                            _isBatchMarkingPaid
+                                ? 'Updating...'
+                                : 'Mark Paid (${selectedVisibleUnpaid.length})',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+              : null,
           body: Column(
             children: [
               Padding(
@@ -208,7 +434,7 @@ class _InvoicesListScreenState extends State<InvoicesListScreen> {
                       controller: _searchCtrl,
                       onChanged: _vm.setSearchQuery,
                       decoration: InputDecoration(
-                        hintText: 'Search invoice # or restaurant',
+                        hintText: 'Search #, restaurant, or month (e.g. Nov 2026)',
                         prefixIcon: const Icon(
                           Icons.search,
                           color: AppTheme.slateMuted,
@@ -229,6 +455,7 @@ class _InvoicesListScreenState extends State<InvoicesListScreen> {
                     Row(
                       children: [
                         Expanded(
+                          flex: 3,
                           child: DropdownButtonFormField<String>(
                             initialValue: rests.any(
                               (r) => r.id == _vm.filterRestaurantId,
@@ -238,7 +465,7 @@ class _InvoicesListScreenState extends State<InvoicesListScreen> {
                             isExpanded: true,
                             decoration: const InputDecoration(
                               contentPadding: EdgeInsets.symmetric(
-                                horizontal: 12,
+                                horizontal: 10,
                                 vertical: 10,
                               ),
                               prefixIcon: Icon(
@@ -249,7 +476,10 @@ class _InvoicesListScreenState extends State<InvoicesListScreen> {
                             items: [
                               const DropdownMenuItem(
                                 value: '',
-                                child: Text('All Restaurants'),
+                                child: Text(
+                                  'All Restaurants',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                               ...rests.map(
                                 (r) => DropdownMenuItem(
@@ -263,6 +493,44 @@ class _InvoicesListScreenState extends State<InvoicesListScreen> {
                             ],
                             onChanged: (val) =>
                                 _vm.setFilterRestaurantId(val ?? ''),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          flex: 2,
+                          child: DropdownButtonFormField<String>(
+                            key: const Key('dropdown_filter_month'),
+                            initialValue: selectedMonth,
+                            isExpanded: true,
+                            decoration: const InputDecoration(
+                              contentPadding: EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 10,
+                              ),
+                              prefixIcon: Icon(
+                                Icons.calendar_month_outlined,
+                                size: 18,
+                              ),
+                            ),
+                            items: [
+                              const DropdownMenuItem(
+                                value: '',
+                                child: Text(
+                                  'All Months',
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              ...months.map(
+                                (m) => DropdownMenuItem(
+                                  value: m,
+                                  child: Text(
+                                    InvoiceFormatters.formatMonthLabel(m),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            ],
+                            onChanged: (val) => _vm.setFilterMonth(val ?? ''),
                           ),
                         ),
                       ],
@@ -301,7 +569,51 @@ class _InvoicesListScreenState extends State<InvoicesListScreen> {
                   ],
                 ),
               ),
-              if (drafts.isNotEmpty)
+              if (_selectionMode)
+                Container(
+                  key: const Key('bar_invoice_select_all'),
+                  color: AppTheme.surfaceCard,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 6,
+                  ),
+                  child: Row(
+                    children: [
+                      Checkbox(
+                        key: const Key('chk_select_all_unpaid'),
+                        value: allUnpaidSelected,
+                        onChanged: (visibleUnpaid.isEmpty || _isBatchMarkingPaid)
+                            ? null
+                            : (checked) {
+                                setState(() {
+                                  final unpaidIds = visibleUnpaid
+                                      .map((e) => e.id)
+                                      .toList();
+                                  if (checked == true) {
+                                    _selectedIds.addAll(unpaidIds);
+                                  } else {
+                                    _selectedIds.removeAll(unpaidIds);
+                                  }
+                                });
+                              },
+                      ),
+                      Expanded(
+                        child: Text(
+                          visibleUnpaid.isEmpty
+                              ? 'No unpaid invoices match current filter'
+                              : (allUnpaidSelected
+                                    ? 'All ${visibleUnpaid.length} unpaid selected'
+                                    : 'Select all unpaid (${visibleUnpaid.length})'),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.slateInk,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              if (drafts.isNotEmpty && !_selectionMode)
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                   child: Card(
@@ -436,9 +748,16 @@ class _InvoicesListScreenState extends State<InvoicesListScreen> {
                               const SizedBox(height: 10),
                           itemBuilder: (context, index) {
                             final inv = invoices[index];
+                            final selectable = inv.status != 'paid';
                             return _InvoiceListCard(
                               invoice: inv,
                               clientName: _vm.displayRestaurantName(inv),
+                              selectionMode: _selectionMode,
+                              selected: selectable && _selectedIds.contains(inv.id),
+                              onToggleSelect: () => _toggleSelected(inv),
+                              onLongPress: selectable
+                                  ? () => _enterSelectionMode(inv.id)
+                                  : null,
                               onView: () => _openDetail(inv),
                               onEdit: () => _openEditor(initialInvoice: inv),
                               onDelete: () => _confirmDeleteInvoice(inv),
@@ -485,6 +804,10 @@ class _InvoiceListCard extends StatelessWidget {
   const _InvoiceListCard({
     required this.invoice,
     required this.clientName,
+    required this.selectionMode,
+    required this.selected,
+    required this.onToggleSelect,
+    required this.onLongPress,
     required this.onView,
     required this.onEdit,
     required this.onDelete,
@@ -492,6 +815,10 @@ class _InvoiceListCard extends StatelessWidget {
 
   final Invoice invoice;
   final String clientName;
+  final bool selectionMode;
+  final bool selected;
+  final VoidCallback onToggleSelect;
+  final VoidCallback? onLongPress;
   final VoidCallback onView;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
@@ -499,6 +826,7 @@ class _InvoiceListCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isPaid = invoice.status == 'paid';
+    final selectable = !isPaid;
     final isOverdue = invoice.status == 'overdue';
     final badgeBg = isPaid
         ? AppTheme.successSurface
@@ -507,18 +835,37 @@ class _InvoiceListCard extends StatelessWidget {
         ? AppTheme.forestGreen
         : (isOverdue ? AppTheme.danger : AppTheme.warning);
 
-    return Card(
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onView,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
+    return Opacity(
+      opacity: (selectionMode && isPaid) ? 0.58 : 1.0,
+      child: Card(
+        color: selected ? AppTheme.sageTint.withValues(alpha: 0.4) : null,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: selected
+              ? const BorderSide(color: AppTheme.forestGreen, width: 1.8)
+              : BorderSide.none,
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: selectionMode
+              ? (selectable ? onToggleSelect : null)
+              : onView,
+          onLongPress: selectionMode ? null : onLongPress,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    if (selectionMode) ...[
+                      Checkbox(
+                        value: selected,
+                        onChanged: selectable ? (_) => onToggleSelect() : null,
+                      ),
+                      const SizedBox(width: 2),
+                    ],
+                    Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
                       vertical: 4,
@@ -604,36 +951,39 @@ class _InvoiceListCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 8),
-              const Divider(height: 1),
-              const SizedBox(height: 6),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  TextButton.icon(
-                    onPressed: onView,
-                    icon: const Icon(Icons.visibility_outlined, size: 16),
-                    label: const Text('View'),
-                  ),
-                  TextButton.icon(
-                    onPressed: onEdit,
-                    icon: const Icon(Icons.edit_outlined, size: 16),
-                    label: const Text('Edit'),
-                  ),
-                  IconButton(
-                    tooltip: 'Delete invoice',
-                    onPressed: onDelete,
-                    icon: const Icon(
-                      Icons.delete_outline,
-                      color: AppTheme.danger,
-                      size: 20,
+              if (!selectionMode) ...[
+                const SizedBox(height: 8),
+                const Divider(height: 1),
+                const SizedBox(height: 6),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    TextButton.icon(
+                      onPressed: onView,
+                      icon: const Icon(Icons.visibility_outlined, size: 16),
+                      label: const Text('View'),
                     ),
-                  ),
-                ],
-              ),
+                    TextButton.icon(
+                      onPressed: onEdit,
+                      icon: const Icon(Icons.edit_outlined, size: 16),
+                      label: const Text('Edit'),
+                    ),
+                    IconButton(
+                      tooltip: 'Delete invoice',
+                      onPressed: onDelete,
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        color: AppTheme.danger,
+                        size: 20,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
+      ),
       ),
     );
   }

@@ -42,6 +42,24 @@ class InvoiceFormatters {
     return '$dd/$mm/$yyyy';
   }
 
+  /// Extracts a normalized `YYYY-MM` month key from any supported date string.
+  static String monthKeyFromDate(String? value) {
+    final normalized = AppHelpers.normalizeAppDate(value);
+    if (normalized.length < 7) return '';
+    return normalized.substring(0, 7);
+  }
+
+  /// Formats a `YYYY-MM` month key into a human-friendly label (e.g. `Nov 2026`).
+  static String formatMonthLabel(String yearMonth) {
+    if (yearMonth.trim().isEmpty) return 'All Months';
+    final parts = yearMonth.split('-');
+    if (parts.length < 2) return yearMonth;
+    final y = int.tryParse(parts[0]);
+    final m = int.tryParse(parts[1]);
+    if (y == null || m == null || m < 1 || m > 12) return yearMonth;
+    return DateFormat('MMM yyyy').format(DateTime(y, m, 1));
+  }
+
   static String todayIso() {
     final now = DateTime.now();
     final y = now.year.toString().padLeft(4, '0');

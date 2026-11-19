@@ -45,6 +45,7 @@ class LocalStorageService {
   static const String keyUserEmail = 'ttg_user_email';
   static const String keyBiometricEnabled = 'ttg_biometric_enabled';
   static const String keyLastPage = 'ttg_last_page';
+  static const String keySavedPrinter = 'ttg_saved_printer';
 
   // Exact collection keys matching `data.js` and `supabase-config.js`.
   static const String keyRestaurants = 'ttg_restaurants';
@@ -264,6 +265,12 @@ class LocalStorageService {
   Future<void> setJson(String key, Object value) async {
     await setRaw(key, jsonEncode(value));
   }
+
+  Future<Map<String, dynamic>> getSavedPrinterConfig() =>
+      getJsonMap(keySavedPrinter);
+
+  Future<void> setSavedPrinterConfig(Map<String, dynamic> value) =>
+      setJson(keySavedPrinter, value);
 
   Future<void> clearVaultData() async {
     final db = await _getDb();

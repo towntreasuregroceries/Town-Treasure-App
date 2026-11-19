@@ -60,11 +60,25 @@ class InvoicesViewModel extends ChangeNotifier {
   // --- List filters ---
   String _searchQuery = '';
   String _filterRestaurantId = '';
+  String _filterMonth = '';
   String _filterStatus = '';
 
   String get searchQuery => _searchQuery;
   String get filterRestaurantId => _filterRestaurantId;
+  String get filterMonth => _filterMonth;
   String get filterStatus => _filterStatus;
+
+  /// Distinct `YYYY-MM` month keys across non-draft invoices, newest first.
+  List<String> get availableMonths {
+    final months = <String>{};
+    for (final inv in _vault.invoices) {
+      if (inv.isDraft) continue;
+      final key = InvoiceFormatters.monthKeyFromDate(inv.date);
+      if (key.isNotEmpty) months.add(key);
+    }
+    final sorted = months.toList()..sort((a, b) => b.compareTo(a));
+    return sorted;
+  }
 
   // --- Editor state ---
   String? _editingInvoiceId;
@@ -127,9 +141,15 @@ class InvoicesViewModel extends ChangeNotifier {
       list = list.where((inv) {
         final displayName =
             Restaurant.invoiceDisplayName(inv, rests).toLowerCase();
+        final monthKey = InvoiceFormatters.monthKeyFromDate(inv.date);
+        final monthLabel =
+            InvoiceFormatters.formatMonthLabel(monthKey).toLowerCase();
         return inv.number.toLowerCase().contains(q) ||
             displayName.contains(q) ||
-            inv.restaurantName.toLowerCase().contains(q);
+            inv.restaurantName.toLowerCase().contains(q) ||
+            inv.date.toLowerCase().contains(q) ||
+            InvoiceFormatters.formatDisplayDate(inv.date).toLowerCase().contains(q) ||
+            monthLabel.contains(q);
       }).toList();
     }
 
@@ -141,6 +161,14 @@ class InvoicesViewModel extends ChangeNotifier {
       list = list
           .where((inv) =>
               Restaurant.invoiceBelongsToRestaurant(inv, selected, rests))
+          .toList();
+    }
+
+    if (_filterMonth.isNotEmpty) {
+      list = list
+          .where(
+            (inv) => InvoiceFormatters.monthKeyFromDate(inv.date) == _filterMonth,
+          )
           .toList();
     }
 
@@ -186,6 +214,12 @@ class InvoicesViewModel extends ChangeNotifier {
   void setFilterRestaurantId(String restaurantId) {
     if (_filterRestaurantId == restaurantId) return;
     _filterRestaurantId = restaurantId;
+    notifyListeners();
+  }
+
+  void setFilterMonth(String month) {
+    if (_filterMonth == month) return;
+    _filterMonth = month;
     notifyListeners();
   }
 
@@ -812,6 +846,53 @@ class InvoicesViewModel extends ChangeNotifier {
       ok: true,
       synced: synced,
       message: 'Invoice ${updated.number} marked as paid',
+    );
+  }
+
+  /// Marks multiple unpaid non-draft invoices as paid in a single atomic vault update.
+  Future<ActionOutcome> markInvoicesAsPaid(List<String> ids) async {
+    if (ids.isEmpty) {
+      return const ActionOutcome(
+        ok: false,
+        synced: false,
+        message: 'No invoices selected.',
+      );
+    }
+    final targetIds = ids.toSet();
+    final today = InvoiceFormatters.todayIso();
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final list = List<Invoice>.from(_vault.invoices);
+    var updatedCount = 0;
+
+    for (var i = 0; i < list.length; i++) {
+      final inv = list[i];
+      if (targetIds.contains(inv.id) && !inv.isDraft && inv.status != 'paid') {
+        list[i] = inv.copyWith(
+          status: 'paid',
+          paidDate: today,
+          updatedAt: nowIso,
+        );
+        updatedCount++;
+      }
+    }
+
+    if (updatedCount == 0) {
+      return const ActionOutcome(
+        ok: false,
+        synced: false,
+        message: 'Selected invoices are already marked as paid.',
+      );
+    }
+
+    await _vault.setInvoices(list, sync: false);
+    final synced = await _boundedSync();
+    final noun = updatedCount == 1 ? 'invoice' : 'invoices';
+    return ActionOutcome(
+      ok: true,
+      synced: synced,
+      message: synced
+          ? '$updatedCount $noun marked as paid and synced.'
+          : '$updatedCount $noun marked as paid on this device (cloud sync pending).',
     );
   }
 

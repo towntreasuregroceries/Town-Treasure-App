@@ -691,6 +691,154 @@ void main() {
       expect(find.text('TTG-1111'), findsOneWidget);
       expect(find.text('TTG-2222'), findsNothing);
     });
+
+    test('InvoicesViewModel filters by month and markInvoicesAsPaid updates batch atomically',
+        () async {
+      final env = await _createTestVault();
+      final vault = env.vault;
+      await vault.setRestaurants([
+        const Restaurant(id: 'r1', name: 'Hemingways'),
+      ]);
+      await vault.setInvoices([
+        const Invoice(
+          id: 'i1',
+          number: 'TTG-OCT1',
+          restaurantId: 'r1',
+          restaurantName: 'Hemingways',
+          date: '2026-10-12',
+          totalSell: 1500,
+          status: 'pending',
+        ),
+        const Invoice(
+          id: 'i2',
+          number: 'TTG-NOV1',
+          restaurantId: 'r1',
+          restaurantName: 'Hemingways',
+          date: '2026-11-05',
+          totalSell: 2000,
+          status: 'overdue',
+        ),
+        const Invoice(
+          id: 'i3',
+          number: 'TTG-NOV2',
+          restaurantId: 'r1',
+          restaurantName: 'Hemingways',
+          date: '2026-11-18',
+          totalSell: 3500,
+          status: 'paid',
+        ),
+      ]);
+
+      final vm = InvoicesViewModel(vault: vault);
+      addTearDown(vm.dispose);
+
+      expect(vm.availableMonths, ['2026-11', '2026-10']);
+
+      vm.setFilterMonth('2026-11');
+      expect(vm.filteredInvoices.map((e) => e.id).toList(), ['i3', 'i2']);
+
+      vm.setFilterMonth('');
+      vm.setSearchQuery('Oct 2026');
+      expect(vm.filteredInvoices.map((e) => e.id).toList(), ['i1']);
+
+      vm.setSearchQuery('');
+      final res = await vm.markInvoicesAsPaid(['i1', 'i2', 'i3']);
+      expect(res.ok, isTrue);
+      expect(res.message, contains('2 invoices marked as paid'));
+      expect(vm.findInvoiceById('i1')?.status, 'paid');
+      expect(vm.findInvoiceById('i1')?.paidDate, isNotNull);
+      expect(vm.findInvoiceById('i2')?.status, 'paid');
+      expect(vm.findInvoiceById('i3')?.status, 'paid');
+    });
+
+    testWidgets('InvoicesListScreen filters by month, selects multiple unpaid, and marks paid in batch',
+        (tester) async {
+      final env = await _createTestVault();
+      final vault = env.vault;
+      await vault.setRestaurants([
+        const Restaurant(id: 'r1', name: 'Kempinski'),
+      ]);
+      await vault.setInvoices([
+        const Invoice(
+          id: 'i1',
+          number: 'TTG-101',
+          restaurantId: 'r1',
+          restaurantName: 'Kempinski',
+          date: '2026-10-10',
+          totalSell: 1200,
+          profit: 200,
+          status: 'pending',
+        ),
+        const Invoice(
+          id: 'i2',
+          number: 'TTG-201',
+          restaurantId: 'r1',
+          restaurantName: 'Kempinski',
+          date: '2026-11-04',
+          totalSell: 3000,
+          profit: 600,
+          status: 'pending',
+        ),
+        const Invoice(
+          id: 'i3',
+          number: 'TTG-202',
+          restaurantId: 'r1',
+          restaurantName: 'Kempinski',
+          date: '2026-11-15',
+          totalSell: 4500,
+          profit: 900,
+          status: 'overdue',
+        ),
+      ]);
+
+      await tester.pumpWidget(
+        _wrapWithProviders(vault, const InvoicesListScreen()),
+      );
+      await tester.pumpAndSettle();
+
+      // Filter by Nov 2026 using month dropdown
+      await tester.tap(find.byKey(const Key('dropdown_filter_month')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Nov 2026').last);
+      await tester.pumpAndSettle();
+
+      expect(find.text('TTG-101'), findsNothing);
+      expect(find.text('TTG-201'), findsOneWidget);
+      expect(find.text('TTG-202'), findsOneWidget);
+
+      // Enter multi-select mode and select all unpaid for Nov 2026
+      await tester.tap(find.byKey(const Key('btn_select_multiple_invoices')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('chk_select_all_unpaid')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('2 unpaid invoice(s) selected'), findsOneWidget);
+      expect(find.text('Total: KES 7,500.00'), findsOneWidget);
+
+      // Verify batch Print button opens PrintOptionsSheet cleanly
+      await tester.tap(find.byKey(const Key('btn_batch_print_invoices')));
+      await tester.pumpAndSettle();
+      expect(find.text('Print & Dispatch Center'), findsOneWidget);
+      expect(find.text('2 Selected Invoices'), findsOneWidget);
+      await tester.tap(find.byTooltip('Close'));
+      await tester.pumpAndSettle();
+
+      // Mark selected batch as paid
+      await tester.tap(find.byKey(const Key('btn_batch_mark_paid')));
+      await tester.pumpAndSettle();
+      expect(find.text('Mark Invoices Paid'), findsOneWidget);
+
+      await tester.tap(find.text('Yes, Mark Paid'));
+      await tester.pumpAndSettle();
+
+      final nov1 = vault.invoices.firstWhere((e) => e.id == 'i2');
+      final nov2 = vault.invoices.firstWhere((e) => e.id == 'i3');
+      final oct1 = vault.invoices.firstWhere((e) => e.id == 'i1');
+      expect(nov1.status, 'paid');
+      expect(nov2.status, 'paid');
+      expect(oct1.status, 'pending'); // Untouched because filtered out!
+    });
   });
 
   group('InvoicePdfBuilder', () {

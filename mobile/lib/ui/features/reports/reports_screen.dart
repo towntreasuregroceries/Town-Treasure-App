@@ -1,7 +1,6 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -9,6 +8,7 @@ import '../../../data/repositories/vault_repository.dart';
 import '../../core/app_lock_guard.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/user_friendly_error.dart';
+import '../../core/widgets/print_options_sheet.dart';
 import 'reports_view_model.dart';
 import 'statements_screen.dart';
 
@@ -145,28 +145,15 @@ class _ReportsScreenState extends State<ReportsScreen>
 
   Future<void> _exportPdf() async {
     final report = _activeReport ?? _generateCurrentReport();
-    setState(() => _exporting = true);
-    try {
-      final bytes = await _vm.buildReportPdfBytes(report);
-      await AppLockGuard.runWithoutRelock(
-        () => Printing.layoutPdf(
-          name: 'Report_${report.type}.pdf',
-          onLayout: (_) async => bytes,
-        ),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not generate PDF: ${UserFriendlyError.format(e)}',
-            ),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _exporting = false);
-    }
+    await showPrintOptionsSheet(
+      context,
+      document: PrintableDocument(
+        title: 'Report: ${report.dateRangeLabel}',
+        filename: 'Report_${report.type}.pdf',
+        supportsThermalRoll: false,
+        buildPdf: (_) => _vm.buildReportPdfBytes(report),
+      ),
+    );
   }
 
   Future<void> _exportExcel() async {

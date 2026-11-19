@@ -4,8 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/services/print_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/branded_pdf_viewer_screen.dart';
+import '../../core/widgets/print_options_sheet.dart';
 import 'invoice_editor_screen.dart';
 import 'invoice_formatters.dart';
 import 'invoice_pdf_builder.dart';
@@ -96,20 +99,54 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     }
   }
 
-  Future<void> _handlePrintPdf(Invoice inv, Restaurant? rest) async {
-    final vault = context.read<VaultRepository>();
-    setState(() => _pdfBusy = true);
-    try {
-      await InvoicePdfBuilder.previewAndPrint(
+  PrintableDocument _buildPrintableDoc(
+    Invoice inv,
+    Restaurant? rest,
+    VaultRepository vault,
+  ) {
+    return PrintableDocument(
+      title: 'Invoice ${inv.number}',
+      filename: InvoicePdfBuilder.pdfFilename(inv, rest),
+      supportsThermalRoll: true,
+      buildPdf: (format) => InvoicePdfBuilder.buildPdfBytes(
         invoice: inv,
         restaurant: rest,
         settings: vault.settings,
-      );
-    } catch (e) {
-      _showSnack('Failed to generate PDF: $e', isError: true);
-    } finally {
-      if (mounted) setState(() => _pdfBusy = false);
-    }
+        pageFormat: format,
+      ),
+      buildEscPos: (cols) => EscPosReceiptBuilder.buildInvoicesReceipt(
+        invoices: [inv],
+        restaurants: vault.restaurants,
+        lineWidth: cols,
+      ),
+    );
+  }
+
+  Future<void> _handleViewPdf(Invoice inv, Restaurant? rest) async {
+    final vault = context.read<VaultRepository>();
+    final doc = _buildPrintableDoc(inv, rest, vault);
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (viewerCtx) => BrandedPdfViewerScreen(
+          title: doc.title,
+          filename: doc.filename,
+          supportsThermalRoll: doc.supportsThermalRoll,
+          buildPdf: doc.buildPdf,
+          onOpenPrintCenter: () => showPrintOptionsSheet(
+            viewerCtx,
+            document: doc,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handlePrintPdf(Invoice inv, Restaurant? rest) async {
+    final vault = context.read<VaultRepository>();
+    await showPrintOptionsSheet(
+      context,
+      document: _buildPrintableDoc(inv, rest, vault),
+    );
   }
 
   Future<void> _handleSharePdf(Invoice inv, Restaurant? rest) async {
@@ -262,9 +299,15 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                   label: Text(inv.isPaid ? 'Mark as Unpaid' : 'Mark as Paid'),
                 ),
                 OutlinedButton.icon(
-                  onPressed: _pdfBusy ? null : () => _handlePrintPdf(inv, rest),
+                  key: const Key('btn_view_invoice_pdf'),
+                  onPressed: _pdfBusy ? null : () => _handleViewPdf(inv, rest),
                   icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
                   label: const Text('PDF'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _pdfBusy ? null : () => _handlePrintPdf(inv, rest),
+                  icon: const Icon(Icons.print_outlined, size: 18),
+                  label: const Text('Print'),
                 ),
                 OutlinedButton.icon(
                   onPressed: _pdfBusy ? null : () => _handleSharePdf(inv, rest),

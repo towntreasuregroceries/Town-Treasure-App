@@ -60,6 +60,12 @@ class VaultRepository extends ChangeNotifier {
   final SupabaseGateway _supabase;
   final Duration _syncDebounceDuration;
 
+  Future<Map<String, dynamic>> getSavedPrinterConfig() =>
+      _storage.getSavedPrinterConfig();
+
+  Future<void> savePrinterConfig(Map<String, dynamic> config) =>
+      _storage.setSavedPrinterConfig(config);
+
   List<Restaurant> _restaurants = [];
   List<String> _deletedRestaurantIds = [];
   List<Invoice> _invoices = [];

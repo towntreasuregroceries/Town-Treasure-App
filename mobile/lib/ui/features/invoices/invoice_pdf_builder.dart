@@ -26,83 +26,268 @@ class InvoicePdfBuilder {
   static const PdfColor _watermarkColor = PdfColor.fromInt(0xFFEBEBEB);
   static const PdfColor _stampRed = PdfColor.fromInt(0xFFDC2626);
 
-  /// Generates A4 PDF bytes with header banner, KRA PIN under BILLED TO,
-  /// line items table, totals, QR link, official stamp (`assets/stamp.png`),
-  /// and saved signature from [settings].
+  /// Generates A4 (or Letter/Thermal Roll) PDF bytes with header banner, KRA PIN
+  /// under BILLED TO, line items table, totals, QR link, official stamp
+  /// (`assets/stamp.png`), and saved signature from [settings].
   static Future<Uint8List> buildPdfBytes({
     required Invoice invoice,
     Restaurant? restaurant,
     VaultSettings settings = const VaultSettings(),
+    PdfPageFormat pageFormat = PdfPageFormat.a4,
     Uint8List? logoBytesOverride,
     Uint8List? stampBytesOverride,
   }) async {
-    final clientName =
-        restaurant?.name.trim().isNotEmpty == true
-            ? restaurant!.name
-            : (invoice.restaurantName.trim().isNotEmpty
-                ? invoice.restaurantName
-                : 'Unknown');
-    final kraPin = Restaurant.normalizeKraPin(restaurant?.kraPin);
-    final clientAddress = restaurant?.address.trim() ?? '';
-    final clientPhone = restaurant?.phone.trim() ?? '';
+    return buildMultiInvoicePdfBytes(
+      invoices: [invoice],
+      restaurants: restaurant != null ? [restaurant] : const [],
+      settings: settings,
+      pageFormat: pageFormat,
+      logoBytesOverride: logoBytesOverride,
+      stampBytesOverride: stampBytesOverride,
+    );
+  }
+
+  /// Generates a combined PDF (A4/Letter multi-invoice pages or 80mm/58mm thermal receipts).
+  static Future<Uint8List> buildMultiInvoicePdfBytes({
+    required List<Invoice> invoices,
+    required List<Restaurant> restaurants,
+    VaultSettings settings = const VaultSettings(),
+    PdfPageFormat pageFormat = PdfPageFormat.a4,
+    Uint8List? logoBytesOverride,
+    Uint8List? stampBytesOverride,
+  }) async {
+    if (invoices.isEmpty) {
+      throw ArgumentError('At least one invoice is required to build a PDF.');
+    }
+    if (pageFormat == PdfPageFormat.roll80 || pageFormat == PdfPageFormat.roll57) {
+      return buildReceiptPdfBytes(
+        invoices: invoices,
+        restaurants: restaurants,
+        settings: settings,
+        pageFormat: pageFormat,
+      );
+    }
 
     final logoBytes = logoBytesOverride ?? await _loadAssetBytes('assets/logo.png');
     final stampRaw = stampBytesOverride ?? await _loadAssetBytes('assets/stamp.png');
-    final stampGrayscale = stampRaw != null ? _toGrayscalePng(stampRaw) : null;
+    final stampGrayscale =
+        (stampRaw != null && stampRaw.isNotEmpty) ? _toGrayscalePng(stampRaw) : null;
     final signatureBytes = decodeSignatureDataUrl(settings.signature);
 
-    final logoImage = logoBytes != null ? pw.MemoryImage(logoBytes) : null;
-    final stampImage =
-        stampGrayscale != null ? pw.MemoryImage(stampGrayscale) : null;
-    final sigImage =
-        signatureBytes != null ? pw.MemoryImage(signatureBytes) : null;
+    final logoImage =
+        (logoBytes != null && logoBytes.isNotEmpty) ? pw.MemoryImage(logoBytes) : null;
+    final stampImage = (stampGrayscale != null && stampGrayscale.isNotEmpty)
+        ? pw.MemoryImage(stampGrayscale)
+        : null;
+    final sigImage = (signatureBytes != null && signatureBytes.isNotEmpty)
+        ? pw.MemoryImage(signatureBytes)
+        : null;
 
     final doc = pw.Document(
-      title: 'Invoice ${invoice.number}',
+      title: invoices.length == 1
+          ? 'Invoice ${invoices.first.number}'
+          : 'Town Treasure Invoices (${invoices.length})',
       author: 'Town Treasure Limited',
     );
 
-    final pageTheme = pw.PageTheme(
-      pageFormat: PdfPageFormat.a4,
-      margin: const pw.EdgeInsets.fromLTRB(36, 24, 36, 60),
-      buildBackground: (context) => _buildPageBackground(
-        context: context,
-        logoImage: logoImage,
-        clientName: clientName,
-      ),
-    );
+    for (final invoice in invoices) {
+      final restaurant = Restaurant.resolveInvoiceRestaurant(
+        invoice,
+        restaurants,
+      ).restaurant;
+      final clientName =
+          restaurant?.name.trim().isNotEmpty == true
+              ? restaurant!.name
+              : (invoice.restaurantName.trim().isNotEmpty
+                  ? invoice.restaurantName
+                  : 'Unknown');
+      final kraPin = Restaurant.normalizeKraPin(restaurant?.kraPin);
+      final clientAddress = restaurant?.address.trim() ?? '';
+      final clientPhone = restaurant?.phone.trim() ?? '';
 
-    doc.addPage(
-      pw.MultiPage(
-        pageTheme: pageTheme,
-        header: (context) => _buildPageHeader(
+      final pageTheme = pw.PageTheme(
+        pageFormat: pageFormat,
+        margin: const pw.EdgeInsets.fromLTRB(36, 24, 36, 60),
+        buildBackground: (context) => _buildPageBackground(
           context: context,
-          invoice: invoice,
+          logoImage: logoImage,
           clientName: clientName,
         ),
-        build: (context) => [
-          _buildTitleAndMeta(invoice),
-          pw.SizedBox(height: 20),
-          _buildFromAndBilledTo(
-            clientName: clientName,
-            kraPin: kraPin,
-            clientAddress: clientAddress,
-            clientPhone: clientPhone,
-          ),
-          pw.SizedBox(height: 20),
-          _buildItemsTable(invoice.items),
-          pw.SizedBox(height: 20),
-          _buildTotalsBlock(invoice.totalSell),
-          pw.SizedBox(height: 28),
-          _buildBottomQrAndStamp(
+      );
+
+      doc.addPage(
+        pw.MultiPage(
+          pageTheme: pageTheme,
+          header: (context) => _buildPageHeader(
+            context: context,
             invoice: invoice,
-            stampImage: stampImage,
-            sigImage: sigImage,
+            clientName: clientName,
           ),
-        ],
-      ),
+          build: (context) => [
+            _buildTitleAndMeta(invoice),
+            pw.SizedBox(height: 20),
+            _buildFromAndBilledTo(
+              clientName: clientName,
+              kraPin: kraPin,
+              clientAddress: clientAddress,
+              clientPhone: clientPhone,
+            ),
+            pw.SizedBox(height: 20),
+            _buildItemsTable(invoice.items),
+            pw.SizedBox(height: 20),
+            _buildTotalsBlock(invoice.totalSell),
+            pw.SizedBox(height: 28),
+            _buildBottomQrAndStamp(
+              invoice: invoice,
+              stampImage: stampImage,
+              sigImage: sigImage,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return doc.save();
+  }
+
+  /// Generates compact 80mm / 58mm thermal roll PDF receipts for Android print plugins
+  /// (Mopria, RawBT, USB thermal drivers, and Wi-Fi roll printers).
+  static Future<Uint8List> buildReceiptPdfBytes({
+    required List<Invoice> invoices,
+    required List<Restaurant> restaurants,
+    VaultSettings settings = const VaultSettings(),
+    PdfPageFormat pageFormat = PdfPageFormat.roll80,
+  }) async {
+    final is58mm = pageFormat.width <= PdfPageFormat.roll57.width + 1;
+    final baseFont = is58mm ? 7.5 : 9.0;
+    final titleFont = is58mm ? 11.0 : 13.0;
+    final doc = pw.Document(
+      title: invoices.length == 1
+          ? 'Receipt ${invoices.first.number}'
+          : 'Receipts (${invoices.length})',
+      author: 'Town Treasure Limited',
     );
 
+    for (final invoice in invoices) {
+      final clientName = Restaurant.invoiceDisplayName(invoice, restaurants);
+      final rest = Restaurant.resolveInvoiceRestaurant(
+        invoice,
+        restaurants,
+      ).restaurant;
+      final kraPin = Restaurant.normalizeKraPin(rest?.kraPin);
+
+      doc.addPage(
+        pw.Page(
+          pageFormat: pageFormat,
+          margin: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          build: (context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: [
+              pw.Center(
+                child: pw.Text(
+                  'TOWN TREASURE LIMITED',
+                  style: pw.TextStyle(
+                    fontSize: titleFont,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
+                ),
+              ),
+              pw.Center(
+                child: pw.Text(
+                  'Tel: 0708567696 | Nairobi',
+                  style: pw.TextStyle(fontSize: baseFont),
+                ),
+              ),
+              pw.Divider(thickness: 0.7),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'INV: ${invoice.number}',
+                    style: pw.TextStyle(
+                      fontSize: baseFont,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.Text(
+                    invoice.status.toUpperCase(),
+                    style: pw.TextStyle(
+                      fontSize: baseFont,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              pw.Text('Client: $clientName', style: pw.TextStyle(fontSize: baseFont)),
+              if (kraPin.isNotEmpty)
+                pw.Text('PIN: $kraPin', style: pw.TextStyle(fontSize: baseFont - 1)),
+              pw.Text(
+                'Date: ${InvoiceFormatters.formatDisplayDate(invoice.date)}',
+                style: pw.TextStyle(fontSize: baseFont),
+              ),
+              pw.Divider(thickness: 0.7),
+              ...invoice.items.map(
+                (it) => pw.Padding(
+                  padding: const pw.EdgeInsets.only(bottom: 3),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        it.desc,
+                        style: pw.TextStyle(
+                          fontSize: baseFont,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text(
+                            '${it.qty == it.qty.roundToDouble() ? it.qty.toInt() : it.qty} ${it.unit} x ${InvoiceFormatters.formatMoney(it.sellPrice)}',
+                            style: pw.TextStyle(fontSize: baseFont - 0.5),
+                          ),
+                          pw.Text(
+                            InvoiceFormatters.formatMoney(it.total),
+                            style: pw.TextStyle(fontSize: baseFont),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              pw.Divider(thickness: 0.9),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'TOTAL (KES)',
+                    style: pw.TextStyle(
+                      fontSize: baseFont + 1,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                  pw.Text(
+                    InvoiceFormatters.formatMoney(invoice.totalSell),
+                    style: pw.TextStyle(
+                      fontSize: baseFont + 1,
+                      fontWeight: pw.FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              pw.SizedBox(height: 8),
+              pw.Center(
+                child: pw.Text(
+                  'Thank you for choosing Town Treasure!',
+                  style: pw.TextStyle(fontSize: baseFont - 0.5),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
     return doc.save();
   }
 

@@ -2,15 +2,17 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/services/print_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/user_friendly_error.dart';
+import '../../core/widgets/print_options_sheet.dart';
+import '../invoices/invoice_formatters.dart';
 import 'pricelist_pdf_builder.dart';
 import 'pricelists_view_model.dart';
 
@@ -52,31 +54,29 @@ class _PriceListPreviewScreenState extends State<PriceListPreviewScreen> {
   }
 
   Future<void> _downloadOrPrintPdf(PriceList pl) async {
-    setState(() => _busy = true);
-    try {
-      final bytes = await PriceListPdfBuilder.buildPdfBytes(
-        pl,
-        settings: _vm.settings,
-      );
-      await AppLockGuard.runWithoutRelock(
-        () => Printing.layoutPdf(
-          name: '${pl.name.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_')}.pdf',
-          onLayout: (_) async => bytes,
+    await showPrintOptionsSheet(
+      context,
+      document: PrintableDocument(
+        title: pl.name,
+        filename: '${pl.name.replaceAll(RegExp(r'[^a-zA-Z0-9]+'), '_')}.pdf',
+        supportsThermalRoll: false,
+        buildPdf: (_) => PriceListPdfBuilder.buildPdfBytes(
+          pl,
+          settings: _vm.settings,
         ),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not generate PDF: ${UserFriendlyError.format(e)}',
-            ),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+        buildEscPos: (cols) => EscPosReceiptBuilder.buildSummaryReceipt(
+          title: pl.name,
+          lines: pl.items
+              .map(
+                (it) => it.isHeader
+                    ? '[ ${it.name} ]'
+                    : '${it.name} (${it.unit}): KES ${InvoiceFormatters.formatMoney(it.price)}',
+              )
+              .toList(),
+          lineWidth: cols,
+        ),
+      ),
+    );
   }
 
   Future<void> _sharePdfFile(PriceList pl) async {

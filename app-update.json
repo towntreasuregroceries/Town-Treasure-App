@@ -1,8 +1,8 @@
 {
-  "version": "1.1.3",
-  "buildNumber": 2007,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.1.3/TownTreasureGroceries.apk",
-  "sha256": "7690c97900a797ffd6591863b4bf900f0439d08e7bbcb4c5cba0b18bc2e4b194",
-  "releaseNotes": "v1.1.3+7: Fixed Save button lag and double-tap protection across Invoices, Drafts, Price Lists, and Clerk Review with immediate 'Saving...' feedback and 6s bounded cloud sync; restored live Gemini Vision OCR fallback (gemini-3-flash-preview -> gemini-2.5-flash -> gemini-flash-lite-latest with BLOCK_NONE safety settings) alongside bundled offline PP-OCRv5 ONNX and Google ML Kit engines.",
+  "version": "1.1.4",
+  "buildNumber": 2008,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.1.4/TownTreasureGroceries.apk",
+  "sha256": "b37ae3043350599c33dbfdea4d57a7a936c88177c6b620ffaaf2d7775c29dbcf",
+  "releaseNotes": "v1.1.4+8: Added monthly invoice filter & multi-select batch Mark as Paid / Batch Print on Invoices; built Universal Print & Dispatch Center (Android System/Mopria/USB Print, Direct Wi-Fi/LAN IPP port 631, Raw TCP port 9100, 80mm/58mm ESC/POS thermal receipts, network subnet printer auto-scanner, and printer app bridge); added Town Treasure branded in-app PDF viewer with pinch/double-tap zoom and page strip requiring zero external PDF apps.",
   "mandatory": false
 }

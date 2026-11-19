@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import 'package:printing/printing.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/services/print_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/user_friendly_error.dart';
+import '../../core/widgets/print_options_sheet.dart';
+import '../invoices/invoice_formatters.dart';
 import 'reports_view_model.dart';
 import 'statement_pdf_builder.dart';
 
@@ -101,32 +103,32 @@ class _StatementsScreenState extends State<StatementsScreen> {
       );
       return;
     }
-    setState(() => _busy = true);
-    try {
-      final stmt = _vm.buildStatement(rest, _selectedMonth);
-      final bytes = await StatementPdfBuilder.buildPdfBytes(
-        stmt,
-        settings: _vm.settings,
-      );
-      await AppLockGuard.runWithoutRelock(
-        () => Printing.layoutPdf(
-          name: 'Statement_${rest.name.replaceAll(' ', '_')}_${stmt.monthName}.pdf',
-          onLayout: (_) async => bytes,
+    final stmt = _vm.buildStatement(rest, _selectedMonth);
+    await showPrintOptionsSheet(
+      context,
+      document: PrintableDocument(
+        title: 'Statement - ${rest.name} (${stmt.monthName})',
+        filename:
+            'Statement_${rest.name.replaceAll(' ', '_')}_${stmt.monthName}.pdf',
+        supportsThermalRoll: false,
+        buildPdf: (_) => StatementPdfBuilder.buildPdfBytes(
+          stmt,
+          settings: _vm.settings,
         ),
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              'Could not generate PDF: ${UserFriendlyError.format(e)}',
-            ),
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
+        buildEscPos: (cols) => EscPosReceiptBuilder.buildSummaryReceipt(
+          title: 'Statement: ${rest.name}',
+          lines: [
+            'Period: ${stmt.monthName}',
+            'Entries: ${stmt.transactions.length}',
+            'Opening: KES ${InvoiceFormatters.formatMoney(stmt.openingBalance)}',
+            'Billed: KES ${InvoiceFormatters.formatMoney(stmt.monthInvoicedTotal)}',
+            'Paid: KES ${InvoiceFormatters.formatMoney(stmt.monthPaidTotal)}',
+            'Balance Due: KES ${InvoiceFormatters.formatMoney(stmt.closingBalance)}',
+          ],
+          lineWidth: cols,
+        ),
+      ),
+    );
   }
 
   Future<void> _sharePdf() async {
