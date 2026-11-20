@@ -33,6 +33,7 @@ Future<LocalStorageService> createTestLocalStorage() async {
 
 class FakeSupabaseGateway implements SupabaseGateway {
   AuthUserInfo? user;
+  String? accessToken = 'fake-access-token';
   bool missingRevisionColumn = false;
   String? vaultData;
   int vaultRevision = 0;
@@ -50,6 +51,9 @@ class FakeSupabaseGateway implements SupabaseGateway {
 
   @override
   Future<AuthUserInfo?> getCurrentUser() async => user;
+
+  @override
+  Future<String?> getAccessToken() async => user != null ? accessToken : null;
 
   @override
   Future<void> verifyInvitedEmail(String email) async {

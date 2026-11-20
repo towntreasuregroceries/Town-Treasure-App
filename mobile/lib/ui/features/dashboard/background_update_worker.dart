@@ -189,6 +189,27 @@ class BackgroundAlertRunner {
       }
     }
 
+    final expiringDocs = vault.settings.personalDocuments
+        .where((d) => d.isExpired(now) || d.isExpiringSoon(now))
+        .toList();
+    if (expiringDocs.isNotEmpty) {
+      final todayKey = DateFormat('yyyy-MM-dd').format(now);
+      const lastDocKey = 'ttg_last_doc_expiry_notif_day';
+      final lastDay = await storage.getRaw(lastDocKey) ?? '';
+      if (lastDay != todayKey) {
+        final expiredCount = expiringDocs.where((d) => d.isExpired(now)).length;
+        await smartNotifier.showCategoryNotification(
+          category: NotificationCategory.documentExpiry,
+          title: expiredCount > 0
+              ? '$expiredCount Personal Vault Doc${expiredCount == 1 ? '' : 's'} Expired'
+              : '${expiringDocs.length} Vault Doc${expiringDocs.length == 1 ? '' : 's'} Expiring Soon',
+          body:
+              '${expiringDocs.first.title} needs attention in your encrypted Personal Vault.',
+        );
+        await storage.setRaw(lastDocKey, todayKey);
+      }
+    }
+
     // 2. Remote Field Clerk Dockets check (every ~30 min when online & signed in)
     if (prefs.clerkAlertsEnabled) {
       try {

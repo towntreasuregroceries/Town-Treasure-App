@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ttg-vault-docs",
+  "main": "src/index.js",
+  "compatibility_date": "2026-11-20",
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1,
+    "traces": {
+      "enabled": true,
+      "head_sampling_rate": 1
+    }
+  },
+  "r2_buckets": [
+    {
+      "binding": "VAULT_DOCS_BUCKET",
+      "bucket_name": "towntreasure"
+    }
+  ],
+  "vars": {
+    "SUPABASE_URL": "https://hufxsjfmgjeyfdidsvcq.supabase.co",
+    "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1ZnhzamZtZ2pleWZkaWRzdmNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM2OTc4NTcsImV4cCI6MjEwOTI3Mzg1N30.AERGUhCqait59P0JhA-Ph1F-Kz2pzjfdqYyxMXRSfJY"
+  }
+}

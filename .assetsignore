@@ -1,0 +1,16 @@
+mobile/
+scripts/
+supabase/
+tests/
+workers/
+docs/
+problems to be fixed/
+scratch/
+test_samples/
+*.sql
+.env
+.env.*
+*.cjs
+bun.lock
+package.json
+package-lock.json

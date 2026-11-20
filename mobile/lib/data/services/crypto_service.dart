@@ -93,19 +93,19 @@ class CryptoService {
     return SecretKey(bytes);
   }
 
-  /// Encrypts a JSON-serializable object and returns base64 `[IV(12) | cipher | tag(16)]`.
-  Future<String> encrypt(
-    Map<String, dynamic> dataObj,
+  /// Encrypts raw binary data (such as personal vault PDFs/images) and returns
+  /// `[IV(12) | cipher | tag(16)]`.
+  Future<Uint8List> encryptBytes(
+    Uint8List plainBytes,
     Map<String, dynamic> jwkKey,
   ) async {
     final secretKey = jwkToSecretKey(jwkKey);
-    final plaintext = utf8.encode(jsonEncode(dataObj));
     final nonce = _aesGcm.newNonce();
     if (nonce.length != ivLengthBytes) {
       throw StateError('Unexpected AES-GCM nonce length: ${nonce.length}');
     }
     final secretBox = await _aesGcm.encrypt(
-      plaintext,
+      plainBytes,
       secretKey: secretKey,
       nonce: nonce,
     );
@@ -128,7 +128,48 @@ class CryptoService {
       payload.length,
       macBytes,
     );
-    return base64Encode(payload);
+    return payload;
+  }
+
+  /// Decrypts raw `[IV(12) | cipher | tag(16)]` binary ciphertext produced by [encryptBytes].
+  Future<Uint8List?> decryptBytes(
+    Uint8List? payload,
+    Map<String, dynamic>? jwkKey,
+  ) async {
+    if (payload == null ||
+        payload.length < ivLengthBytes + macLengthBytes + 1 ||
+        jwkKey == null) {
+      return null;
+    }
+    try {
+      final secretKey = jwkToSecretKey(jwkKey);
+      final iv = payload.sublist(0, ivLengthBytes);
+      final cipherText = payload.sublist(
+        ivLengthBytes,
+        payload.length - macLengthBytes,
+      );
+      final macBytes = payload.sublist(payload.length - macLengthBytes);
+
+      final secretBox = SecretBox(
+        cipherText,
+        nonce: iv,
+        mac: Mac(macBytes),
+      );
+      final decrypted = await _aesGcm.decrypt(secretBox, secretKey: secretKey);
+      return Uint8List.fromList(decrypted);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Encrypts a JSON-serializable object and returns base64 `[IV(12) | cipher | tag(16)]`.
+  Future<String> encrypt(
+    Map<String, dynamic> dataObj,
+    Map<String, dynamic> jwkKey,
+  ) async {
+    final plaintext = Uint8List.fromList(utf8.encode(jsonEncode(dataObj)));
+    final encrypted = await encryptBytes(plaintext, jwkKey);
+    return base64Encode(encrypted);
   }
 
   /// Decrypts a base64 `[IV(12) | cipher | tag(16)]` payload produced by `data.js` or this service.
@@ -139,11 +180,11 @@ class CryptoService {
   ) async {
     if (base64Str == null || base64Str.isEmpty || jwkKey == null) return null;
     try {
-      final secretKey = jwkToSecretKey(jwkKey);
-      final payload = base64Decode(base64Str);
+      final payload = Uint8List.fromList(base64Decode(base64Str));
       if (payload.length < ivLengthBytes + macLengthBytes) {
         return null;
       }
+      final secretKey = jwkToSecretKey(jwkKey);
       final iv = payload.sublist(0, ivLengthBytes);
       final cipherText = payload.sublist(
         ivLengthBytes,

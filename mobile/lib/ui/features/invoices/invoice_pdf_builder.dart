@@ -105,6 +105,17 @@ class InvoicePdfBuilder {
       final clientAddress = restaurant?.address.trim() ?? '';
       final clientPhone = restaurant?.phone.trim() ?? '';
 
+      final taxSummary = KraTaxCalculator.computeInvoiceTaxSummary(
+        invoice,
+        profile: settings.kraProfile,
+      );
+      final sellerPin = settings.kraProfile.normalizedSellerPin;
+      final cuSerial = settings.kraProfile.cuSerialNumber.trim();
+      final isTaxInvoice =
+          settings.kraProfile.vatRegistered &&
+          (taxSummary.hasTaxableVatLines ||
+              (invoice.cuInvoiceNumber?.trim().isNotEmpty ?? false));
+
       final pageTheme = pw.PageTheme(
         pageFormat: pageFormat,
         margin: const pw.EdgeInsets.fromLTRB(36, 24, 36, 60),
@@ -124,18 +135,24 @@ class InvoicePdfBuilder {
             clientName: clientName,
           ),
           build: (context) => [
-            _buildTitleAndMeta(invoice),
+            _buildTitleAndMeta(invoice, isTaxInvoice: isTaxInvoice),
             pw.SizedBox(height: 20),
             _buildFromAndBilledTo(
               clientName: clientName,
               kraPin: kraPin,
               clientAddress: clientAddress,
               clientPhone: clientPhone,
+              sellerKraPin: sellerPin,
+              cuSerial: cuSerial,
             ),
             pw.SizedBox(height: 20),
             _buildItemsTable(invoice.items),
             pw.SizedBox(height: 20),
-            _buildTotalsBlock(invoice.totalSell),
+            _buildTotalsBlock(
+              invoice.totalSell,
+              taxSummary: taxSummary,
+              isTaxInvoice: isTaxInvoice,
+            ),
             pw.SizedBox(height: 28),
             _buildBottomQrAndStamp(
               invoice: invoice,
@@ -175,6 +192,11 @@ class InvoicePdfBuilder {
         restaurants,
       ).restaurant;
       final kraPin = Restaurant.normalizeKraPin(rest?.kraPin);
+      final sellerPin = settings.kraProfile.normalizedSellerPin;
+      final taxSummary = KraTaxCalculator.computeInvoiceTaxSummary(
+        invoice,
+        profile: settings.kraProfile,
+      );
 
       doc.addPage(
         pw.Page(
@@ -198,6 +220,13 @@ class InvoicePdfBuilder {
                   style: pw.TextStyle(fontSize: baseFont),
                 ),
               ),
+              if (sellerPin.isNotEmpty)
+                pw.Center(
+                  child: pw.Text(
+                    'PIN: $sellerPin',
+                    style: pw.TextStyle(fontSize: baseFont - 0.5),
+                  ),
+                ),
               pw.Divider(thickness: 0.7),
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -221,6 +250,11 @@ class InvoicePdfBuilder {
               pw.Text('Client: $clientName', style: pw.TextStyle(fontSize: baseFont)),
               if (kraPin.isNotEmpty)
                 pw.Text('PIN: $kraPin', style: pw.TextStyle(fontSize: baseFont - 1)),
+              if (invoice.cuInvoiceNumber?.isNotEmpty == true)
+                pw.Text(
+                  'CU Inv: ${invoice.cuInvoiceNumber}',
+                  style: pw.TextStyle(fontSize: baseFont - 1),
+                ),
               pw.Text(
                 'Date: ${InvoiceFormatters.formatDisplayDate(invoice.date)}',
                 style: pw.TextStyle(fontSize: baseFont),
@@ -257,6 +291,28 @@ class InvoicePdfBuilder {
                 ),
               ),
               pw.Divider(thickness: 0.9),
+              if (taxSummary.outputVatTotal > 0) ...[
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('Exempt:', style: pw.TextStyle(fontSize: baseFont - 0.5)),
+                    pw.Text(
+                      InvoiceFormatters.formatMoney(taxSummary.exemptTotal),
+                      style: pw.TextStyle(fontSize: baseFont - 0.5),
+                    ),
+                  ],
+                ),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text('VAT (16%):', style: pw.TextStyle(fontSize: baseFont - 0.5)),
+                    pw.Text(
+                      InvoiceFormatters.formatMoney(taxSummary.outputVatTotal),
+                      style: pw.TextStyle(fontSize: baseFont - 0.5),
+                    ),
+                  ],
+                ),
+              ],
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
@@ -268,7 +324,11 @@ class InvoicePdfBuilder {
                     ),
                   ),
                   pw.Text(
-                    InvoiceFormatters.formatMoney(invoice.totalSell),
+                    InvoiceFormatters.formatMoney(
+                      taxSummary.outputVatTotal > 0
+                          ? taxSummary.grandTotalWithVat
+                          : invoice.totalSell,
+                    ),
                     style: pw.TextStyle(
                       fontSize: baseFont + 1,
                       fontWeight: pw.FontWeight.bold,
@@ -456,15 +516,19 @@ class InvoicePdfBuilder {
     );
   }
 
-  static pw.Widget _buildTitleAndMeta(Invoice invoice) {
+  static pw.Widget _buildTitleAndMeta(
+    Invoice invoice, {
+    bool isTaxInvoice = false,
+  }) {
+    final cuNo = invoice.cuInvoiceNumber?.trim() ?? '';
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       children: [
         pw.Text(
-          'INVOICE',
+          isTaxInvoice ? 'TAX INVOICE' : 'INVOICE',
           style: pw.TextStyle(
-            fontSize: 24,
+            fontSize: isTaxInvoice ? 21 : 24,
             fontWeight: pw.FontWeight.bold,
             color: _leafGreen,
           ),
@@ -507,6 +571,26 @@ class InvoicePdfBuilder {
                 ),
               ],
             ),
+            if (cuNo.isNotEmpty) ...[
+              pw.SizedBox(height: 4),
+              pw.Row(
+                mainAxisSize: pw.MainAxisSize.min,
+                children: [
+                  pw.Text(
+                    'CU Inv No:  ',
+                    style: pw.TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _slateDark,
+                    ),
+                  ),
+                  pw.Text(
+                    cuNo,
+                    style: const pw.TextStyle(fontSize: 9.5, color: _textMuted),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ],
@@ -518,6 +602,8 @@ class InvoicePdfBuilder {
     required String kraPin,
     required String clientAddress,
     required String clientPhone,
+    String sellerKraPin = '',
+    String cuSerial = '',
   }) {
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -544,6 +630,24 @@ class InvoicePdfBuilder {
                   color: _leafGreen,
                 ),
               ),
+              if (sellerKraPin.isNotEmpty) ...[
+                pw.SizedBox(height: 4),
+                pw.Text(
+                  'KRA PIN: $sellerKraPin',
+                  style: pw.TextStyle(
+                    fontSize: 9.5,
+                    fontWeight: pw.FontWeight.bold,
+                    color: _slateDark,
+                  ),
+                ),
+              ],
+              if (cuSerial.isNotEmpty) ...[
+                pw.SizedBox(height: 2),
+                pw.Text(
+                  'eTIMS CU: $cuSerial',
+                  style: const pw.TextStyle(fontSize: 8.5, color: _textMuted),
+                ),
+              ],
               pw.SizedBox(height: 4),
               pw.Text(
                 'Tel: 0708567696',
@@ -719,37 +823,82 @@ class InvoicePdfBuilder {
     );
   }
 
-  static pw.Widget _buildTotalsBlock(double totalSell) {
+  static pw.Widget _totalLineRow(String label, double amount) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: pw.Row(
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Text(
+            label,
+            style: pw.TextStyle(
+              fontSize: 9.2,
+              fontWeight: pw.FontWeight.bold,
+              color: _textDark,
+            ),
+          ),
+          pw.Text(
+            'KSh ${InvoiceFormatters.formatMoney(amount)}',
+            style: pw.TextStyle(
+              fontSize: 9.2,
+              fontWeight: pw.FontWeight.bold,
+              color: _textDark,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _buildTotalsBlock(
+    double totalSell, {
+    KraInvoiceTaxSummary? taxSummary,
+    bool isTaxInvoice = false,
+  }) {
+    final showVatSplit = isTaxInvoice &&
+        taxSummary != null &&
+        taxSummary.hasTaxableVatLines;
+    final grandDisplay = showVatSplit ? taxSummary.grandTotalWithVat : totalSell;
+
     return pw.Align(
       alignment: pw.Alignment.centerRight,
       child: pw.SizedBox(
-        width: 225,
+        width: 235,
         child: pw.Column(
           children: [
-            pw.Padding(
-              padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-              child: pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    'Sub Total:',
-                    style: pw.TextStyle(
-                      fontSize: 9.5,
-                      fontWeight: pw.FontWeight.bold,
-                      color: _textDark,
+            if (showVatSplit) ...[
+              if (taxSummary.exemptTotal > 0)
+                _totalLineRow('VAT Exempt:', taxSummary.exemptTotal),
+              if (taxSummary.zeroRatedTotal > 0)
+                _totalLineRow('Zero-Rated (0%):', taxSummary.zeroRatedTotal),
+              if (taxSummary.taxableNetTotal > 0)
+                _totalLineRow('Taxable Net:', taxSummary.taxableNetTotal),
+              _totalLineRow('Output VAT (16%):', taxSummary.outputVatTotal),
+            ] else
+              pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      'Sub Total:',
+                      style: pw.TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: pw.FontWeight.bold,
+                        color: _textDark,
+                      ),
                     ),
-                  ),
-                  pw.Text(
-                    'KSh ${InvoiceFormatters.formatMoney(totalSell)}',
-                    style: pw.TextStyle(
-                      fontSize: 9.5,
-                      fontWeight: pw.FontWeight.bold,
-                      color: _textDark,
+                    pw.Text(
+                      'KSh ${InvoiceFormatters.formatMoney(totalSell)}',
+                      style: pw.TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: pw.FontWeight.bold,
+                        color: _textDark,
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
             pw.Container(
               color: _leafGreen,
               padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -765,7 +914,7 @@ class InvoicePdfBuilder {
                     ),
                   ),
                   pw.Text(
-                    'KSh ${InvoiceFormatters.formatMoney(totalSell)}',
+                    'KSh ${InvoiceFormatters.formatMoney(grandDisplay)}',
                     style: pw.TextStyle(
                       fontSize: 10,
                       fontWeight: pw.FontWeight.bold,
@@ -789,6 +938,8 @@ class InvoicePdfBuilder {
     final stampDate = InvoiceFormatters.formatDisplayDate(
       InvoiceFormatters.todayIso(),
     );
+    final etimsQr = invoice.etimsQrData?.trim() ?? '';
+    final hasEtimsQr = etimsQr.isNotEmpty;
 
     return pw.Row(
       crossAxisAlignment: pw.CrossAxisAlignment.end,
@@ -801,7 +952,7 @@ class InvoicePdfBuilder {
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  'Visit Us Online:',
+                  hasEtimsQr ? 'KRA eTIMS Verification:' : 'Visit Us Online:',
                   style: pw.TextStyle(
                     fontSize: 9.5,
                     fontWeight: pw.FontWeight.bold,
@@ -811,7 +962,9 @@ class InvoicePdfBuilder {
                 pw.SizedBox(height: 6),
                 pw.BarcodeWidget(
                   barcode: pw.Barcode.qrCode(),
-                  data: 'https://towntreasuregroceries.com',
+                  data: hasEtimsQr
+                      ? etimsQr
+                      : 'https://towntreasuregroceries.com',
                   width: 66,
                   height: 66,
                   color: _slateDark,
@@ -822,7 +975,9 @@ class InvoicePdfBuilder {
             pw.SizedBox(
               width: 120,
               child: pw.Text(
-                'Scan to visit our website\nand explore our fresh\ngrocery catalog online.',
+                hasEtimsQr
+                    ? 'Scan QR to verify invoice\non KRA eTIMS portal.\n${invoice.cuInvoiceNumber?.isNotEmpty == true ? 'CU: ${invoice.cuInvoiceNumber}' : ''}'
+                    : 'Scan to visit our website\nand explore our fresh\ngrocery catalog online.',
                 style: const pw.TextStyle(fontSize: 8.2, color: _textMuted),
               ),
             ),

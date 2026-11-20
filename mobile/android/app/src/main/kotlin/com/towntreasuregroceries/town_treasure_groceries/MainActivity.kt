@@ -9,6 +9,7 @@ import android.graphics.pdf.PdfRenderer
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import io.flutter.embedding.android.FlutterFragmentActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -22,11 +23,14 @@ class MainActivity : FlutterFragmentActivity() {
     companion object {
         private const val PDF_CHANNEL = "com.towntreasuregroceries/pdf_picker"
         private const val REQ_PICK_PDF = 4109
+        private const val REQ_PICK_RAW_DOC = 4110
         private const val MAX_PDF_PAGES = 12
         private const val MAX_PAGE_WIDTH = 2000
+        private const val MAX_RAW_DOC_BYTES = 20 * 1024 * 1024
     }
 
     private var pendingPdfResult: MethodChannel.Result? = null
+    private var pendingRawDocResult: MethodChannel.Result? = null
     private val pdfExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
 
@@ -37,25 +41,48 @@ class MainActivity : FlutterFragmentActivity() {
             flutterEngine.dartExecutor.binaryMessenger,
             PDF_CHANNEL
         ).setMethodCallHandler { call, result ->
-            if (call.method == "pickAndRenderPdf") {
-                if (pendingPdfResult != null) {
-                    result.error("BUSY", "PDF picker already active", null)
-                    return@setMethodCallHandler
-                }
-                pendingPdfResult = result
-                try {
-                    val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-                        addCategory(Intent.CATEGORY_OPENABLE)
-                        type = "application/pdf"
-                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+            when (call.method) {
+                "pickAndRenderPdf" -> {
+                    if (pendingPdfResult != null || pendingRawDocResult != null) {
+                        result.error("BUSY", "File picker already active", null)
+                        return@setMethodCallHandler
                     }
-                    startActivityForResult(intent, REQ_PICK_PDF)
-                } catch (e: Throwable) {
-                    pendingPdfResult = null
-                    result.error("PICKER_ERROR", e.message ?: "Could not open PDF picker", null)
+                    pendingPdfResult = result
+                    try {
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "application/pdf"
+                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+                        }
+                        startActivityForResult(intent, REQ_PICK_PDF)
+                    } catch (e: Throwable) {
+                        pendingPdfResult = null
+                        result.error("PICKER_ERROR", e.message ?: "Could not open PDF picker", null)
+                    }
                 }
-            } else {
-                result.notImplemented()
+                "pickRawDocument" -> {
+                    if (pendingPdfResult != null || pendingRawDocResult != null) {
+                        result.error("BUSY", "File picker already active", null)
+                        return@setMethodCallHandler
+                    }
+                    pendingRawDocResult = result
+                    try {
+                        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                            addCategory(Intent.CATEGORY_OPENABLE)
+                            type = "*/*"
+                            putExtra(
+                                Intent.EXTRA_MIME_TYPES,
+                                arrayOf("application/pdf", "image/jpeg", "image/png", "image/webp")
+                            )
+                            putExtra(Intent.EXTRA_ALLOW_MULTIPLE, false)
+                        }
+                        startActivityForResult(intent, REQ_PICK_RAW_DOC)
+                    } catch (e: Throwable) {
+                        pendingRawDocResult = null
+                        result.error("PICKER_ERROR", e.message ?: "Could not open file picker", null)
+                    }
+                }
+                else -> result.notImplemented()
             }
         }
     }
@@ -86,7 +113,69 @@ class MainActivity : FlutterFragmentActivity() {
             }
             return
         }
+        if (requestCode == REQ_PICK_RAW_DOC) {
+            val res = pendingRawDocResult
+            pendingRawDocResult = null
+            if (res == null) {
+                super.onActivityResult(requestCode, resultCode, data)
+                return
+            }
+            if (resultCode != Activity.RESULT_OK || data?.data == null) {
+                res.success(null)
+                return
+            }
+            val uri = data.data!!
+            pdfExecutor.execute {
+                try {
+                    val docMap = readRawDocumentUri(uri)
+                    mainHandler.post { res.success(docMap) }
+                } catch (e: Throwable) {
+                    mainHandler.post {
+                        res.error("DOC_READ_ERROR", e.message ?: "Could not read selected file", null)
+                    }
+                }
+            }
+            return
+        }
         super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    private fun readRawDocumentUri(uri: Uri): Map<String, Any> {
+        var displayName = "document"
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) {
+                    val name = cursor.getString(idx)
+                    if (!name.isNullOrBlank()) displayName = name
+                }
+            }
+        }
+        val mimeType = contentResolver.getType(uri) ?: if (displayName.lowercase().endsWith(".pdf")) {
+            "application/pdf"
+        } else {
+            "application/octet-stream"
+        }
+        val bytes = contentResolver.openInputStream(uri)?.use { input ->
+            val baos = ByteArrayOutputStream()
+            val buf = ByteArray(16384)
+            var total = 0
+            while (true) {
+                val read = input.read(buf)
+                if (read <= 0) break
+                total += read
+                if (total > MAX_RAW_DOC_BYTES) {
+                    throw IllegalStateException("Selected document exceeds 20 MB limit.")
+                }
+                baos.write(buf, 0, read)
+            }
+            baos.toByteArray()
+        } ?: throw IllegalStateException("Could not open selected document.")
+        return hashMapOf(
+            "fileName" to displayName,
+            "mimeType" to mimeType,
+            "bytes" to bytes
+        )
     }
 
     private fun renderPdfUriToJpegs(uri: Uri): List<Map<String, Any>> {

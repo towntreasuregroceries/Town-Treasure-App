@@ -1,8 +1,8 @@
 {
-  "version": "1.1.7",
-  "buildNumber": 2011,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.1.7/TownTreasureClerk.apk",
-  "sha256": "f2e516bc93a2c54b16ab4bf86394c4f1b72691687c76db30b4edbe8e109f17db",
-  "releaseNotes": "v1.1.7: Added built-in remote OTA auto-updater (Update Available banner & Check for Updates button) so future Town Treasure Clerk releases update directly in-app.",
+  "version": "1.1.8",
+  "buildNumber": 2012,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.1.8/TownTreasureClerk.apk",
+  "sha256": "7fb8e8d1d12ed4045fa1ebd14913f3d8d07ad88c93b9825abf5abd48f52e2ba5",
+  "releaseNotes": "v1.1.8: Maintenance release with shared SAF document picker and latest model compatibility.",
   "mandatory": false
 }

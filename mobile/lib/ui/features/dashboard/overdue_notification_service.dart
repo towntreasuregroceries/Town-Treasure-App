@@ -12,6 +12,7 @@ enum NotificationCategory {
   recurringBills,
   syncHealth,
   monthlyStatements,
+  documentExpiry,
 }
 
 enum NotificationSeverity { info, warning, urgent }
@@ -257,6 +258,12 @@ class FlutterLocalOverdueNotificationGateway
           'Monthly Client Statements',
           'Start-of-month reminders to send client statements.',
           1006,
+        ),
+      NotificationCategory.documentExpiry => (
+          'ttg_vault_expiry',
+          'Vault Document Expiries',
+          'Alerts when personal or KRA compliance documents are expiring soon.',
+          1007,
         ),
     };
 

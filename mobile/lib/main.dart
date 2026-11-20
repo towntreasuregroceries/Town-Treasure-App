@@ -8,6 +8,7 @@ import 'data/services/crypto_service.dart';
 import 'data/services/duplicate_detector_service.dart';
 import 'data/services/local_storage_service.dart';
 import 'data/services/ocr_consensus_service.dart';
+import 'data/services/personal_vault_service.dart';
 import 'data/services/remote_update_service.dart';
 import 'data/services/supabase_service.dart';
 import 'ui/core/app_lock_guard.dart';
@@ -120,6 +121,13 @@ class TownTreasureApp extends StatelessWidget {
         ),
         Provider<DuplicateDetectorService>.value(
           value: duplicateDetectorService ?? DuplicateDetectorService(),
+        ),
+        Provider<PersonalVaultService>.value(
+          value: PersonalVaultService(
+            cryptoService: cryptoService,
+            localStorage: localStorageService,
+            supabase: supabaseService,
+          ),
         ),
         ChangeNotifierProvider<VaultRepository>.value(value: vaultRepository),
         ChangeNotifierProvider<AuthRepository>.value(value: authRepository),

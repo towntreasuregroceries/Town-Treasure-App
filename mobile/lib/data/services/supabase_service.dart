@@ -49,6 +49,7 @@ class VaultSyncException implements Exception {
 /// Gateway interface over Supabase operations for testability and clean separation.
 abstract class SupabaseGateway {
   Future<AuthUserInfo?> getCurrentUser();
+  Future<String?> getAccessToken();
   Future<AuthUserInfo> signInWithPassword(String email, String password);
   Future<void> verifyInvitedEmail(String email);
   Future<AuthUserInfo> verifySignupOtp(String email, String token);
@@ -124,6 +125,11 @@ class SupabaseService implements SupabaseGateway {
     final user = session?.user ?? client.auth.currentUser;
     if (user == null) return null;
     return AuthUserInfo(id: user.id, email: user.email);
+  }
+
+  @override
+  Future<String?> getAccessToken() async {
+    return client.auth.currentSession?.accessToken;
   }
 
   @override

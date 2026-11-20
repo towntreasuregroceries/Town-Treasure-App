@@ -17,6 +17,7 @@ class NotificationCenterSheet extends StatelessWidget {
     this.onOpenInvoices,
     this.onOpenExpenses,
     this.onOpenStatements,
+    this.onOpenPersonalVault,
   });
 
   final DashboardViewModel viewModel;
@@ -25,6 +26,7 @@ class NotificationCenterSheet extends StatelessWidget {
   final VoidCallback? onOpenInvoices;
   final void Function(int tabIndex)? onOpenExpenses;
   final VoidCallback? onOpenStatements;
+  final VoidCallback? onOpenPersonalVault;
 
   static Future<void> show(
     BuildContext context, {
@@ -34,6 +36,7 @@ class NotificationCenterSheet extends StatelessWidget {
     VoidCallback? onOpenInvoices,
     void Function(int tabIndex)? onOpenExpenses,
     VoidCallback? onOpenStatements,
+    VoidCallback? onOpenPersonalVault,
   }) {
     return showModalBottomSheet<void>(
       context: context,
@@ -310,6 +313,8 @@ class NotificationCenterSheet extends StatelessWidget {
         viewModel.refresh();
       case NotificationCategory.monthlyStatements:
         onOpenStatements?.call();
+      case NotificationCategory.documentExpiry:
+        onOpenPersonalVault?.call();
     }
   }
 }

@@ -3,6 +3,8 @@ export 'borrowing.dart';
 export 'expense.dart';
 export 'invoice.dart';
 export 'invoice_line_item.dart';
+export 'kra_tax.dart';
+export 'personal_document.dart';
 export 'price_list.dart';
 export 'record_action.dart';
 export 'recurring_expense.dart';

@@ -255,6 +255,28 @@ class DashboardViewModel extends ChangeNotifier {
       );
     }
 
+    final expiringDocs = _vault.personalDocuments
+        .where((d) => d.isExpired(now) || d.isExpiringSoon(now))
+        .toList();
+    if (expiringDocs.isNotEmpty) {
+      final expiredCount = expiringDocs.where((d) => d.isExpired(now)).length;
+      final firstTitle = expiringDocs.first.title;
+      alerts.add(
+        NotificationAlertItem(
+          category: NotificationCategory.documentExpiry,
+          title: expiredCount > 0
+              ? '$expiredCount Vault Document${expiredCount == 1 ? '' : 's'} Expired'
+              : '${expiringDocs.length} Vault Document${expiringDocs.length == 1 ? '' : 's'} Expiring Soon',
+          body:
+              '"$firstTitle"${expiringDocs.length > 1 ? ' and ${expiringDocs.length - 1} more' : ''} need renewal in Personal Vault.',
+          severity: expiredCount > 0
+              ? NotificationSeverity.urgent
+              : NotificationSeverity.warning,
+          actionLabel: 'Vault',
+        ),
+      );
+    }
+
     return alerts;
   }
 

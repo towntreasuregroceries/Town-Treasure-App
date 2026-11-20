@@ -6,9 +6,11 @@ import 'package:provider/provider.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../data/repositories/staging_repository.dart';
 import '../../data/repositories/vault_repository.dart';
+import '../../data/services/crypto_service.dart';
 import '../../data/services/duplicate_detector_service.dart';
 import '../../data/services/local_storage_service.dart';
 import '../../data/services/ocr_consensus_service.dart';
+import '../../data/services/personal_vault_service.dart';
 import '../../data/services/remote_update_service.dart';
 import '../../data/services/supabase_service.dart';
 import '../../domain/models/models.dart';
@@ -26,6 +28,7 @@ import '../features/invoices/invoice_editor_screen.dart';
 import '../features/invoices/invoices_list_screen.dart';
 import '../features/invoices/invoices_view_model.dart';
 import '../features/invoices/recycle_bin_screen.dart';
+import '../features/kra/kra_tax_center_screen.dart';
 import '../features/pricelists/pricelist_editor_screen.dart';
 import '../features/pricelists/pricelists_screen.dart';
 import '../features/pricelists/pricelists_view_model.dart';
@@ -35,6 +38,7 @@ import '../features/reports/statements_screen.dart';
 import '../features/restaurants/restaurants_screen.dart';
 import '../features/restaurants/restaurants_view_model.dart';
 import '../features/scanner/docket_scanner_sheet.dart';
+import '../features/vault/personal_vault_screen.dart';
 import 'theme/app_theme.dart';
 
 /// Authenticated workspace shell with Material 3 `NavigationBar`,
@@ -127,6 +131,8 @@ class _AppShellState extends State<AppShell> {
       _openExpensesHub(initialTabIndex: 2);
     } else if (payload == NotificationCategory.monthlyStatements.name) {
       _openStatements();
+    } else if (payload == NotificationCategory.documentExpiry.name) {
+      _openPersonalVault();
     }
   }
 
@@ -383,6 +389,37 @@ class _AppShellState extends State<AppShell> {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => RecycleBinScreen(viewModel: _invoicesVm),
+      ),
+    );
+  }
+
+  Future<void> _openPersonalVault() async {
+    final vault = context.read<VaultRepository>();
+    PersonalVaultService? vaultService;
+    try {
+      vaultService = context.read<PersonalVaultService>();
+    } catch (_) {
+      vaultService = PersonalVaultService(
+        cryptoService: context.read<CryptoService>(),
+        localStorage: context.read<LocalStorageService>(),
+        supabase: context.read<SupabaseGateway>(),
+      );
+    }
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => PersonalVaultScreen(
+          vault: vault,
+          vaultService: vaultService!,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openKraTaxCenter() async {
+    final vault = context.read<VaultRepository>();
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => KraTaxCenterScreen(vault: vault),
       ),
     );
   }
@@ -685,6 +722,8 @@ class _AppShellState extends State<AppShell> {
                   onOpenExpenses: _openExpensesHub,
                   onOpenReports: _openReports,
                   onOpenStatements: () => _openStatements(),
+                  onOpenPersonalVault: _openPersonalVault,
+                  onOpenKraTaxCenter: _openKraTaxCenter,
                   onOpenRecycleBin: _openRecycleBin,
                   onCheckUpdates: _openUpdateChecker,
                   onOpenSignature: _openSignatureScanner,
@@ -753,6 +792,8 @@ class _MoreHubScreen extends StatelessWidget {
     required this.onOpenExpenses,
     required this.onOpenReports,
     required this.onOpenStatements,
+    required this.onOpenPersonalVault,
+    required this.onOpenKraTaxCenter,
     required this.onOpenRecycleBin,
     required this.onCheckUpdates,
     required this.onOpenSignature,
@@ -766,6 +807,8 @@ class _MoreHubScreen extends StatelessWidget {
   final VoidCallback onOpenExpenses;
   final VoidCallback onOpenReports;
   final VoidCallback onOpenStatements;
+  final VoidCallback onOpenPersonalVault;
+  final VoidCallback onOpenKraTaxCenter;
   final VoidCallback onOpenRecycleBin;
   final VoidCallback onCheckUpdates;
   final VoidCallback onOpenSignature;
@@ -918,6 +961,22 @@ class _MoreHubScreen extends StatelessWidget {
                       title: 'Monthly Statements',
                       subtitle: 'Client billing statements, PDF & WhatsApp',
                       onTap: onOpenStatements,
+                    ),
+                    const Divider(height: 1),
+                    _MoreTile(
+                      key: const Key('more_kra_tax_center'),
+                      icon: Icons.assured_workload_outlined,
+                      title: 'KRA & VAT3 Tax Center',
+                      subtitle: 'Seller KRA PIN, 16% VAT / Exempt split, eTIMS & iTax packs',
+                      onTap: onOpenKraTaxCenter,
+                    ),
+                    const Divider(height: 1),
+                    _MoreTile(
+                      key: const Key('more_personal_vault'),
+                      icon: Icons.enhanced_encryption_outlined,
+                      title: 'Personal Documents Vault',
+                      subtitle: 'E2EE permits, KRA TCC, IDs & Cloudflare R2 backup',
+                      onTap: onOpenPersonalVault,
                     ),
                   ],
                 ),

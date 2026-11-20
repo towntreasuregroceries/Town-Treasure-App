@@ -113,6 +113,9 @@ class VaultRepository extends ChangeNotifier {
       List.unmodifiable(_deletedPriceLists);
   List<Borrowing> get borrowings => List.unmodifiable(_borrowings);
   VaultSettings get settings => _settings;
+  KraCompanyProfile get kraProfile => _settings.kraProfile;
+  List<PersonalDocument> get personalDocuments => _settings.personalDocuments;
+  String get personalDocsWorkerUrl => _settings.personalDocsWorkerUrl;
   int? get remoteRevision => _remoteRevision;
   String? get lastSyncError => _lastSyncError;
   bool get isSyncing => _isSyncing;
@@ -377,6 +380,58 @@ class VaultRepository extends ChangeNotifier {
     if (sync) scheduleSync();
   }
 
+  Future<void> saveKraProfile(
+    KraCompanyProfile profile, {
+    bool sync = true,
+  }) async {
+    await setSettings(_settings.withKraProfile(profile), sync: sync);
+  }
+
+  Future<void> savePersonalDocsWorkerUrl(
+    String workerUrl, {
+    bool sync = true,
+  }) async {
+    await setSettings(
+      _settings.withPersonalDocsWorkerUrl(workerUrl),
+      sync: sync,
+    );
+  }
+
+  Future<void> savePersonalDocumentMeta(
+    PersonalDocument doc, {
+    bool sync = true,
+  }) async {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final updated = doc.copyWith(
+      createdAt: doc.createdAt ?? nowIso,
+      updatedAt: nowIso,
+    );
+    final docs = List<PersonalDocument>.from(_settings.allPersonalDocumentsRaw);
+    final idx = docs.indexWhere((d) => d.id == updated.id);
+    if (idx >= 0) {
+      docs[idx] = updated;
+    } else {
+      docs.insert(0, updated);
+    }
+    await setSettings(_settings.withPersonalDocuments(docs), sync: sync);
+  }
+
+  Future<void> deletePersonalDocumentMeta(
+    String docId, {
+    bool sync = true,
+  }) async {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final docs = List<PersonalDocument>.from(_settings.allPersonalDocumentsRaw);
+    final idx = docs.indexWhere((d) => d.id == docId);
+    if (idx < 0) return;
+    docs[idx] = docs[idx].copyWith(
+      deletedAt: nowIso,
+      updatedAt: nowIso,
+      r2Synced: false,
+    );
+    await setSettings(_settings.withPersonalDocuments(docs), sync: sync);
+  }
+
   Future<void> markRecordDeleted(String collection, String id,
       {bool sync = true}) async {
     if (collection.isEmpty || id.isEmpty) return;
@@ -595,6 +650,44 @@ class VaultRepository extends ChangeNotifier {
     final merged = localTime > remoteTime
         ? <String, dynamic>{...remoteMap, ...localMap}
         : <String, dynamic>{...localMap, ...remoteMap};
+
+    // Merge nested `kraProfile` by its own `updatedAt` so a signature or document edit never clobbers tax config.
+    final localKra = local.extra[VaultSettings.keyKraProfile];
+    final remoteKra = remote.extra[VaultSettings.keyKraProfile];
+    if (localKra is Map && remoteKra is Map) {
+      final lKraTime = AppHelpers.parseTimestampMs(localKra['updatedAt']);
+      final rKraTime = AppHelpers.parseTimestampMs(remoteKra['updatedAt']);
+      merged[VaultSettings.keyKraProfile] = lKraTime >= rKraTime
+          ? Map<String, dynamic>.from(localKra)
+          : Map<String, dynamic>.from(remoteKra);
+    }
+
+    // Merge personal documents by `id` using latest `updatedAt` / `deletedAt` tombstone.
+    final docsById = <String, PersonalDocument>{};
+    for (final doc in [
+      ...remote.allPersonalDocumentsRaw,
+      ...local.allPersonalDocumentsRaw,
+    ]) {
+      final existing = docsById[doc.id];
+      if (existing == null) {
+        docsById[doc.id] = doc;
+      } else {
+        final dTime = AppHelpers.parseTimestampMs(
+          doc.updatedAt ?? doc.deletedAt ?? doc.createdAt,
+        );
+        final eTime = AppHelpers.parseTimestampMs(
+          existing.updatedAt ?? existing.deletedAt ?? existing.createdAt,
+        );
+        if (dTime >= eTime) {
+          docsById[doc.id] = doc;
+        }
+      }
+    }
+    if (docsById.isNotEmpty) {
+      merged[VaultSettings.keyPersonalDocs] =
+          docsById.values.map((d) => d.toJson()).toList();
+    }
+
     return VaultSettings.fromJson(merged);
   }
 

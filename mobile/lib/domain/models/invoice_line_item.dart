@@ -9,6 +9,7 @@ class InvoiceLineItem {
     required this.buyPrice,
     required this.sellPrice,
     required this.total,
+    this.taxRate,
   });
 
   final String desc;
@@ -17,6 +18,8 @@ class InvoiceLineItem {
   final double buyPrice;
   final double sellPrice;
   final double total;
+  /// Optional Kenyan VAT code (`'exempt'`, `'zero_rated'`, `'standard_16'`).
+  final String? taxRate;
 
   factory InvoiceLineItem.fromJson(Map<String, dynamic> json) {
     final qty = AppHelpers.parseDouble(json['qty'], 1);
@@ -28,6 +31,7 @@ class InvoiceLineItem {
     final total = json['total'] != null
         ? AppHelpers.parseDouble(json['total'], qty * sell)
         : qty * sell;
+    final rawTax = json['taxRate']?.toString().trim();
 
     return InvoiceLineItem(
       desc: (json['desc'] ?? json['name'] ?? '').toString().trim(),
@@ -38,6 +42,7 @@ class InvoiceLineItem {
       buyPrice: buy,
       sellPrice: sell,
       total: total,
+      taxRate: (rawTax != null && rawTax.isNotEmpty) ? rawTax : null,
     );
   }
 
@@ -49,6 +54,7 @@ class InvoiceLineItem {
       'buyPrice': buyPrice,
       'sellPrice': sellPrice,
       'total': total,
+      if (taxRate != null && taxRate!.isNotEmpty) 'taxRate': taxRate,
     };
   }
 
@@ -59,6 +65,8 @@ class InvoiceLineItem {
     double? buyPrice,
     double? sellPrice,
     double? total,
+    String? taxRate,
+    bool clearTaxRate = false,
   }) {
     final nextQty = qty ?? this.qty;
     final nextSell = sellPrice ?? this.sellPrice;
@@ -69,6 +77,7 @@ class InvoiceLineItem {
       buyPrice: buyPrice ?? this.buyPrice,
       sellPrice: nextSell,
       total: total ?? (nextQty * nextSell),
+      taxRate: clearTaxRate ? null : (taxRate ?? this.taxRate),
     );
   }
 }

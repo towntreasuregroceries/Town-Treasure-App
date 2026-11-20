@@ -24,6 +24,11 @@ class Invoice {
     this.originalStatus,
     this.createdAt,
     this.updatedAt,
+    this.vatMode,
+    this.cuInvoiceNumber,
+    this.cuSerial,
+    this.etimsQrData,
+    this.etimsSubmittedAt,
   });
 
   final String id;
@@ -46,6 +51,11 @@ class Invoice {
   final String? originalStatus;
   final String? createdAt;
   final String? updatedAt;
+  final String? vatMode;
+  final String? cuInvoiceNumber;
+  final String? cuSerial;
+  final String? etimsQrData;
+  final String? etimsSubmittedAt;
 
   bool get isDraft => status == 'draft';
   bool get isPaid => status == 'paid';
@@ -88,6 +98,11 @@ class Invoice {
       originalStatus: json['originalStatus']?.toString(),
       createdAt: json['createdAt']?.toString(),
       updatedAt: json['updatedAt']?.toString(),
+      vatMode: json['vatMode']?.toString(),
+      cuInvoiceNumber: json['cuInvoiceNumber']?.toString(),
+      cuSerial: json['cuSerial']?.toString(),
+      etimsQrData: json['etimsQrData']?.toString(),
+      etimsSubmittedAt: json['etimsSubmittedAt']?.toString(),
     );
   }
 
@@ -113,6 +128,14 @@ class Invoice {
       if (originalStatus != null) 'originalStatus': originalStatus,
       if (createdAt != null) 'createdAt': createdAt,
       if (updatedAt != null) 'updatedAt': updatedAt,
+      if (vatMode != null && vatMode!.isNotEmpty) 'vatMode': vatMode,
+      if (cuInvoiceNumber != null && cuInvoiceNumber!.isNotEmpty)
+        'cuInvoiceNumber': cuInvoiceNumber,
+      if (cuSerial != null && cuSerial!.isNotEmpty) 'cuSerial': cuSerial,
+      if (etimsQrData != null && etimsQrData!.isNotEmpty)
+        'etimsQrData': etimsQrData,
+      if (etimsSubmittedAt != null && etimsSubmittedAt!.isNotEmpty)
+        'etimsSubmittedAt': etimsSubmittedAt,
     };
   }
 
@@ -140,6 +163,12 @@ class Invoice {
     bool clearOriginalStatus = false,
     String? createdAt,
     String? updatedAt,
+    String? vatMode,
+    String? cuInvoiceNumber,
+    String? cuSerial,
+    String? etimsQrData,
+    String? etimsSubmittedAt,
+    bool clearEtims = false,
   }) {
     return Invoice(
       id: id ?? this.id,
@@ -163,6 +192,13 @@ class Invoice {
           clearOriginalStatus ? null : (originalStatus ?? this.originalStatus),
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      vatMode: vatMode ?? this.vatMode,
+      cuInvoiceNumber:
+          clearEtims ? null : (cuInvoiceNumber ?? this.cuInvoiceNumber),
+      cuSerial: clearEtims ? null : (cuSerial ?? this.cuSerial),
+      etimsQrData: clearEtims ? null : (etimsQrData ?? this.etimsQrData),
+      etimsSubmittedAt:
+          clearEtims ? null : (etimsSubmittedAt ?? this.etimsSubmittedAt),
     );
   }
 }

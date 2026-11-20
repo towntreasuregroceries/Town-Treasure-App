@@ -12,6 +12,8 @@ class Expense {
     required this.desc,
     this.category = 'other',
     required this.amount,
+    this.inputVatAmount,
+    this.supplierKraPin,
     this.createdAt,
     this.updatedAt,
   });
@@ -25,12 +27,16 @@ class Expense {
   final String desc;
   final String category;
   final double amount;
+  final double? inputVatAmount;
+  final String? supplierKraPin;
   final String? createdAt;
   final String? updatedAt;
 
   bool get isCapital => type == 'capital';
 
   factory Expense.fromJson(Map<String, dynamic> json) {
+    final rawVat = json['inputVatAmount'];
+    final rawPin = json['supplierKraPin']?.toString().trim();
     return Expense(
       id: (json['id'] ?? '').toString(),
       invId: json['invId']?.toString(),
@@ -41,6 +47,10 @@ class Expense {
       desc: (json['desc'] ?? '').toString(),
       category: (json['category'] ?? 'other').toString(),
       amount: AppHelpers.parseDouble(json['amount']),
+      inputVatAmount:
+          rawVat != null ? AppHelpers.parseDouble(rawVat) : null,
+      supplierKraPin:
+          (rawPin != null && rawPin.isNotEmpty) ? rawPin : null,
       createdAt: json['createdAt']?.toString(),
       updatedAt: json['updatedAt']?.toString(),
     );
@@ -57,6 +67,10 @@ class Expense {
       'desc': desc,
       'category': category,
       'amount': amount,
+      if (inputVatAmount != null && inputVatAmount! > 0)
+        'inputVatAmount': inputVatAmount,
+      if (supplierKraPin != null && supplierKraPin!.isNotEmpty)
+        'supplierKraPin': supplierKraPin,
       if (createdAt != null) 'createdAt': createdAt,
       if (updatedAt != null) 'updatedAt': updatedAt,
     };
@@ -72,6 +86,8 @@ class Expense {
     String? desc,
     String? category,
     double? amount,
+    double? inputVatAmount,
+    String? supplierKraPin,
     String? createdAt,
     String? updatedAt,
   }) {
@@ -85,6 +101,8 @@ class Expense {
       desc: desc ?? this.desc,
       category: category ?? this.category,
       amount: amount ?? this.amount,
+      inputVatAmount: inputVatAmount ?? this.inputVatAmount,
+      supplierKraPin: supplierKraPin ?? this.supplierKraPin,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
