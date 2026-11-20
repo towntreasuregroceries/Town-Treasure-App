@@ -9,24 +9,32 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:share_plus/share_plus.dart';
 
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/services/kra_oscu_service.dart';
+import '../../../data/services/supabase_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/user_friendly_error.dart';
 import '../../core/widgets/branded_pdf_viewer_screen.dart';
 import '../../core/widgets/scoped_text_controllers.dart';
 import '../invoices/invoice_formatters.dart';
+import '../invoices/invoice_pdf_builder.dart';
+import '../reports/reports_view_model.dart';
+import '../reports/statement_pdf_builder.dart';
 
-/// KRA VAT3 Compliance Center & iTax Helper for Town Treasure Limited.
-/// Supports Seller KRA PIN/eTIMS profile configuration, mixed VAT-Exempt produce vs
-/// 16% Standard VAT invoice tagging, client KRA PIN compliance audit, monthly Input VAT
-/// recording, and 1-tap VAT3 PDF + iTax CSV ledger exports.
+/// KRA & eTIMS Tax Center for Town Treasure Limited.
+/// Designed in plain business English with an in-app Help guide, uncluttered Tax
+/// & OSCU setup sheet, mixed Exempt Produce vs 16% VAT tagging, live or manual
+/// eTIMS QR generation on TAX INVOICE PDFs, and iTax CSV/PDF monthly packs.
 class KraTaxCenterScreen extends StatefulWidget {
   const KraTaxCenterScreen({
     super.key,
     required this.vault,
+    this.oscuService,
   });
 
   final VaultRepository vault;
+  final KraOscuService? oscuService;
 
   @override
   State<KraTaxCenterScreen> createState() => _KraTaxCenterScreenState();
@@ -35,6 +43,7 @@ class KraTaxCenterScreen extends StatefulWidget {
 class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
   final NumberFormat _moneyFmt = NumberFormat('#,##0.00');
   late String _selectedMonth;
+  bool _monthlyEtimsMode = false;
 
   @override
   void initState() {
@@ -52,6 +61,9 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
   void _onVaultChanged() {
     if (mounted) setState(() {});
   }
+
+  KraOscuService get _oscu =>
+      widget.oscuService ?? KraOscuService(supabase: SupabaseService());
 
   void _showSnack(String msg, {Color color = AppTheme.forestGreen}) {
     if (!mounted) return;
@@ -76,159 +88,421 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
     return sorted;
   }
 
+  Future<void> _openHelpGuide() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.82,
+        minChildSize: 0.5,
+        maxChildSize: 0.94,
+        builder: (ctx, scrollCtrl) => Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+              child: Row(
+                children: [
+                  CircleAvatar(
+                    backgroundColor: AppTheme.sageTint,
+                    foregroundColor: AppTheme.forestGreen,
+                    child: const Icon(Icons.help_outline),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'How KRA & eTIMS Tax Center Works',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.slateInk,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                controller: scrollCtrl,
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+                children: [
+                  const Text(
+                    'Use this screen to give hotels and corporate clients KRA-compliant Tax Invoices with an eTIMS QR code, track monthly VAT, and export figures ready for iTax.',
+                    style: TextStyle(fontSize: 13.5, color: AppTheme.slateInk),
+                  ),
+                  const SizedBox(height: 14),
+                  _helpStepCard(
+                    step: '1',
+                    title: 'Set Up Town Treasure PIN & OSCU Once',
+                    body:
+                        'Tap Setup on the top card to save Town Treasure Limited’s 11-character KRA PIN, Branch ID (00), and OSCU settings. Once saved, your KRA PIN prints automatically on every invoice & statement PDF.',
+                  ),
+                  const SizedBox(height: 10),
+                  _helpStepCard(
+                    step: '2',
+                    title: 'Daily OR Monthly Consolidated eTIMS QR',
+                    body:
+                        'Choose how each hotel bills under eTIMS Invoices:\n'
+                        '• Daily (Per Invoice): Tap any single delivery invoice to mark Fresh Produce (No VAT) or 16% VAT and print an eTIMS QR on that invoice PDF.\n'
+                        '• Monthly (By Hotel): Switch to Monthly (By Hotel) to combine a client’s full month deliveries into ONE consolidated eTIMS QR that prints directly onto their Monthly Statement PDF.',
+                  ),
+                  const SizedBox(height: 10),
+                  _helpStepCard(
+                    step: '3',
+                    title: 'Check Missing Hotel KRA PINs',
+                    body:
+                        'If any corporate customer is missing a KRA PIN for the selected month, tap the yellow alert banner to save their PIN right from here so your iTax sheet is clean.',
+                  ),
+                  const SizedBox(height: 10),
+                  _helpStepCard(
+                    step: '4',
+                    title: 'File Monthly Return Before the 20th',
+                    body:
+                        'Before the 20th of next month, review "Net VAT to Pay KRA", tap Expenses to record VAT you paid on supplies (this reduces VAT owed), then download the Tax Summary (PDF) or iTax Sheet (CSV).',
+                  ),
+                ],
+              ),
+            ),
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    key: const Key('btn_kra_help_got_it'),
+                    onPressed: () => Navigator.of(ctx).pop(),
+                    child: const Text('Got It'),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _helpStepCard({
+    required String step,
+    required String title,
+    required String body,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceSage,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppTheme.borderSubtle),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 14,
+            backgroundColor: AppTheme.forestGreen,
+            foregroundColor: Colors.white,
+            child: Text(
+              step,
+              style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    color: AppTheme.slateInk,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  body,
+                  style: const TextStyle(
+                    fontSize: 12.8,
+                    height: 1.4,
+                    color: AppTheme.slateMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _editCompanyTaxProfile() async {
     final profile = widget.vault.kraProfile;
     var vatReg = profile.vatRegistered;
     var defaultRate = profile.defaultTaxRate;
     var defaultMode = profile.defaultVatMode;
+    var oscuSandbox = profile.oscuSandbox;
     String? errorMsg;
 
-    await showDialog<void>(
+    await showModalBottomSheet<void>(
       context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (ctx) => ScopedTextControllers(
         initialTexts: [
           profile.sellerKraPin,
           profile.vatNumber,
           profile.cuSerialNumber,
           profile.etimsBranchId,
+          profile.oscuRelayUrl.isNotEmpty
+              ? profile.oscuRelayUrl
+              : KraOscuService.defaultOscuRelayUrl,
         ],
         builder: (ctx, ctrls) {
           final pinCtrl = ctrls[0];
           final vatNoCtrl = ctrls[1];
           final cuSerialCtrl = ctrls[2];
           final branchCtrl = ctrls[3];
+          final oscuUrlCtrl = ctrls[4];
           return StatefulBuilder(
-            builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('Town Treasure KRA Profile'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                TextField(
-                  key: const Key('field_kra_seller_pin'),
-                  controller: pinCtrl,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: 'Company KRA PIN *',
-                    hintText: 'e.g. P051234567X',
-                    helperText: 'Printed on invoices and iTax VAT3 pack headers',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                TextField(
-                  controller: vatNoCtrl,
-                  textCapitalization: TextCapitalization.characters,
-                  decoration: const InputDecoration(
-                    labelText: 'VAT Registration No. (Optional)',
-                  ),
-                ),
-                const SizedBox(height: 8),
-                SwitchListTile.adaptive(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('VAT Registered (VAT3)'),
-                  subtitle: const Text('16% Taxable + Exempt Produce split'),
-                  value: vatReg,
-                  onChanged: (v) => setDialogState(() => vatReg = v),
-                ),
-                DropdownButtonFormField<KraTaxRate>(
-                  initialValue: defaultRate,
-                  decoration: const InputDecoration(
-                    labelText: 'Default Line Tax Classification',
-                  ),
-                  items: KraTaxRate.values
-                      .map(
-                        (r) => DropdownMenuItem(value: r, child: Text(r.label)),
-                      )
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) setDialogState(() => defaultRate = v);
-                  },
-                ),
-                const SizedBox(height: 10),
-                DropdownButtonFormField<KraVatMode>(
-                  initialValue: defaultMode,
-                  decoration: const InputDecoration(
-                    labelText: 'Default Price Tax Mode',
-                  ),
-                  items: KraVatMode.values
-                      .map(
-                        (m) => DropdownMenuItem(value: m, child: Text(m.label)),
-                      )
-                      .toList(),
-                  onChanged: (v) {
-                    if (v != null) setDialogState(() => defaultMode = v);
-                  },
-                ),
-                const SizedBox(height: 10),
-                Row(
+            builder: (ctx, setSheetState) => Padding(
+              padding: EdgeInsets.fromLTRB(
+                18,
+                16,
+                18,
+                MediaQuery.of(ctx).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      flex: 2,
-                      child: TextField(
-                        controller: cuSerialCtrl,
-                        textCapitalization: TextCapitalization.characters,
-                        decoration: const InputDecoration(
-                          labelText: 'eTIMS CU Serial',
-                          hintText: 'Optional',
+                    Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Town Treasure KRA & OSCU Setup',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.slateInk,
+                            ),
+                          ),
                         ),
+                        IconButton(
+                          onPressed: () => Navigator.of(ctx).pop(),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Section 1: Business KRA Details
+                    const Text(
+                      '1. Business KRA Details',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                        color: AppTheme.forestGreen,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: TextField(
-                        controller: branchCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Branch ID',
-                          hintText: '00',
-                        ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      key: const Key('field_kra_seller_pin'),
+                      controller: pinCtrl,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'Company KRA PIN *',
+                        hintText: 'e.g. P051234567X',
                       ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: vatNoCtrl,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: const InputDecoration(
+                        labelText: 'VAT Certificate No. (Optional)',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Registered for VAT'),
+                      subtitle: const Text('Supports both Fresh Produce (No VAT) & 16% VAT'),
+                      value: vatReg,
+                      onChanged: (v) => setSheetState(() => vatReg = v),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Default Tax for New Items',
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('Fresh Produce (No VAT)'),
+                          selected: defaultRate == KraTaxRate.exempt,
+                          onSelected: (_) => setSheetState(
+                            () => defaultRate = KraTaxRate.exempt,
+                          ),
+                        ),
+                        ChoiceChip(
+                          label: const Text('16% VAT'),
+                          selected: defaultRate == KraTaxRate.standard16,
+                          onSelected: (_) => setSheetState(
+                            () => defaultRate = KraTaxRate.standard16,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    const Text(
+                      'How Item Prices Are Entered',
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('VAT Already Included in Price'),
+                          selected: defaultMode == KraVatMode.inclusive,
+                          onSelected: (_) => setSheetState(
+                            () => defaultMode = KraVatMode.inclusive,
+                          ),
+                        ),
+                        ChoiceChip(
+                          label: const Text('Add 16% VAT on Top'),
+                          selected: defaultMode == KraVatMode.exclusive,
+                          onSelected: (_) => setSheetState(
+                            () => defaultMode = KraVatMode.exclusive,
+                          ),
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 20),
+                    const Divider(),
+                    const SizedBox(height: 12),
+
+                    // Section 2: eTIMS OSCU Online Setup
+                    const Text(
+                      '2. KRA eTIMS Online Connection (OSCU)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                        color: AppTheme.forestGreen,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      'Used to generate official eTIMS Tax Invoices and QR codes for company buyers.',
+                      style: TextStyle(fontSize: 12, color: AppTheme.slateMuted),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          flex: 2,
+                          child: TextField(
+                            controller: cuSerialCtrl,
+                            textCapitalization: TextCapitalization.characters,
+                            decoration: const InputDecoration(
+                              labelText: 'OSCU Device Serial',
+                              hintText: 'Optional',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: branchCtrl,
+                            decoration: const InputDecoration(
+                              labelText: 'Branch ID',
+                              hintText: '00',
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    SwitchListTile.adaptive(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        oscuSandbox ? 'OSCU Mode: KRA Test (Sandbox)' : 'OSCU Mode: KRA Live',
+                      ),
+                      subtitle: const Text('Switch off when KRA approves live OSCU billing'),
+                      value: oscuSandbox,
+                      onChanged: (v) => setSheetState(() => oscuSandbox = v),
+                    ),
+                    TextField(
+                      controller: oscuUrlCtrl,
+                      keyboardType: TextInputType.url,
+                      decoration: const InputDecoration(
+                        labelText: 'eTIMS OSCU Server Address',
+                        hintText: KraOscuService.defaultOscuRelayUrl,
+                      ),
+                    ),
+
+                    if (errorMsg != null) ...[
+                      const SizedBox(height: 10),
+                      Text(
+                        errorMsg!,
+                        style: const TextStyle(color: AppTheme.danger, fontSize: 12.5),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      key: const Key('btn_save_kra_profile'),
+                      onPressed: () async {
+                        final pinNorm = Restaurant.normalizeKraPin(pinCtrl.text);
+                        if (pinNorm.isNotEmpty && !Restaurant.isValidKraPin(pinNorm)) {
+                          setSheetState(
+                            () => errorMsg =
+                                'Enter a valid 11-character KRA PIN (e.g. P051234567X).',
+                          );
+                          return;
+                        }
+                        final next = KraCompanyProfile(
+                          sellerKraPin: pinNorm,
+                          vatNumber: vatNoCtrl.text.trim().toUpperCase(),
+                          vatRegistered: vatReg,
+                          defaultTaxRate: defaultRate,
+                          defaultVatMode: defaultMode,
+                          cuSerialNumber: cuSerialCtrl.text.trim().toUpperCase(),
+                          etimsBranchId: branchCtrl.text.trim().isEmpty
+                              ? '00'
+                              : branchCtrl.text.trim(),
+                          oscuSandbox: oscuSandbox,
+                          oscuRelayUrl: oscuUrlCtrl.text.trim(),
+                        );
+                        await widget.vault.saveKraProfile(next);
+                        if (ctx.mounted) Navigator.of(ctx).pop();
+                        _showSnack('Town Treasure KRA & OSCU settings saved.');
+                      },
+                      icon: const Icon(Icons.check_circle_outline),
+                      label: const Text('Save Settings'),
                     ),
                   ],
                 ),
-                if (errorMsg != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    errorMsg!,
-                    style: const TextStyle(color: AppTheme.danger, fontSize: 12),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              key: const Key('btn_save_kra_profile'),
-              onPressed: () async {
-                final pinNorm = Restaurant.normalizeKraPin(pinCtrl.text);
-                if (pinNorm.isNotEmpty && !Restaurant.isValidKraPin(pinNorm)) {
-                  setDialogState(
-                    () => errorMsg = 'Enter a valid 11-character KRA PIN (e.g. P051234567X).',
-                  );
-                  return;
-                }
-                final next = KraCompanyProfile(
-                  sellerKraPin: pinNorm,
-                  vatNumber: vatNoCtrl.text.trim().toUpperCase(),
-                  vatRegistered: vatReg,
-                  defaultTaxRate: defaultRate,
-                  defaultVatMode: defaultMode,
-                  cuSerialNumber: cuSerialCtrl.text.trim().toUpperCase(),
-                  etimsBranchId: branchCtrl.text.trim().isEmpty
-                      ? '00'
-                      : branchCtrl.text.trim(),
-                );
-                await widget.vault.saveKraProfile(next);
-                if (ctx.mounted) Navigator.of(ctx).pop();
-                _showSnack('Company KRA tax profile saved.');
-              },
-              child: const Text('Save'),
-            ),
-          ],
+              ),
             ),
           );
         },
@@ -237,250 +511,549 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
   }
 
   Future<void> _openInvoiceTaxSheet(Invoice invoice) async {
-    final profile = widget.vault.kraProfile;
-    var items = List<InvoiceLineItem>.from(invoice.items);
-    var vatMode = KraVatMode.fromCode(
-      invoice.vatMode ?? profile.defaultVatMode.code,
+    final rest = Restaurant.resolveInvoiceRestaurant(
+      invoice,
+      widget.vault.restaurants,
+    ).restaurant;
+    await _openEtimsEditorSheet(
+      sheetTitle: 'eTIMS & VAT — ${invoice.number}',
+      sheetSubtitle:
+          '${invoice.restaurantName} · ${InvoiceFormatters.formatDisplayDate(invoice.date)}',
+      initialInvoice: invoice,
+      resolvedBuyer: rest,
+      previewLabel: 'Preview PDF',
+      onPreviewPdf: (draft, _) {
+        final buyer = Restaurant.resolveInvoiceRestaurant(
+          draft,
+          widget.vault.restaurants,
+        ).restaurant;
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => BrandedPdfViewerScreen(
+              title: 'Tax Invoice ${draft.number}',
+              filename: 'TaxInvoice_${draft.number}.pdf',
+              buildPdf: (_) => InvoicePdfBuilder.buildPdfBytes(
+                invoice: draft,
+                restaurant: buyer,
+                settings: widget.vault.settings,
+              ),
+            ),
+          ),
+        );
+      },
+      onSave: (draft, _) async {
+        final list = List<Invoice>.from(widget.vault.invoices);
+        final idx = list.indexWhere((i) => i.id == draft.id);
+        if (idx >= 0) {
+          list[idx] = draft;
+          await widget.vault.setInvoices(list);
+        }
+        _showSnack('Saved eTIMS QR & VAT settings for ${invoice.number}.');
+      },
     );
+  }
+
+  List<_MonthlyClientGroup> _buildMonthlyClientGroups(List<Invoice> monthInvoices) {
+    final grouped = <String, List<Invoice>>{};
+    final resolvedRestaurants = <String, Restaurant?>{};
+    final displayNames = <String, String>{};
+
+    for (final inv in monthInvoices) {
+      final res = Restaurant.resolveInvoiceRestaurant(
+        inv,
+        widget.vault.restaurants,
+      );
+      final rest = res.restaurant;
+      final keyId = MonthlyClientEtims.buildId(
+        _selectedMonth,
+        rest,
+        inv.restaurantName,
+      );
+      grouped.putIfAbsent(keyId, () => []).add(inv);
+      resolvedRestaurants[keyId] ??= rest;
+      displayNames[keyId] ??= rest?.name ?? inv.restaurantName;
+    }
+
+    final result = <_MonthlyClientGroup>[];
+    for (final entry in grouped.entries) {
+      final invs = entry.value..sort((a, b) => a.date.compareTo(b.date));
+      final rest = resolvedRestaurants[entry.key];
+      final name = displayNames[entry.key] ?? 'Client';
+      final totalSell = invs.fold<double>(0, (s, i) => s + i.totalSell);
+      final existing = widget.vault.settings.findMonthlyEtims(
+        _selectedMonth,
+        rest,
+        fallbackName: name,
+      );
+      result.add(
+        _MonthlyClientGroup(
+          keyId: entry.key,
+          clientName: name,
+          restaurant: rest,
+          invoices: invs,
+          totalSell: totalSell,
+          existingEtims: existing,
+        ),
+      );
+    }
+    result.sort((a, b) => b.totalSell.compareTo(a.totalSell));
+    return result;
+  }
+
+  Future<void> _openMonthlyClientEtimsSheet(_MonthlyClientGroup group) async {
+    final profile = widget.vault.kraProfile;
+    final consolidatedItems = <InvoiceLineItem>[];
+    for (final inv in group.invoices) {
+      if (inv.items.isEmpty) {
+        consolidatedItems.add(
+          InvoiceLineItem(
+            desc: 'Delivery ${inv.number} (${inv.date})',
+            qty: 1,
+            buyPrice: 0,
+            sellPrice: inv.totalSell,
+            total: inv.totalSell,
+            taxRate: KraTaxRate.exempt.code,
+          ),
+        );
+      } else {
+        for (final item in inv.items) {
+          consolidatedItems.add(
+            item.copyWith(desc: '${inv.number} · ${item.desc}'),
+          );
+        }
+      }
+    }
+
+    final existing = group.existingEtims;
+    final yrMonthCompact = _selectedMonth.replaceAll('-', '');
+    final consolidatedTemplate = Invoice(
+      id: group.keyId,
+      number: 'STMT-$yrMonthCompact-${group.invoices.length}',
+      restaurantId: group.restaurant?.id ?? '',
+      restaurantName: group.clientName,
+      date: '$_selectedMonth-28',
+      items: consolidatedItems,
+      totalSell: group.totalSell,
+      vatMode: existing?.vatMode ?? profile.defaultVatMode.code,
+      cuInvoiceNumber: existing?.cuInvoiceNumber ?? '',
+      etimsRcptSign: existing?.rcptSign ?? '',
+      etimsQrData: existing?.qrCodeUrl ?? '',
+    );
+
+    MonthlyClientEtims toMonthlyRecord(
+      Invoice draft,
+      KraInvoiceTaxSummary taxSummary,
+    ) {
+      return MonthlyClientEtims(
+        id: group.keyId,
+        month: _selectedMonth,
+        restaurantId: group.restaurant?.id ?? '',
+        restaurantName: group.clientName,
+        cuInvoiceNumber: (draft.cuInvoiceNumber ?? '').trim(),
+        rcptSign: (draft.etimsRcptSign ?? '').trim(),
+        qrCodeUrl: (draft.etimsQrData ?? '').trim(),
+        vatMode: draft.vatMode ?? KraVatMode.inclusive.code,
+        totalAmount: taxSummary.grandTotalWithVat,
+        exemptAmount: taxSummary.exemptTotal,
+        taxableNetAmount: taxSummary.taxableNetTotal,
+        outputVatAmount: taxSummary.outputVatTotal,
+        invoiceIds: group.invoices.map((i) => i.id).toList(),
+        updatedAt: DateTime.now().toUtc().toIso8601String(),
+      );
+    }
+
+    await _openEtimsEditorSheet(
+      sheetTitle: 'Monthly eTIMS — ${group.clientName}',
+      sheetSubtitle:
+          '${group.invoices.length} deliveries · ${DateFormat('MMMM yyyy').format(DateTime.parse('$_selectedMonth-01'))}',
+      initialInvoice: consolidatedTemplate,
+      resolvedBuyer: group.restaurant,
+      previewLabel: 'Preview Statement',
+      onPreviewPdf: (draft, taxSummary) {
+        final rest = group.restaurant ??
+            Restaurant(id: group.keyId, name: group.clientName);
+        final stmt = ReportsViewModel(vault: widget.vault).buildStatement(
+          rest,
+          _selectedMonth,
+        );
+        final previewRecord = toMonthlyRecord(draft, taxSummary);
+        final currentRecords = List<MonthlyClientEtims>.from(
+          widget.vault.monthlyEtimsRecords,
+        )..removeWhere((r) => r.id == previewRecord.id);
+        currentRecords.insert(0, previewRecord);
+        final previewSettings =
+            widget.vault.settings.withMonthlyEtims(currentRecords);
+
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) => BrandedPdfViewerScreen(
+              title: 'Statement — ${group.clientName}',
+              filename: 'Statement_${group.clientName}_$_selectedMonth.pdf',
+              buildPdf: (_) => StatementPdfBuilder.buildPdfBytes(
+                stmt,
+                settings: previewSettings,
+              ),
+            ),
+          ),
+        );
+      },
+      onSave: (draft, taxSummary) async {
+        await widget.vault.saveMonthlyEtimsRecord(
+          toMonthlyRecord(draft, taxSummary),
+        );
+        _showSnack(
+          'Saved consolidated monthly eTIMS QR for ${group.clientName}.',
+        );
+      },
+    );
+  }
+
+  Future<void> _openEtimsEditorSheet({
+    required String sheetTitle,
+    required String sheetSubtitle,
+    required Invoice initialInvoice,
+    required Restaurant? resolvedBuyer,
+    required String previewLabel,
+    required void Function(Invoice draft, KraInvoiceTaxSummary summary) onPreviewPdf,
+    required Future<void> Function(Invoice draft, KraInvoiceTaxSummary summary) onSave,
+  }) async {
+    final profile = widget.vault.kraProfile;
+    var items = List<InvoiceLineItem>.from(initialInvoice.items);
+    var vatMode = KraVatMode.fromCode(
+      initialInvoice.vatMode ?? profile.defaultVatMode.code,
+    );
+    var isIssuingOscu = false;
+    String? sheetError;
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: AppTheme.surfaceCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => ScopedTextControllers(
         initialTexts: [
-          invoice.cuInvoiceNumber ?? '',
-          invoice.etimsQrData ?? '',
+          initialInvoice.cuInvoiceNumber ?? '',
+          initialInvoice.etimsRcptSign ?? '',
+          initialInvoice.etimsQrData ?? '',
         ],
         builder: (ctx, ctrls) {
           final cuNoCtrl = ctrls[0];
-          final qrCtrl = ctrls[1];
+          final signCtrl = ctrls[1];
+          final qrCtrl = ctrls[2];
           return StatefulBuilder(
             builder: (ctx, setSheetState) {
-          final previewInv = invoice.copyWith(
-            items: items,
-            vatMode: vatMode.code,
-          );
-          final taxSummary = KraTaxCalculator.computeInvoiceTaxSummary(
-            previewInv,
-            profile: profile,
-          );
+              Invoice buildDraft() {
+                final nowIso = DateTime.now().toUtc().toIso8601String();
+                final finalQr = qrCtrl.text.trim().isNotEmpty
+                    ? qrCtrl.text.trim()
+                    : KraTaxCalculator.buildEtimsQrUrl(
+                        sellerKraPin: profile.normalizedSellerPin,
+                        branchId: profile.etimsBranchId,
+                        receiptSignature: signCtrl.text.trim(),
+                        sandbox: profile.oscuSandbox,
+                      );
+                return initialInvoice.copyWith(
+                  items: items,
+                  vatMode: vatMode.code,
+                  cuInvoiceNumber: cuNoCtrl.text.trim(),
+                  etimsRcptSign: signCtrl.text.trim(),
+                  etimsQrData: finalQr,
+                  etimsSubmittedAt: cuNoCtrl.text.trim().isNotEmpty
+                      ? (initialInvoice.etimsSubmittedAt ?? nowIso)
+                      : null,
+                  updatedAt: nowIso,
+                );
+              }
 
-          void applyRateToAll(KraTaxRate rate) {
-            setSheetState(() {
-              items = items
-                  .map((it) => it.copyWith(taxRate: rate.code))
-                  .toList();
-            });
-          }
+              final previewInv = buildDraft();
+              final taxSummary = KraTaxCalculator.computeInvoiceTaxSummary(
+                previewInv,
+                profile: profile,
+              );
 
-          return Padding(
-            padding: EdgeInsets.fromLTRB(
-              18,
-              16,
-              18,
-              MediaQuery.of(ctx).viewInsets.bottom + 20,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    'Tax & eTIMS — ${invoice.number}',
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.slateInk,
-                    ),
-                  ),
-                  Text(
-                    '${invoice.restaurantName} · ${InvoiceFormatters.formatDisplayDate(invoice.date)}',
-                    style: const TextStyle(fontSize: 12.5, color: AppTheme.slateMuted),
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
+              void applyRateToAll(KraTaxRate rate) {
+                setSheetState(() {
+                  items = items
+                      .map((it) => it.copyWith(taxRate: rate.code))
+                      .toList();
+                });
+              }
+
+              void syncQrFromSignature(String sig) {
+                final built = KraTaxCalculator.buildEtimsQrUrl(
+                  sellerKraPin: profile.normalizedSellerPin,
+                  branchId: profile.etimsBranchId,
+                  receiptSignature: sig,
+                  sandbox: profile.oscuSandbox,
+                );
+                if (built.isNotEmpty) {
+                  setSheetState(() => qrCtrl.text = built);
+                }
+              }
+
+              Future<void> issueViaOscu() async {
+                setSheetState(() {
+                  isIssuingOscu = true;
+                  sheetError = null;
+                });
+                try {
+                  final result = await _oscu.submitSalesInvoice(
+                    invoice: previewInv,
+                    profile: profile,
+                    buyer: resolvedBuyer,
+                  );
+                  setSheetState(() {
+                    isIssuingOscu = false;
+                    cuNoCtrl.text = result.cuInvoiceNumber;
+                    signCtrl.text = result.receiptSignature;
+                    qrCtrl.text = result.qrCodeUrl;
+                  });
+                } catch (e) {
+                  setSheetState(() {
+                    isIssuingOscu = false;
+                    sheetError = UserFriendlyError.format(e);
+                  });
+                }
+              }
+
+              return Padding(
+                padding: EdgeInsets.fromLTRB(
+                  18,
+                  16,
+                  18,
+                  MediaQuery.of(ctx).viewInsets.bottom + 24,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      const Text(
-                        'VAT Mode:',
-                        style: TextStyle(fontWeight: FontWeight.w600),
+                      Text(
+                        sheetTitle,
+                        style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.slateInk,
+                        ),
                       ),
-                      const SizedBox(width: 8),
-                      ChoiceChip(
-                        label: const Text('Inclusive'),
-                        selected: vatMode == KraVatMode.inclusive,
-                        onSelected: (_) =>
-                            setSheetState(() => vatMode = KraVatMode.inclusive),
+                      Text(
+                        sheetSubtitle,
+                        style: const TextStyle(fontSize: 12.5, color: AppTheme.slateMuted),
                       ),
-                      const SizedBox(width: 6),
-                      ChoiceChip(
-                        label: const Text('Exclusive'),
-                        selected: vatMode == KraVatMode.exclusive,
-                        onSelected: (_) =>
-                            setSheetState(() => vatMode = KraVatMode.exclusive),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: [
-                      ActionChip(
-                        label: const Text('All VAT Exempt (Produce)'),
-                        onPressed: () => applyRateToAll(KraTaxRate.exempt),
-                      ),
-                      ActionChip(
-                        key: const Key('chip_mark_all_vat16'),
-                        label: const Text('All 16% VAT'),
-                        onPressed: () => applyRateToAll(KraTaxRate.standard16),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  ...List.generate(items.length, (i) {
-                    final it = items[i];
-                    final rate = KraTaxRate.fromCode(it.taxRate);
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 6),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppTheme.surfaceSage,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppTheme.borderSubtle),
-                      ),
-                      child: Row(
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 6,
                         children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  it.desc,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w600,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                                Text(
-                                  'KES ${_moneyFmt.format(it.total)}',
-                                  style: const TextStyle(
-                                    fontSize: 11.5,
-                                    color: AppTheme.slateMuted,
-                                  ),
-                                ),
-                              ],
-                            ),
+                          ActionChip(
+                            label: const Text('All Fresh Produce (No VAT)'),
+                            onPressed: () => applyRateToAll(KraTaxRate.exempt),
                           ),
-                          DropdownButton<KraTaxRate>(
-                            value: rate,
-                            underline: const SizedBox.shrink(),
-                            items: KraTaxRate.values
-                                .map(
-                                  (r) => DropdownMenuItem(
-                                    value: r,
-                                    child: Text(
-                                      r == KraTaxRate.standard16
-                                          ? '16% VAT'
-                                          : (r == KraTaxRate.zeroRated
-                                              ? '0%'
-                                              : 'Exempt'),
-                                      style: const TextStyle(fontSize: 12.5),
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                            onChanged: (nextRate) {
-                              if (nextRate == null) return;
-                              setSheetState(() {
-                                items[i] = it.copyWith(taxRate: nextRate.code);
-                              });
-                            },
+                          ActionChip(
+                            key: const Key('chip_mark_all_vat16'),
+                            label: const Text('Mark All 16% VAT'),
+                            onPressed: () => applyRateToAll(KraTaxRate.standard16),
                           ),
                         ],
                       ),
-                    );
-                  }),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: AppTheme.infoSurface,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Exempt: KES ${_moneyFmt.format(taxSummary.exemptTotal)}  |  Taxable Net: KES ${_moneyFmt.format(taxSummary.taxableNetTotal)}',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          ChoiceChip(
+                            label: const Text('VAT Included'),
+                            selected: vatMode == KraVatMode.inclusive,
+                            onSelected: (_) =>
+                                setSheetState(() => vatMode = KraVatMode.inclusive),
+                          ),
+                          const SizedBox(width: 8),
+                          ChoiceChip(
+                            label: const Text('Add 16% on Top'),
+                            selected: vatMode == KraVatMode.exclusive,
+                            onSelected: (_) =>
+                                setSheetState(() => vatMode = KraVatMode.exclusive),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      ...List.generate(items.length, (i) {
+                        final it = items[i];
+                        final rate = KraTaxRate.fromCode(it.taxRate);
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppTheme.surfaceSage,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppTheme.borderSubtle),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      it.desc,
+                                      style: const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                    Text(
+                                      'KES ${_moneyFmt.format(it.total)}',
+                                      style: const TextStyle(
+                                        fontSize: 11.5,
+                                        color: AppTheme.slateMuted,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              DropdownButton<KraTaxRate>(
+                                value: rate,
+                                underline: const SizedBox.shrink(),
+                                items: const [
+                                  DropdownMenuItem(
+                                    value: KraTaxRate.exempt,
+                                    child: Text('No VAT', style: TextStyle(fontSize: 12.5)),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: KraTaxRate.standard16,
+                                    child: Text('16% VAT', style: TextStyle(fontSize: 12.5)),
+                                  ),
+                                  DropdownMenuItem(
+                                    value: KraTaxRate.zeroRated,
+                                    child: Text('0% Rated', style: TextStyle(fontSize: 12.5)),
+                                  ),
+                                ],
+                                onChanged: (nextRate) {
+                                  if (nextRate == null) return;
+                                  setSheetState(() {
+                                    items[i] = it.copyWith(taxRate: nextRate.code);
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: AppTheme.infoSurface,
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        Text(
-                          'Output VAT (16%): KES ${_moneyFmt.format(taxSummary.outputVatTotal)}  ·  Total w/ VAT: KES ${_moneyFmt.format(taxSummary.grandTotalWithVat)}',
+                        child: Text(
+                          'No VAT: KES ${_moneyFmt.format(taxSummary.exemptTotal)} · '
+                          '16% Net: KES ${_moneyFmt.format(taxSummary.taxableNetTotal)} · '
+                          'VAT: KES ${_moneyFmt.format(taxSummary.outputVatTotal)}',
                           style: const TextStyle(
-                            fontSize: 12.5,
+                            fontSize: 12,
                             fontWeight: FontWeight.w700,
                             color: AppTheme.slateInk,
                           ),
                         ),
+                      ),
+                      const SizedBox(height: 14),
+                      OutlinedButton.icon(
+                        key: const Key('btn_issue_oscu'),
+                        onPressed: isIssuingOscu ? null : issueViaOscu,
+                        icon: isIssuingOscu
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.qr_code_2),
+                        label: Text(
+                          isIssuingOscu
+                              ? 'Contacting KRA OSCU...'
+                              : 'Issue Official eTIMS QR (OSCU)',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        key: const Key('field_etims_cu_number'),
+                        controller: cuNoCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'eTIMS CU / Receipt Number',
+                          hintText: 'e.g. KRAMW0123456/0042',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        key: const Key('field_etims_rcpt_sign'),
+                        controller: signCtrl,
+                        onChanged: syncQrFromSignature,
+                        decoration: const InputDecoration(
+                          labelText: 'KRA Receipt Signature (Auto-Builds QR)',
+                          hintText: 'Paste 16-char KRA signature to build QR link',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        key: const Key('field_etims_qr_url'),
+                        controller: qrCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'eTIMS QR Verification Link',
+                          hintText: 'https://etims.kra.go.ke/...',
+                        ),
+                      ),
+                      if (sheetError != null) ...[
+                        const SizedBox(height: 8),
+                        Text(
+                          sheetError!,
+                          style: const TextStyle(color: AppTheme.danger, fontSize: 12),
+                        ),
                       ],
-                    ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              key: const Key('btn_preview_etims_pdf'),
+                              onPressed: () {
+                                final draft = buildDraft();
+                                final sum = KraTaxCalculator.computeInvoiceTaxSummary(
+                                  draft,
+                                  profile: profile,
+                                );
+                                onPreviewPdf(draft, sum);
+                              },
+                              icon: const Icon(Icons.picture_as_pdf_outlined),
+                              label: Text(previewLabel),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: FilledButton.icon(
+                              key: const Key('btn_save_invoice_tax'),
+                              onPressed: () async {
+                                final draft = buildDraft();
+                                final sum = KraTaxCalculator.computeInvoiceTaxSummary(
+                                  draft,
+                                  profile: profile,
+                                );
+                                await onSave(draft, sum);
+                                if (ctx.mounted) Navigator.of(ctx).pop();
+                              },
+                              icon: const Icon(Icons.save_outlined),
+                              label: const Text('Save'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: const Key('field_etims_cu_number'),
-                    controller: cuNoCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'eTIMS CU Invoice No. (Optional)',
-                      hintText: 'e.g. KRAMW0123456/0042',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    key: const Key('field_etims_qr_url'),
-                    controller: qrCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'eTIMS Verification QR URL (Optional)',
-                      hintText: 'https://etims.kra.go.ke/...',
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  FilledButton.icon(
-                    key: const Key('btn_save_invoice_tax'),
-                    onPressed: () async {
-                      final nowIso = DateTime.now().toUtc().toIso8601String();
-                      final updated = invoice.copyWith(
-                        items: items,
-                        vatMode: vatMode.code,
-                        cuInvoiceNumber: cuNoCtrl.text.trim(),
-                        etimsQrData: qrCtrl.text.trim(),
-                        etimsSubmittedAt: cuNoCtrl.text.trim().isNotEmpty
-                            ? (invoice.etimsSubmittedAt ?? nowIso)
-                            : null,
-                        updatedAt: nowIso,
-                      );
-                      final list = List<Invoice>.from(widget.vault.invoices);
-                      final idx = list.indexWhere((i) => i.id == updated.id);
-                      if (idx >= 0) {
-                        list[idx] = updated;
-                        await widget.vault.setInvoices(list);
-                      }
-                      if (ctx.mounted) Navigator.of(ctx).pop();
-                      _showSnack('Updated KRA tax & eTIMS details for ${invoice.number}.');
-                    },
-                    icon: const Icon(Icons.save_outlined),
-                    label: const Text('Save Tax & eTIMS Details'),
-                  ),
-                ],
-              ),
-            ),
-          );
+                ),
+              );
             },
           );
         },
@@ -495,7 +1068,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
     ).restaurant;
     if (rest == null) {
       _showSnack(
-        'Link this invoice to a saved restaurant client before assigning KRA PIN.',
+        'Link this invoice to a saved restaurant client first.',
         color: AppTheme.warning,
       );
       return;
@@ -511,56 +1084,56 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
           final ctrl = ctrls[0];
           return StatefulBuilder(
             builder: (ctx, setDialogState) => AlertDialog(
-          title: Text('KRA PIN — ${rest.name}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: ctrl,
-                textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(
-                  labelText: 'Buyer KRA PIN',
-                  hintText: 'e.g. P051234567X',
-                ),
+              title: Text('KRA PIN — ${rest.name}'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: ctrl,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Customer KRA PIN',
+                      hintText: 'e.g. P051234567X',
+                    ),
+                  ),
+                  if (errorMsg != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      errorMsg!,
+                      style: const TextStyle(color: AppTheme.danger, fontSize: 12),
+                    ),
+                  ],
+                ],
               ),
-              if (errorMsg != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  errorMsg!,
-                  style: const TextStyle(color: AppTheme.danger, fontSize: 12),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final pin = Restaurant.normalizeKraPin(ctrl.text);
+                    if (pin.isEmpty || !Restaurant.isValidKraPin(pin)) {
+                      setDialogState(
+                        () => errorMsg = 'Enter a valid 11-character KRA PIN (e.g. P051234567X).',
+                      );
+                      return;
+                    }
+                    final list = List<Restaurant>.from(widget.vault.restaurants);
+                    final idx = list.indexWhere((r) => r.id == rest.id);
+                    if (idx >= 0) {
+                      list[idx] = rest.copyWith(
+                        kraPin: pin,
+                        updatedAt: DateTime.now().toUtc().toIso8601String(),
+                      );
+                      await widget.vault.setRestaurants(list);
+                    }
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                    _showSnack('Saved KRA PIN for ${rest.name}.');
+                  },
+                  child: const Text('Save PIN'),
                 ),
               ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                final pin = Restaurant.normalizeKraPin(ctrl.text);
-                if (pin.isEmpty || !Restaurant.isValidKraPin(pin)) {
-                  setDialogState(
-                    () => errorMsg = 'Enter a valid 11-character KRA PIN (e.g. P051234567X).',
-                  );
-                  return;
-                }
-                final list = List<Restaurant>.from(widget.vault.restaurants);
-                final idx = list.indexWhere((r) => r.id == rest.id);
-                if (idx >= 0) {
-                  list[idx] = rest.copyWith(
-                    kraPin: pin,
-                    updatedAt: DateTime.now().toUtc().toIso8601String(),
-                  );
-                  await widget.vault.setRestaurants(list);
-                }
-                if (ctx.mounted) Navigator.of(ctx).pop();
-                _showSnack('Updated KRA PIN for ${rest.name}.');
-              },
-              child: const Text('Save PIN'),
-            ),
-          ],
             ),
           );
         },
@@ -585,79 +1158,79 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
           final vatCtrl = ctrls[1];
           return StatefulBuilder(
             builder: (ctx, setDialogState) => AlertDialog(
-          title: Text('Input VAT — ${exp.desc}'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Expense Total: KES ${_moneyFmt.format(exp.amount)}',
-                style: const TextStyle(fontSize: 12.5, color: AppTheme.slateMuted),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: pinCtrl,
-                textCapitalization: TextCapitalization.characters,
-                decoration: const InputDecoration(
-                  labelText: 'Supplier KRA PIN',
-                  hintText: 'e.g. P051234567X',
-                ),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                controller: vatCtrl,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: InputDecoration(
-                  labelText: 'Claimable Input VAT (KES)',
-                  suffixIcon: TextButton(
-                    onPressed: () {
-                      final est = (exp.amount * 16 / 116);
-                      setDialogState(() => vatCtrl.text = est.toStringAsFixed(2));
-                    },
-                    child: const Text('16%'),
+              title: Text('VAT Paid — ${exp.desc}'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Expense Total: KES ${_moneyFmt.format(exp.amount)}',
+                    style: const TextStyle(fontSize: 12.5, color: AppTheme.slateMuted),
                   ),
-                ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: pinCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Supplier KRA PIN',
+                      hintText: 'e.g. P051234567X',
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: vatCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(
+                      labelText: 'VAT Paid (KES)',
+                      suffixIcon: TextButton(
+                        onPressed: () {
+                          final est = (exp.amount * 16 / 116);
+                          setDialogState(() => vatCtrl.text = est.toStringAsFixed(2));
+                        },
+                        child: const Text('16%'),
+                      ),
+                    ),
+                  ),
+                  if (errorMsg != null) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      errorMsg!,
+                      style: const TextStyle(color: AppTheme.danger, fontSize: 12),
+                    ),
+                  ],
+                ],
               ),
-              if (errorMsg != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  errorMsg!,
-                  style: const TextStyle(color: AppTheme.danger, fontSize: 12),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () async {
+                    final pin = Restaurant.normalizeKraPin(pinCtrl.text);
+                    if (pin.isNotEmpty && !Restaurant.isValidKraPin(pin)) {
+                      setDialogState(
+                        () => errorMsg = 'Enter a valid 11-character Supplier KRA PIN.',
+                      );
+                      return;
+                    }
+                    final vatVal = double.tryParse(vatCtrl.text.trim()) ?? 0;
+                    final list = List<Expense>.from(widget.vault.expenses);
+                    final idx = list.indexWhere((e) => e.id == exp.id);
+                    if (idx >= 0) {
+                      list[idx] = exp.copyWith(
+                        supplierKraPin: pin,
+                        inputVatAmount: vatVal,
+                        updatedAt: DateTime.now().toUtc().toIso8601String(),
+                      );
+                      await widget.vault.setExpenses(list);
+                    }
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                    _showSnack('Updated expense VAT record.');
+                  },
+                  child: const Text('Save'),
                 ),
               ],
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-            FilledButton(
-              onPressed: () async {
-                final pin = Restaurant.normalizeKraPin(pinCtrl.text);
-                if (pin.isNotEmpty && !Restaurant.isValidKraPin(pin)) {
-                  setDialogState(
-                    () => errorMsg = 'Invalid Supplier KRA PIN (11 chars e.g. P051234567X).',
-                  );
-                  return;
-                }
-                final vatVal = double.tryParse(vatCtrl.text.trim()) ?? 0;
-                final list = List<Expense>.from(widget.vault.expenses);
-                final idx = list.indexWhere((e) => e.id == exp.id);
-                if (idx >= 0) {
-                  list[idx] = exp.copyWith(
-                    supplierKraPin: pin,
-                    inputVatAmount: vatVal,
-                    updatedAt: DateTime.now().toUtc().toIso8601String(),
-                  );
-                  await widget.vault.setExpenses(list);
-                }
-                if (ctx.mounted) Navigator.of(ctx).pop();
-                _showSnack('Updated Input VAT record.');
-              },
-              child: const Text('Save'),
-            ),
-          ],
             ),
           );
         },
@@ -676,7 +1249,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
         .toList();
 
     final doc = pw.Document(
-      title: 'KRA VAT3 Tax Pack $_selectedMonth',
+      title: 'KRA Monthly Tax Report $_selectedMonth',
       author: 'Town Treasure Limited',
     );
 
@@ -700,18 +1273,18 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
                     ),
                   ),
                   pw.Text(
-                    'KRA VAT3 Monthly Filing Pack ($_selectedMonth)',
+                    'Monthly KRA Tax Summary ($_selectedMonth)',
                     style: pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold),
                   ),
                   if (profile.normalizedSellerPin.isNotEmpty)
                     pw.Text(
-                      'Taxpayer PIN: ${profile.normalizedSellerPin}${profile.vatNumber.isNotEmpty ? ' | VAT No: ${profile.vatNumber}' : ''}',
+                      'Company PIN: ${profile.normalizedSellerPin}',
                       style: const pw.TextStyle(fontSize: 9.5),
                     ),
                 ],
               ),
               pw.Text(
-                'Due: ${DateFormat('dd MMM yyyy').format(summary.filingDeadline)}',
+                'File before: ${DateFormat('dd MMM yyyy').format(summary.filingDeadline)}',
                 style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold),
               ),
             ],
@@ -726,14 +1299,13 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
-                _pdfStatRow('16% Standard Rated Sales (Net)', 'KES ${_moneyFmt.format(summary.taxableNetSalesTotal)}'),
-                _pdfStatRow('Output VAT (16%)', 'KES ${_moneyFmt.format(summary.outputVatTotal)}'),
-                _pdfStatRow('VAT-Exempt Produce Sales', 'KES ${_moneyFmt.format(summary.exemptSalesTotal)}'),
-                _pdfStatRow('Zero-Rated Sales (0%)', 'KES ${_moneyFmt.format(summary.zeroRatedSalesTotal)}'),
-                _pdfStatRow('Claimable Input VAT (Expenses)', 'KES ${_moneyFmt.format(summary.inputVatTotal)}'),
+                _pdfStatRow('Fresh Produce Sales (No VAT)', 'KES ${_moneyFmt.format(summary.exemptSalesTotal)}'),
+                _pdfStatRow('Taxable Goods Sales (Net 16%)', 'KES ${_moneyFmt.format(summary.taxableNetSalesTotal)}'),
+                _pdfStatRow('VAT Collected on Sales', 'KES ${_moneyFmt.format(summary.outputVatTotal)}'),
+                _pdfStatRow('VAT Paid on Purchases', 'KES ${_moneyFmt.format(summary.inputVatTotal)}'),
                 pw.Divider(),
                 _pdfStatRow(
-                  summary.netVatPayable >= 0 ? 'Net VAT Payable' : 'Net VAT Credit Carried Forward',
+                  summary.netVatPayable >= 0 ? 'Net VAT to Pay KRA' : 'VAT Credit Carried Forward',
                   'KES ${_moneyFmt.format(summary.netVatPayable.abs())}',
                   bold: true,
                 ),
@@ -742,7 +1314,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
           ),
           pw.SizedBox(height: 14),
           pw.Text(
-            'Sales & Output Tax Ledger (${monthInvoices.length} invoices)',
+            'Invoices (${monthInvoices.length})',
             style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
           ),
           pw.SizedBox(height: 6),
@@ -750,7 +1322,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
             headerStyle: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
             headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF313A43)),
             cellStyle: const pw.TextStyle(fontSize: 8),
-            headers: ['Date', 'Inv No.', 'Client', 'Client PIN', 'Exempt', 'Net 16%', 'VAT 16%', 'CU Inv'],
+            headers: ['Date', 'Inv No.', 'Client', 'Client PIN', 'No VAT', 'Net 16%', 'VAT 16%', 'CU Inv'],
             data: monthInvoices.map((inv) {
               final rest = Restaurant.resolveInvoiceRestaurant(inv, widget.vault.restaurants).restaurant;
               final tax = KraTaxCalculator.computeInvoiceTaxSummary(inv, profile: profile);
@@ -769,7 +1341,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
           if (monthExpenses.isNotEmpty) ...[
             pw.SizedBox(height: 14),
             pw.Text(
-              'Claimable Input VAT Purchases (${monthExpenses.length})',
+              'Purchases with VAT Paid (${monthExpenses.length})',
               style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 6),
@@ -777,7 +1349,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
               headerStyle: pw.TextStyle(fontSize: 8.5, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
               headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF166534)),
               cellStyle: const pw.TextStyle(fontSize: 8),
-              headers: ['Date', 'Supplier PIN', 'Description', 'Gross Amt', 'Input VAT'],
+              headers: ['Date', 'Supplier PIN', 'Description', 'Amount', 'VAT Paid'],
               data: monthExpenses.map((e) => [
                 e.date,
                 e.supplierKraPin ?? '',
@@ -818,7 +1390,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
 
     final buf = StringBuffer();
     buf.writeln(
-      'Section,Type,PIN,Party Name,Date,Doc Number,CU Invoice Number,Taxable Net (16%),Output/Input VAT (16%),Exempt Amount,Zero Rated (0%)',
+      'Section,Tax Type,KRA PIN,Name,Date,Document No,eTIMS CU No,Net 16%,VAT 16%,No-VAT Produce,Zero Rated',
     );
     for (final inv in monthInvoices) {
       final rest = Restaurant.resolveInvoiceRestaurant(inv, widget.vault.restaurants).restaurant;
@@ -826,7 +1398,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
       final tax = KraTaxCalculator.computeInvoiceTaxSummary(inv, profile: profile);
       buf.writeln([
         'Sales',
-        tax.hasTaxableVatLines ? 'Taxable 16%' : 'Exempt Produce',
+        tax.hasTaxableVatLines ? '16% VAT' : 'Exempt Produce',
         _csvEsc(pin),
         _csvEsc(rest?.name ?? inv.restaurantName),
         _csvEsc(inv.date),
@@ -845,7 +1417,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
       final vat = exp.inputVatAmount ?? 0;
       buf.writeln([
         'Purchases',
-        'Input VAT',
+        'VAT Paid',
         _csvEsc(exp.supplierKraPin ?? ''),
         _csvEsc(exp.desc),
         _csvEsc(exp.date),
@@ -859,12 +1431,12 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
     }
 
     final dir = await getTemporaryDirectory();
-    final file = File('${dir.path}/TownTreasure_iTax_VAT3_$_selectedMonth.csv');
+    final file = File('${dir.path}/TownTreasure_iTax_$_selectedMonth.csv');
     await file.writeAsString(buf.toString(), flush: true);
     await AppLockGuard.runWithoutRelock(
       () => Share.shareXFiles(
         [XFile(file.path)],
-        subject: 'KRA VAT3 iTax CSV ($_selectedMonth)',
+        subject: 'KRA iTax Sheet ($_selectedMonth)',
       ),
     );
   }
@@ -884,6 +1456,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
         .where((inv) => !inv.isDraft && inv.date.startsWith(_selectedMonth))
         .toList()
       ..sort((a, b) => b.date.compareTo(a.date));
+    final monthlyGroups = _buildMonthlyClientGroups(monthInvoices);
     final monthExpenses = widget.vault.expenses
         .where((e) => !e.isCapital && e.date.startsWith(_selectedMonth))
         .toList()
@@ -892,20 +1465,26 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
     return Scaffold(
       backgroundColor: AppTheme.surfaceSage,
       appBar: AppBar(
-        title: const Text('KRA & VAT3 Tax Center'),
+        title: const Text('KRA & eTIMS Tax'),
         actions: [
           IconButton(
+            key: const Key('btn_kra_help'),
+            tooltip: 'How KRA & eTIMS Works',
+            onPressed: _openHelpGuide,
+            icon: const Icon(Icons.help_outline),
+          ),
+          IconButton(
             key: const Key('btn_edit_kra_profile'),
-            tooltip: 'Company KRA Tax Profile',
+            tooltip: 'Tax & OSCU Setup',
             onPressed: _editCompanyTaxProfile,
-            icon: const Icon(Icons.account_balance_outlined),
+            icon: const Icon(Icons.tune),
           ),
         ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(14),
         children: [
-          // 1. Company KRA Profile card
+          // 1. Clean Business Tax & OSCU Banner
           Card(
             child: ListTile(
               leading: CircleAvatar(
@@ -915,17 +1494,17 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
               ),
               title: Text(
                 profile.hasValidSellerPin
-                    ? 'Seller KRA PIN: ${profile.normalizedSellerPin}'
-                    : 'Set Company KRA PIN & VAT Profile',
+                    ? 'Company PIN: ${profile.normalizedSellerPin}'
+                    : 'Set Town Treasure KRA PIN',
                 style: const TextStyle(fontWeight: FontWeight.w700),
               ),
               subtitle: Text(
-                '${profile.vatRegistered ? 'VAT3 Registered' : 'Non-VAT'} · Default: ${profile.defaultTaxRate.label} (${profile.defaultVatMode.label})${profile.cuSerialNumber.isNotEmpty ? ' · CU: ${profile.cuSerialNumber}' : ''}',
+                '${profile.vatRegistered ? 'VAT Registered' : 'Non-VAT'} · OSCU ${profile.oscuSandbox ? 'Test' : 'Live'}${profile.cuSerialNumber.isNotEmpty ? ' · ${profile.cuSerialNumber}' : ''}',
                 style: const TextStyle(fontSize: 12, color: AppTheme.slateMuted),
               ),
               trailing: TextButton(
                 onPressed: _editCompanyTaxProfile,
-                child: const Text('Edit'),
+                child: const Text('Setup'),
               ),
             ),
           ),
@@ -938,7 +1517,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
                 child: DropdownButtonFormField<String>(
                   initialValue: _selectedMonth,
                   decoration: const InputDecoration(
-                    labelText: 'Tax Period (Month)',
+                    labelText: 'Month',
                     prefixIcon: Icon(Icons.calendar_month_outlined),
                     isDense: true,
                   ),
@@ -961,7 +1540,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     const Text(
-                      'VAT3 DEADLINE',
+                      'FILE BEFORE',
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w700,
@@ -983,7 +1562,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
           ),
           const SizedBox(height: 12),
 
-          // 3. VAT3 Return Breakdown Card
+          // 3. Monthly Tax Summary Card
           Card(
             child: Padding(
               padding: const EdgeInsets.all(14),
@@ -991,7 +1570,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   const Text(
-                    'Monthly VAT3 Return Estimate',
+                    'Monthly Tax Summary',
                     style: TextStyle(
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
@@ -999,18 +1578,17 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  _statLine('VAT-Exempt Produce Sales', summary.exemptSalesTotal),
-                  _statLine('Zero-Rated Sales (0%)', summary.zeroRatedSalesTotal),
-                  _statLine('16% Taxable Sales (Net)', summary.taxableNetSalesTotal),
-                  _statLine('Output VAT (16%)', summary.outputVatTotal,
+                  _statLine('Fresh Produce (No VAT)', summary.exemptSalesTotal),
+                  _statLine('16% VAT Goods (Net)', summary.taxableNetSalesTotal),
+                  _statLine('VAT Collected on Sales', summary.outputVatTotal,
                       color: AppTheme.info),
-                  _statLine('Deductible Input VAT (Expenses)', summary.inputVatTotal,
+                  _statLine('VAT Paid on Purchases', summary.inputVatTotal,
                       color: AppTheme.forestGreen),
                   const Divider(),
                   _statLine(
                     summary.netVatPayable >= 0
-                        ? 'Net VAT Payable'
-                        : 'Net VAT Credit',
+                        ? 'Net VAT to Pay KRA'
+                        : 'VAT Credit Balance',
                     summary.netVatPayable.abs(),
                     bold: true,
                     color: summary.netVatPayable > 0
@@ -1027,8 +1605,8 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
                             Navigator.of(context).push(
                               MaterialPageRoute<void>(
                                 builder: (_) => BrandedPdfViewerScreen(
-                                  title: 'KRA VAT3 Pack ($_selectedMonth)',
-                                  filename: 'KRA_VAT3_$_selectedMonth.pdf',
+                                  title: 'Tax Summary ($_selectedMonth)',
+                                  filename: 'KRA_Summary_$_selectedMonth.pdf',
                                   supportsThermalRoll: false,
                                   buildPdf: (_) => _buildVat3ReturnPdf(summary),
                                 ),
@@ -1036,7 +1614,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
                             );
                           },
                           icon: const Icon(Icons.picture_as_pdf_outlined),
-                          label: const Text('VAT3 PDF Pack'),
+                          label: const Text('Tax Summary PDF'),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -1055,7 +1633,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
             ),
           ),
 
-          // 4. B2B Client KRA PIN Audit
+          // 4. Missing Hotel/Company KRA PINs
           if (summary.invoicesMissingClientPin.isNotEmpty) ...[
             const SizedBox(height: 12),
             Card(
@@ -1066,7 +1644,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${summary.invoicesMissingClientPin.length} Invoice(s) Missing Client KRA PIN',
+                      '${summary.invoicesMissingClientPin.length} Client(s) Missing KRA PIN',
                       style: const TextStyle(
                         fontWeight: FontWeight.w700,
                         color: AppTheme.warning,
@@ -1074,7 +1652,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
                     ),
                     const SizedBox(height: 4),
                     const Text(
-                      'Tap an invoice below to assign the client’s 11-character KRA PIN for iTax VAT3 compliance:',
+                      'Tap an invoice below to add the hotel or company KRA PIN:',
                       style: TextStyle(fontSize: 12, color: AppTheme.slateInk),
                     ),
                     const SizedBox(height: 8),
@@ -1097,51 +1675,147 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
             ),
           ],
 
-          // 5. Invoices Tax & eTIMS Tagging List
+          // 5. eTIMS Invoices List — Daily (Per Invoice) or Monthly (Consolidated by Hotel)
           const SizedBox(height: 16),
-          Text(
-            'Invoices Tax & eTIMS Tagging (${monthInvoices.length})',
-            style: const TextStyle(
-              fontWeight: FontWeight.w700,
-              color: AppTheme.slateInk,
-            ),
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'eTIMS QR & VAT Billing',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: AppTheme.slateInk,
+                  ),
+                ),
+              ),
+              Text(
+                _monthlyEtimsMode
+                    ? '${monthlyGroups.length} hotels'
+                    : '${monthInvoices.length} invoices',
+                style: const TextStyle(fontSize: 12, color: AppTheme.slateMuted),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
-          if (monthInvoices.isEmpty)
-            const Card(
-              child: Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('No finalized invoices for this month.'),
+          SegmentedButton<bool>(
+            key: const Key('segmented_etims_cadence'),
+            segments: [
+              ButtonSegment<bool>(
+                value: false,
+                icon: const Icon(Icons.receipt_long_outlined, size: 17),
+                label: Text('Daily (${monthInvoices.length})'),
               ),
-            )
-          else
-            ...monthInvoices.map((inv) {
-              final tax = KraTaxCalculator.computeInvoiceTaxSummary(
-                inv,
-                profile: profile,
-              );
-              return Card(
-                margin: const EdgeInsets.only(bottom: 8),
-                child: ListTile(
-                  key: Key('kra_inv_${inv.id}'),
-                  onTap: () => _openInvoiceTaxSheet(inv),
-                  title: Text(
-                    '${inv.number} · ${inv.restaurantName}',
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text(
-                    'Exempt: ${_moneyFmt.format(tax.exemptTotal)} · Net 16%: ${_moneyFmt.format(tax.taxableNetTotal)} · VAT: ${_moneyFmt.format(tax.outputVatTotal)}${inv.cuInvoiceNumber?.isNotEmpty == true ? ' · CU: ${inv.cuInvoiceNumber}' : ''}',
-                    style: const TextStyle(fontSize: 12, color: AppTheme.slateMuted),
-                  ),
-                  trailing: const Icon(Icons.edit_note_outlined),
+              ButtonSegment<bool>(
+                value: true,
+                icon: const Icon(Icons.apartment_outlined, size: 17),
+                label: Text('Monthly Hotel (${monthlyGroups.length})'),
+              ),
+            ],
+            selected: {_monthlyEtimsMode},
+            onSelectionChanged: (sel) {
+              setState(() => _monthlyEtimsMode = sel.first);
+            },
+          ),
+          const SizedBox(height: 10),
+          if (!_monthlyEtimsMode) ...[
+            if (monthInvoices.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No finalized invoices for this month.'),
                 ),
-              );
-            }),
+              )
+            else
+              ...monthInvoices.map((inv) {
+                final tax = KraTaxCalculator.computeInvoiceTaxSummary(
+                  inv,
+                  profile: profile,
+                );
+                final hasQr = (inv.etimsQrData ?? '').trim().isNotEmpty;
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    key: Key('kra_inv_${inv.id}'),
+                    onTap: () => _openInvoiceTaxSheet(inv),
+                    title: Text(
+                      '${inv.number} · ${inv.restaurantName}',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      [
+                        if (hasQr) 'eTIMS QR Ready',
+                        if (!hasQr && inv.cuInvoiceNumber?.isNotEmpty == true)
+                          'CU: ${inv.cuInvoiceNumber}',
+                        if (tax.outputVatTotal > 0)
+                          'VAT: KES ${_moneyFmt.format(tax.outputVatTotal)}'
+                        else
+                          'Produce (No VAT): KES ${_moneyFmt.format(tax.exemptTotal)}',
+                      ].join(' · '),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: hasQr ? AppTheme.forestGreen : AppTheme.slateMuted,
+                        fontWeight: hasQr ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                    ),
+                    trailing: Icon(
+                      hasQr ? Icons.qr_code_2 : Icons.edit_note_outlined,
+                      color: hasQr ? AppTheme.forestGreen : AppTheme.slateMuted,
+                    ),
+                  ),
+                );
+              }),
+          ] else ...[
+            if (monthlyGroups.isEmpty)
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(16),
+                  child: Text('No hotel deliveries found for this month.'),
+                ),
+              )
+            else
+              ...monthlyGroups.map((group) {
+                final rec = group.existingEtims;
+                final hasMonthlyQr = rec?.hasQr == true;
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 8),
+                  child: ListTile(
+                    key: Key('kra_monthly_${group.keyId}'),
+                    onTap: () => _openMonthlyClientEtimsSheet(group),
+                    title: Text(
+                      group.clientName,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      [
+                        '${group.invoices.length} invoices · KES ${_moneyFmt.format(group.totalSell)}',
+                        if (hasMonthlyQr)
+                          'Monthly QR Ready${rec!.cuInvoiceNumber.isNotEmpty ? ' · CU: ${rec.cuInvoiceNumber}' : ''}'
+                        else
+                          'Tap to issue monthly eTIMS QR',
+                      ].join('\n'),
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: hasMonthlyQr
+                            ? AppTheme.forestGreen
+                            : AppTheme.slateMuted,
+                        fontWeight:
+                            hasMonthlyQr ? FontWeight.w600 : FontWeight.normal,
+                      ),
+                    ),
+                    trailing: Icon(
+                      hasMonthlyQr ? Icons.qr_code_2 : Icons.summarize_outlined,
+                      color:
+                          hasMonthlyQr ? AppTheme.forestGreen : AppTheme.slateMuted,
+                    ),
+                  ),
+                );
+              }),
+          ],
 
-          // 6. Monthly Input VAT Expenses
+          // 6. Monthly Purchases VAT
           const SizedBox(height: 16),
           Text(
-            'Monthly Expenses — Claimable Input VAT (${monthExpenses.length})',
+            'Monthly Expenses — Record VAT Paid (${monthExpenses.length})',
             style: const TextStyle(
               fontWeight: FontWeight.w700,
               color: AppTheme.slateInk,
@@ -1166,7 +1840,7 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                   subtitle: Text(
-                    '${exp.date} · Amt: KES ${_moneyFmt.format(exp.amount)}${(exp.inputVatAmount ?? 0) > 0 ? ' · Input VAT: KES ${_moneyFmt.format(exp.inputVatAmount!)}' : ' · Tap to add Supplier PIN / Input VAT'}',
+                    '${exp.date} · KES ${_moneyFmt.format(exp.amount)}${(exp.inputVatAmount ?? 0) > 0 ? ' · VAT Paid: KES ${_moneyFmt.format(exp.inputVatAmount!)}' : ' · Tap if purchase included 16% VAT'}',
                     style: const TextStyle(fontSize: 12, color: AppTheme.slateMuted),
                   ),
                   trailing: const Icon(Icons.receipt_outlined),
@@ -1209,4 +1883,22 @@ class _KraTaxCenterScreenState extends State<KraTaxCenterScreen> {
       ),
     );
   }
+}
+
+class _MonthlyClientGroup {
+  const _MonthlyClientGroup({
+    required this.keyId,
+    required this.clientName,
+    required this.restaurant,
+    required this.invoices,
+    required this.totalSell,
+    required this.existingEtims,
+  });
+
+  final String keyId;
+  final String clientName;
+  final Restaurant? restaurant;
+  final List<Invoice> invoices;
+  final double totalSell;
+  final MonthlyClientEtims? existingEtims;
 }

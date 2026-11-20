@@ -39,7 +39,7 @@ enum KraVatMode {
   }
 }
 
-/// Company KRA tax configuration stored inside `VaultSettings` (`kraProfile`).
+/// Company KRA tax & eTIMS OSCU configuration stored inside `VaultSettings` (`kraProfile`).
 class KraCompanyProfile {
   const KraCompanyProfile({
     this.sellerKraPin = '',
@@ -49,6 +49,8 @@ class KraCompanyProfile {
     this.defaultVatMode = KraVatMode.inclusive,
     this.cuSerialNumber = '',
     this.etimsBranchId = '00',
+    this.oscuSandbox = true,
+    this.oscuRelayUrl = '',
     this.updatedAt,
   });
 
@@ -59,6 +61,8 @@ class KraCompanyProfile {
   final KraVatMode defaultVatMode;
   final String cuSerialNumber;
   final String etimsBranchId;
+  final bool oscuSandbox;
+  final String oscuRelayUrl;
   final String? updatedAt;
 
   String get normalizedSellerPin => Restaurant.normalizeKraPin(sellerKraPin);
@@ -72,9 +76,13 @@ class KraCompanyProfile {
       vatNumber: (json['vatNumber'] ?? '').toString(),
       vatRegistered: json['vatRegistered'] != false,
       defaultTaxRate: KraTaxRate.fromCode(json['defaultTaxRate']?.toString()),
-      defaultVatMode: KraVatMode.fromCode(json['defaultVatMode']?.toString()),
+      defaultVatMode: KraTaxRate.values.isNotEmpty
+          ? KraVatMode.fromCode(json['defaultVatMode']?.toString())
+          : KraVatMode.inclusive,
       cuSerialNumber: (json['cuSerialNumber'] ?? '').toString(),
       etimsBranchId: (json['etimsBranchId'] ?? '00').toString(),
+      oscuSandbox: json['oscuSandbox'] != false,
+      oscuRelayUrl: (json['oscuRelayUrl'] ?? '').toString(),
       updatedAt: json['updatedAt']?.toString(),
     );
   }
@@ -88,6 +96,9 @@ class KraCompanyProfile {
       'defaultVatMode': defaultVatMode.code,
       'cuSerialNumber': cuSerialNumber.trim().toUpperCase(),
       'etimsBranchId': etimsBranchId.trim().isEmpty ? '00' : etimsBranchId.trim(),
+      'oscuSandbox': oscuSandbox,
+      if (oscuRelayUrl.trim().isNotEmpty)
+        'oscuRelayUrl': oscuRelayUrl.trim().replaceAll(RegExp(r'/+$'), ''),
       if (updatedAt != null) 'updatedAt': updatedAt,
     };
   }
@@ -100,6 +111,8 @@ class KraCompanyProfile {
     KraVatMode? defaultVatMode,
     String? cuSerialNumber,
     String? etimsBranchId,
+    bool? oscuSandbox,
+    String? oscuRelayUrl,
     String? updatedAt,
   }) {
     return KraCompanyProfile(
@@ -110,6 +123,8 @@ class KraCompanyProfile {
       defaultVatMode: defaultVatMode ?? this.defaultVatMode,
       cuSerialNumber: cuSerialNumber ?? this.cuSerialNumber,
       etimsBranchId: etimsBranchId ?? this.etimsBranchId,
+      oscuSandbox: oscuSandbox ?? this.oscuSandbox,
+      oscuRelayUrl: oscuRelayUrl ?? this.oscuRelayUrl,
       updatedAt: updatedAt ?? this.updatedAt,
     );
   }
@@ -342,6 +357,246 @@ class KraTaxCalculator {
       netVatPayable: _round2(cleanOutput - cleanInput),
       filingDeadline: filingDeadlineForMonth(monthYm),
       invoicesMissingClientPin: missingPins,
+    );
+  }
+
+  /// Builds the official KRA eTIMS verification QR URL from Seller PIN, Branch ID (`00`),
+  /// and the KRA Receipt Signature (`rcptSign`).
+  static String buildEtimsQrUrl({
+    required String sellerKraPin,
+    required String branchId,
+    required String receiptSignature,
+    bool sandbox = false,
+  }) {
+    final raw = receiptSignature.trim();
+    if (raw.isEmpty) return '';
+    if (raw.startsWith('http://') || raw.startsWith('https://')) {
+      return raw;
+    }
+    final cleanPin = Restaurant.normalizeKraPin(sellerKraPin);
+    if (cleanPin.isEmpty) return '';
+    final cleanBranch = branchId.trim().isEmpty ? '00' : branchId.trim();
+    final host = sandbox
+        ? 'https://etims-sbx.kra.go.ke'
+        : 'https://etims.kra.go.ke';
+    return '$host/common/link/etims/receipt/indexEtimsInvoiceData?Data=$cleanPin$cleanBranch$raw';
+  }
+
+  /// Maps internal tax rate to KRA eTIMS OSCU `taxTyCd` (`A` Exempt, `B` 16% VAT, `C` Zero-Rated).
+  static String oscuTaxCode(KraTaxRate rate) {
+    return switch (rate) {
+      KraTaxRate.exempt => 'A',
+      KraTaxRate.standard16 => 'B',
+      KraTaxRate.zeroRated => 'C',
+    };
+  }
+
+  /// Builds an official KRA eTIMS OSCU `saveTrnsSalesReq` JSON payload for an invoice.
+  static Map<String, dynamic> buildOscuSalesPayload({
+    required Invoice invoice,
+    required KraCompanyProfile profile,
+    Restaurant? buyer,
+    DateTime? timestamp,
+  }) {
+    final now = (timestamp ?? DateTime.now()).toUtc();
+    String fmtDate(DateTime d) =>
+        '${d.year.toString().padLeft(4, '0')}${d.month.toString().padLeft(2, '0')}${d.day.toString().padLeft(2, '0')}';
+    String fmtDateTime(DateTime d) =>
+        '${fmtDate(d)}${d.hour.toString().padLeft(2, '0')}${d.minute.toString().padLeft(2, '0')}${d.second.toString().padLeft(2, '0')}';
+
+    final vatMode = KraVatMode.fromCode(
+      invoice.vatMode ?? profile.defaultVatMode.code,
+    );
+    final summary = computeInvoiceTaxSummary(invoice, profile: profile);
+    final numericDigits = invoice.number.replaceAll(RegExp(r'[^0-9]'), '');
+    final invcNo = int.tryParse(numericDigits) ?? 1;
+    final cleanDate = invoice.date.replaceAll('-', '');
+    final salesDt = cleanDate.length == 8 ? cleanDate : fmtDate(now);
+    final buyerPin = Restaurant.normalizeKraPin(buyer?.kraPin);
+
+    final itemList = <Map<String, dynamic>>[];
+    for (var i = 0; i < invoice.items.length; i++) {
+      final item = invoice.items[i];
+      final lineTax = computeLineBreakdown(item, vatMode: vatMode);
+      final code = oscuTaxCode(lineTax.rate);
+      itemList.add({
+        'itemSeq': i + 1,
+        'itemCd': 'KE2NT${(i + 1).toString().padLeft(4, '0')}',
+        'itemClsCd': '50400000', // Fresh produce / food supplies UNSPSC base
+        'itemNm': item.desc,
+        'pkgUnitCd': 'NT',
+        'pkg': item.qty,
+        'qtyUnitCd': 'KGM',
+        'qty': item.qty,
+        'prc': item.sellPrice,
+        'splyAmt': lineTax.netAmount,
+        'dcRt': 0,
+        'dcAmt': 0,
+        'taxTyCd': code,
+        'taxblAmt': lineTax.netAmount,
+        'taxAmt': lineTax.vatAmount,
+        'totAmt': lineTax.grossAmount,
+      });
+    }
+
+    return {
+      'tin': profile.normalizedSellerPin,
+      'bhfId': profile.etimsBranchId.trim().isEmpty
+          ? '00'
+          : profile.etimsBranchId.trim(),
+      'invcNo': invcNo,
+      'orgInvcNo': 0,
+      if (buyerPin.isNotEmpty) 'custTin': buyerPin,
+      'custNm': buyer?.name ?? invoice.restaurantName,
+      'salesTyCd': 'N',
+      'rcptTyCd': 'S',
+      'pmtTyCd': invoice.isPaid ? '01' : '02',
+      'salesSttsCd': '02',
+      'cfmDt': fmtDateTime(now),
+      'salesDt': salesDt,
+      'totItemCnt': itemList.length,
+      'taxblAmtA': summary.exemptTotal,
+      'taxblAmtB': summary.taxableNetTotal,
+      'taxblAmtC': summary.zeroRatedTotal,
+      'taxRtA': 0,
+      'taxRtB': 16,
+      'taxRtC': 0,
+      'taxAmtA': 0,
+      'taxAmtB': summary.outputVatTotal,
+      'taxAmtC': 0,
+      'totTaxblAmt': summary.subtotalNet,
+      'totTaxAmt': summary.outputVatTotal,
+      'totAmt': summary.grandTotalWithVat,
+      'prchrAcptcYn': 'N',
+      'regrId': 'TownTreasureApp',
+      'regrNm': 'Town Treasure',
+      'modrId': 'TownTreasureApp',
+      'modrNm': 'Town Treasure',
+      'itemList': itemList,
+    };
+  }
+}
+
+/// Consolidated monthly eTIMS invoice / QR record for a hotel or corporate client
+/// billed on a monthly statement rather than per-delivery daily eTIMS.
+class MonthlyClientEtims {
+  const MonthlyClientEtims({
+    required this.id,
+    required this.month,
+    required this.restaurantId,
+    required this.restaurantName,
+    this.cuInvoiceNumber = '',
+    this.rcptSign = '',
+    this.qrCodeUrl = '',
+    this.vatMode = 'inclusive',
+    this.totalAmount = 0,
+    this.exemptAmount = 0,
+    this.taxableNetAmount = 0,
+    this.outputVatAmount = 0,
+    this.invoiceIds = const [],
+    this.updatedAt,
+  });
+
+  final String id;
+  final String month;
+  final String restaurantId;
+  final String restaurantName;
+  final String cuInvoiceNumber;
+  final String rcptSign;
+  final String qrCodeUrl;
+  final String vatMode;
+  final double totalAmount;
+  final double exemptAmount;
+  final double taxableNetAmount;
+  final double outputVatAmount;
+  final List<String> invoiceIds;
+  final String? updatedAt;
+
+  bool get hasQr => qrCodeUrl.trim().isNotEmpty;
+
+  static String buildId(String monthYm, Restaurant? restaurant, [String? fallbackName]) {
+    final restKey = (restaurant != null && restaurant.id.trim().isNotEmpty)
+        ? restaurant.id.trim()
+        : (fallbackName ?? restaurant?.name ?? 'client')
+            .trim()
+            .toLowerCase()
+            .replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    return '${monthYm.trim()}_$restKey';
+  }
+
+  factory MonthlyClientEtims.fromJson(Map<String, dynamic> json) {
+    return MonthlyClientEtims(
+      id: (json['id'] ?? '').toString(),
+      month: (json['month'] ?? '').toString(),
+      restaurantId: (json['restaurantId'] ?? '').toString(),
+      restaurantName: (json['restaurantName'] ?? '').toString(),
+      cuInvoiceNumber: (json['cuInvoiceNumber'] ?? '').toString(),
+      rcptSign: (json['rcptSign'] ?? '').toString(),
+      qrCodeUrl: (json['qrCodeUrl'] ?? '').toString(),
+      vatMode: (json['vatMode'] ?? 'inclusive').toString(),
+      totalAmount: (json['totalAmount'] as num?)?.toDouble() ?? 0,
+      exemptAmount: (json['exemptAmount'] as num?)?.toDouble() ?? 0,
+      taxableNetAmount: (json['taxableNetAmount'] as num?)?.toDouble() ?? 0,
+      outputVatAmount: (json['outputVatAmount'] as num?)?.toDouble() ?? 0,
+      invoiceIds: (json['invoiceIds'] as List?)
+              ?.map((e) => e.toString())
+              .where((e) => e.isNotEmpty)
+              .toList() ??
+          const [],
+      updatedAt: json['updatedAt']?.toString(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'month': month,
+      'restaurantId': restaurantId,
+      'restaurantName': restaurantName,
+      'cuInvoiceNumber': cuInvoiceNumber,
+      'rcptSign': rcptSign,
+      'qrCodeUrl': qrCodeUrl,
+      'vatMode': vatMode,
+      'totalAmount': totalAmount,
+      'exemptAmount': exemptAmount,
+      'taxableNetAmount': taxableNetAmount,
+      'outputVatAmount': outputVatAmount,
+      'invoiceIds': invoiceIds,
+      if (updatedAt != null) 'updatedAt': updatedAt,
+    };
+  }
+
+  MonthlyClientEtims copyWith({
+    String? id,
+    String? month,
+    String? restaurantId,
+    String? restaurantName,
+    String? cuInvoiceNumber,
+    String? rcptSign,
+    String? qrCodeUrl,
+    String? vatMode,
+    double? totalAmount,
+    double? exemptAmount,
+    double? taxableNetAmount,
+    double? outputVatAmount,
+    List<String>? invoiceIds,
+    String? updatedAt,
+  }) {
+    return MonthlyClientEtims(
+      id: id ?? this.id,
+      month: month ?? this.month,
+      restaurantId: restaurantId ?? this.restaurantId,
+      restaurantName: restaurantName ?? this.restaurantName,
+      cuInvoiceNumber: cuInvoiceNumber ?? this.cuInvoiceNumber,
+      rcptSign: rcptSign ?? this.rcptSign,
+      qrCodeUrl: qrCodeUrl ?? this.qrCodeUrl,
+      vatMode: vatMode ?? this.vatMode,
+      totalAmount: totalAmount ?? this.totalAmount,
+      exemptAmount: exemptAmount ?? this.exemptAmount,
+      taxableNetAmount: taxableNetAmount ?? this.taxableNetAmount,
+      outputVatAmount: outputVatAmount ?? this.outputVatAmount,
+      invoiceIds: invoiceIds ?? this.invoiceIds,
+      updatedAt: updatedAt ?? this.updatedAt,
     );
   }
 }

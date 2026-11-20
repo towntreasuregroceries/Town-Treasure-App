@@ -9,6 +9,7 @@ import 'package:http/testing.dart';
 import 'package:image/image.dart' as img;
 import 'package:town_treasure_groceries/data/repositories/vault_repository.dart';
 import 'package:town_treasure_groceries/data/services/crypto_service.dart';
+import 'package:town_treasure_groceries/data/services/kra_oscu_service.dart';
 import 'package:town_treasure_groceries/data/services/local_storage_service.dart';
 import 'package:town_treasure_groceries/data/services/personal_vault_service.dart';
 import 'package:town_treasure_groceries/data/services/supabase_service.dart';
@@ -16,6 +17,8 @@ import 'package:town_treasure_groceries/domain/models/models.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
 import 'package:town_treasure_groceries/ui/features/invoices/invoice_pdf_builder.dart';
 import 'package:town_treasure_groceries/ui/features/kra/kra_tax_center_screen.dart';
+import 'package:town_treasure_groceries/ui/features/reports/reports_view_model.dart';
+import 'package:town_treasure_groceries/ui/features/reports/statement_pdf_builder.dart';
 import 'package:town_treasure_groceries/ui/features/vault/personal_vault_screen.dart';
 
 import 'test_fakes.dart';
@@ -278,6 +281,8 @@ void main() {
       await tester.tap(find.byKey(const Key('btn_vault_pick_file')));
       await tester.pumpAndSettle();
 
+      // Vault should not force expiry clutter onto owner
+      expect(find.byKey(const Key('field_vault_expiry')), findsNothing);
       await tester.enterText(
         find.byKey(const Key('field_vault_title')),
         'KRA TCC 2026',
@@ -390,7 +395,7 @@ void main() {
     });
 
     testWidgets(
-        'KraTaxCenterScreen updates Company KRA PIN, marks invoice 16% VAT + eTIMS CU, and updates VAT3 totals',
+        'KraTaxCenterScreen opens Help guide, configures KRA/OSCU setup, and issues eTIMS QR invoice',
         (tester) async {
       final storage = _InMemoryLocalStorageService();
       final supabase = FakeSupabaseGateway()
@@ -436,21 +441,51 @@ void main() {
         sync: false,
       );
 
+      final fakeOscu = KraOscuService(
+        supabase: supabase,
+        httpClient: MockClient((req) async {
+          expect(req.url.path, '/oscu/sales');
+          return http.Response(
+            jsonEncode({
+              'ok': true,
+              'cuInvoiceNumber': 'KRA-OSCU-2026',
+              'qrCodeUrl':
+                  'https://etims.kra.go.ke/common/link/etims/receipt/indexEtimsInvoiceData?Data=P051234567X00SIG9988',
+              'data': {
+                'rcptNo': 2026,
+                'rcptSign': 'SIG9988',
+                'intrData': 'INTR12',
+              },
+            }),
+            200,
+          );
+        }),
+      );
+
       await tester.pumpWidget(
         MaterialApp(
           theme: AppTheme.light(),
-          home: KraTaxCenterScreen(vault: vault),
+          home: KraTaxCenterScreen(vault: vault, oscuService: fakeOscu),
         ),
       );
       await tester.pumpAndSettle();
 
-      // Configure Company Seller KRA PIN
+      // 1. Help button opens plain-language operational guide
+      await tester.tap(find.byKey(const Key('btn_kra_help')));
+      await tester.pumpAndSettle();
+      expect(find.text('How KRA & eTIMS Tax Center Works'), findsOneWidget);
+      await tester.ensureVisible(find.text('Got It'));
+      await tester.tap(find.text('Got It'));
+      await tester.pumpAndSettle();
+
+      // 2. Uncluttered Setup bottom sheet saves Seller KRA PIN
       await tester.tap(find.byKey(const Key('btn_edit_kra_profile')));
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byKey(const Key('field_kra_seller_pin')),
         'P051234567X',
       );
+      await tester.ensureVisible(find.byKey(const Key('btn_save_kra_profile')));
       await tester.tap(find.byKey(const Key('btn_save_kra_profile')));
       await tester.pumpAndSettle();
       expect(vault.kraProfile.normalizedSellerPin, 'P051234567X');
@@ -458,7 +493,7 @@ void main() {
       ScaffoldMessenger.of(tester.element(find.byType(Scaffold))).hideCurrentSnackBar();
       await tester.pumpAndSettle();
 
-      // Tag invoice to 16% VAT & eTIMS CU number
+      // 3. Tag invoice to 16% VAT & issue eTIMS QR via OSCU
       await tester.ensureVisible(find.byKey(const Key('kra_inv_inv_1')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('kra_inv_inv_1')));
@@ -466,17 +501,65 @@ void main() {
 
       await tester.tap(find.byKey(const Key('chip_mark_all_vat16')));
       await tester.pumpAndSettle();
-      await tester.enterText(
-        find.byKey(const Key('field_etims_cu_number')),
-        'KRA-CU-778',
-      );
+      await tester.ensureVisible(find.byKey(const Key('btn_issue_oscu')));
+      await tester.tap(find.byKey(const Key('btn_issue_oscu')));
+      await tester.pumpAndSettle();
+
       await tester.ensureVisible(find.byKey(const Key('btn_save_invoice_tax')));
       await tester.tap(find.byKey(const Key('btn_save_invoice_tax')));
       await tester.pumpAndSettle();
 
-      // Inclusive 1,160 KES @ 16% => Net 1,000 + Output VAT 160
-      expect(vault.invoices.first.cuInvoiceNumber, 'KRA-CU-778');
+      // Inclusive 1,160 KES @ 16% => Net 1,000 + Output VAT 160 + QR Ready
+      expect(vault.invoices.first.cuInvoiceNumber, 'KRA-OSCU-2026');
+      expect(
+        vault.invoices.first.etimsQrData,
+        'https://etims.kra.go.ke/common/link/etims/receipt/indexEtimsInvoiceData?Data=P051234567X00SIG9988',
+      );
+      expect(find.textContaining('eTIMS QR Ready'), findsWidgets);
       expect(find.textContaining('KES 160.00'), findsWidgets);
+
+      ScaffoldMessenger.of(tester.element(find.byType(Scaffold))).hideCurrentSnackBar();
+      await tester.pumpAndSettle();
+
+      // 4. Switch to Monthly By Hotel cadence & issue consolidated Monthly Statement eTIMS QR
+      await tester.ensureVisible(find.byKey(const Key('segmented_etims_cadence')));
+      await tester.tap(find.textContaining('Monthly Hotel'));
+      await tester.pumpAndSettle();
+
+      final monthKey = DateTime.now().toIso8601String().substring(0, 7);
+      final monthlyTileKey = Key('kra_monthly_${monthKey}_r1');
+      await tester.ensureVisible(find.byKey(monthlyTileKey));
+      await tester.tap(find.byKey(monthlyTileKey));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('btn_issue_oscu')));
+      await tester.tap(find.byKey(const Key('btn_issue_oscu')));
+      await tester.pumpAndSettle();
+
+      await tester.ensureVisible(find.byKey(const Key('btn_save_invoice_tax')));
+      await tester.tap(find.byKey(const Key('btn_save_invoice_tax')));
+      await tester.pumpAndSettle();
+
+      final savedMonthly = vault.settings.findMonthlyEtims(
+        monthKey,
+        const Restaurant(id: 'r1', name: 'Sankara Suites'),
+      );
+      expect(savedMonthly, isNotNull);
+      expect(savedMonthly!.cuInvoiceNumber, 'KRA-OSCU-2026');
+      expect(savedMonthly.hasQr, isTrue);
+      expect(find.textContaining('Monthly QR Ready'), findsOneWidget);
+
+      // 5. Consolidated Monthly Statement PDF renders cleanly with eTIMS QR attached
+      final stmt = ReportsViewModel(vault: vault).buildStatement(
+        const Restaurant(id: 'r1', name: 'Sankara Suites', kraPin: 'P051111111Z'),
+        monthKey,
+      );
+      final stmtPdfBytes = await StatementPdfBuilder.buildPdfBytes(
+        stmt,
+        settings: vault.settings,
+      );
+      expect(stmtPdfBytes.length, greaterThan(1500));
+      expect(utf8.decode(stmtPdfBytes.take(5).toList()), '%PDF-');
     });
   });
 }

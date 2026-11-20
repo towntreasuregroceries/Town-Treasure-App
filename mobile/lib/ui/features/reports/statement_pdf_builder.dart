@@ -32,6 +32,11 @@ class StatementPdfBuilder {
       (generatedDate ?? DateTime.now()).toIso8601String().substring(0, 10),
     );
     final firstMonthWord = statement.monthName.split(' ').first;
+    final kraProfile = settings.kraProfile;
+    final monthlyEtims = settings.findMonthlyEtims(
+      statement.month,
+      statement.restaurant,
+    );
 
     final doc = pw.Document(
       title: 'Statement_${statement.restaurant.name}_${statement.monthName}',
@@ -48,7 +53,13 @@ class StatementPdfBuilder {
         footer: (_) => _buildFooter(statement),
         build: (_) {
           return [
-            _buildHeader(logoBytes, statement, dateText),
+            _buildHeader(
+              logoBytes,
+              statement,
+              dateText,
+              kraProfile: kraProfile,
+              monthlyEtims: monthlyEtims,
+            ),
             pw.SizedBox(height: 20),
             _buildAddressRow(statement.restaurant),
             pw.SizedBox(height: 18),
@@ -62,6 +73,8 @@ class StatementPdfBuilder {
               stampBytes: stampBytes,
               signatureBytes: signatureBytes,
               dateText: dateText,
+              monthName: statement.monthName,
+              monthlyEtims: monthlyEtims,
             ),
           ];
         },
@@ -125,8 +138,12 @@ class StatementPdfBuilder {
   static pw.Widget _buildHeader(
     Uint8List? logoBytes,
     ClientStatementData statement,
-    String dateText,
-  ) {
+    String dateText, {
+    KraCompanyProfile kraProfile = const KraCompanyProfile(),
+    MonthlyClientEtims? monthlyEtims,
+  }) {
+    final hasMonthlyEtims = monthlyEtims != null &&
+        (monthlyEtims.hasQr || monthlyEtims.cuInvoiceNumber.trim().isNotEmpty);
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -142,7 +159,7 @@ class StatementPdfBuilder {
               ),
             pw.SizedBox(height: 10),
             pw.Text(
-              'MONTHLY STATEMENT',
+              hasMonthlyEtims ? 'MONTHLY TAX STATEMENT' : 'MONTHLY STATEMENT',
               style: pw.TextStyle(
                 fontSize: 22,
                 fontWeight: pw.FontWeight.bold,
@@ -168,6 +185,22 @@ class StatementPdfBuilder {
               'Generated: $dateText',
               style: const pw.TextStyle(fontSize: 9.5, color: _textMuted),
             ),
+            if (kraProfile.hasValidSellerPin) ...[
+              pw.SizedBox(height: 3),
+              pw.Text(
+                'KRA PIN: ${kraProfile.normalizedSellerPin}',
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                  color: _textDark,
+                ),
+              ),
+            ],
+            if (kraProfile.cuSerialNumber.trim().isNotEmpty)
+              pw.Text(
+                'eTIMS CU: ${kraProfile.cuSerialNumber.trim()}',
+                style: const pw.TextStyle(fontSize: 8.5, color: _textMuted),
+              ),
           ],
         ),
       ],
@@ -239,6 +272,15 @@ class StatementPdfBuilder {
               pw.Text(
                 rest.phone,
                 style: const pw.TextStyle(fontSize: 9, color: _textMuted),
+              ),
+            if (Restaurant.isValidKraPin(rest.kraPin))
+              pw.Text(
+                'KRA PIN: ${Restaurant.normalizeKraPin(rest.kraPin)}',
+                style: pw.TextStyle(
+                  fontSize: 9,
+                  fontWeight: pw.FontWeight.bold,
+                  color: _textDark,
+                ),
               ),
           ],
         ),
@@ -474,58 +516,137 @@ class StatementPdfBuilder {
     required Uint8List? stampBytes,
     required Uint8List? signatureBytes,
     required String dateText,
+    required String monthName,
+    MonthlyClientEtims? monthlyEtims,
   }) {
-    return pw.Align(
-      alignment: pw.Alignment.centerRight,
-      child: pw.Container(
-        width: 175,
-        padding: const pw.EdgeInsets.all(8),
-        decoration: pw.BoxDecoration(
-          border: pw.Border.all(color: _slateDark, width: 2),
-          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
-        ),
-        child: pw.Column(
+    final stampCard = pw.Container(
+      width: 175,
+      padding: const pw.EdgeInsets.all(8),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: _slateDark, width: 2),
+        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
+      ),
+      child: pw.Column(
+        children: [
+          if (stampBytes != null)
+            pw.Image(
+              pw.MemoryImage(stampBytes),
+              height: 30,
+              fit: pw.BoxFit.contain,
+            )
+          else
+            pw.Text(
+              'TOWN TREASURE GROCERIES',
+              style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
+            ),
+          pw.SizedBox(height: 4),
+          pw.Text(
+            'ACCOUNT VERIFIED',
+            style: pw.TextStyle(
+              fontSize: 10,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.black,
+            ),
+          ),
+          pw.SizedBox(height: 2),
+          pw.Text(
+            'DATE: $dateText',
+            style: const pw.TextStyle(fontSize: 7, color: _dangerRed),
+          ),
+          pw.SizedBox(height: 4),
+          if (signatureBytes != null)
+            pw.Image(
+              pw.MemoryImage(signatureBytes),
+              height: 34,
+              fit: pw.BoxFit.contain,
+            )
+          else ...[
+            pw.SizedBox(height: 16),
+            pw.Divider(color: PdfColors.black, thickness: 0.6),
+            pw.Text('Authorized Signature', style: const pw.TextStyle(fontSize: 6.5)),
+          ],
+        ],
+      ),
+    );
+
+    final hasMonthlyEtims = monthlyEtims != null &&
+        (monthlyEtims.hasQr || monthlyEtims.cuInvoiceNumber.trim().isNotEmpty);
+    if (!hasMonthlyEtims) {
+      return pw.Align(
+        alignment: pw.Alignment.centerRight,
+        child: stampCard,
+      );
+    }
+
+    return pw.Row(
+      crossAxisAlignment: pw.CrossAxisAlignment.end,
+      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+      children: [
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
           children: [
-            if (stampBytes != null)
-              pw.Image(
-                pw.MemoryImage(stampBytes),
-                height: 30,
-                fit: pw.BoxFit.contain,
-              )
-            else
-              pw.Text(
-                'TOWN TREASURE GROCERIES',
-                style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold),
+            if (monthlyEtims.hasQr)
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'Monthly eTIMS Tax Invoice:',
+                    style: pw.TextStyle(
+                      fontSize: 9,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _textDark,
+                    ),
+                  ),
+                  pw.SizedBox(height: 5),
+                  pw.BarcodeWidget(
+                    barcode: pw.Barcode.qrCode(),
+                    data: monthlyEtims.qrCodeUrl.trim(),
+                    width: 64,
+                    height: 64,
+                    color: _slateDark,
+                  ),
+                ],
               ),
-            pw.SizedBox(height: 4),
-            pw.Text(
-              'ACCOUNT VERIFIED',
-              style: pw.TextStyle(
-                fontSize: 10,
-                fontWeight: pw.FontWeight.bold,
-                color: PdfColors.black,
+            if (monthlyEtims.hasQr) pw.SizedBox(width: 10),
+            pw.SizedBox(
+              width: 165,
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  if (!monthlyEtims.hasQr)
+                    pw.Text(
+                      'Monthly eTIMS Tax Invoice',
+                      style: pw.TextStyle(
+                        fontSize: 9,
+                        fontWeight: pw.FontWeight.bold,
+                        color: _textDark,
+                      ),
+                    ),
+                  if (monthlyEtims.cuInvoiceNumber.trim().isNotEmpty)
+                    pw.Text(
+                      'CU No: ${monthlyEtims.cuInvoiceNumber.trim()}',
+                      style: pw.TextStyle(
+                        fontSize: 8.5,
+                        fontWeight: pw.FontWeight.bold,
+                        color: _forestGreen,
+                      ),
+                    ),
+                  if (monthlyEtims.outputVatAmount > 0)
+                    pw.Text(
+                      '16% VAT: KES ${ReportsViewModel.formatMoney(monthlyEtims.outputVatAmount)}',
+                      style: const pw.TextStyle(fontSize: 8, color: _textMuted),
+                    ),
+                  pw.Text(
+                    'Consolidated KRA eTIMS verification\nfor $monthName deliveries.',
+                    style: const pw.TextStyle(fontSize: 7.8, color: _textMuted),
+                  ),
+                ],
               ),
             ),
-            pw.SizedBox(height: 2),
-            pw.Text(
-              'DATE: $dateText',
-              style: const pw.TextStyle(fontSize: 7, color: _dangerRed),
-            ),
-            pw.SizedBox(height: 4),
-            if (signatureBytes != null)
-              pw.Image(
-                pw.MemoryImage(signatureBytes),
-                height: 34,
-                fit: pw.BoxFit.contain,
-              )
-            else ...[
-              pw.SizedBox(height: 16),
-              pw.Divider(color: PdfColors.black, thickness: 0.6),
-              pw.Text('Authorized Signature', style: const pw.TextStyle(fontSize: 6.5)),
-            ],
           ],
         ),
-      ),
+        stampCard,
+      ],
     );
   }
 

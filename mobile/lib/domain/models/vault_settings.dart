@@ -1,5 +1,6 @@
 import 'kra_tax.dart';
 import 'personal_document.dart';
+import 'restaurant.dart';
 
 /// Encrypted vault settings matching `settings` in `data.js` and `signature.js`.
 class VaultSettings {
@@ -10,6 +11,7 @@ class VaultSettings {
   });
 
   static const String keyKraProfile = 'kraProfile';
+  static const String keyMonthlyEtims = 'kraMonthlyEtims';
   static const String keyPersonalDocs = 'personalDocs';
   static const String keyPersonalDocsWorkerUrl = 'personalDocsWorkerUrl';
 
@@ -27,6 +29,42 @@ class VaultSettings {
 
   String get personalDocsWorkerUrl =>
       (extra[keyPersonalDocsWorkerUrl] ?? '').toString().trim();
+
+  /// Returns all saved consolidated monthly client eTIMS records.
+  List<MonthlyClientEtims> get monthlyEtimsRecords {
+    final raw = extra[keyMonthlyEtims];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((e) => MonthlyClientEtims.fromJson(Map<String, dynamic>.from(e)))
+        .where((r) => r.id.isNotEmpty)
+        .toList();
+  }
+
+  /// Looks up a consolidated monthly eTIMS record by `monthYm` and client.
+  MonthlyClientEtims? findMonthlyEtims(
+    String monthYm,
+    Restaurant? restaurant, {
+    String? fallbackName,
+  }) {
+    final targetId = MonthlyClientEtims.buildId(monthYm, restaurant, fallbackName);
+    for (final rec in monthlyEtimsRecords) {
+      if (rec.id == targetId) return rec;
+      if (rec.month == monthYm &&
+          restaurant != null &&
+          restaurant.id.isNotEmpty &&
+          rec.restaurantId == restaurant.id) {
+        return rec;
+      }
+      final nameToMatch = (restaurant?.name ?? fallbackName ?? '').trim().toLowerCase();
+      if (rec.month == monthYm &&
+          nameToMatch.isNotEmpty &&
+          rec.restaurantName.trim().toLowerCase() == nameToMatch) {
+        return rec;
+      }
+    }
+    return null;
+  }
 
   /// Returns all stored personal document metadata (including soft-deleted tombstones for sync).
   List<PersonalDocument> get allPersonalDocumentsRaw {
@@ -92,6 +130,13 @@ class VaultSettings {
     final nowIso = DateTime.now().toUtc().toIso8601String();
     final nextExtra = Map<String, dynamic>.from(extra);
     nextExtra[keyKraProfile] = profile.copyWith(updatedAt: nowIso).toJson();
+    return copyWith(updatedAt: nowIso, extra: nextExtra);
+  }
+
+  VaultSettings withMonthlyEtims(List<MonthlyClientEtims> records) {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final nextExtra = Map<String, dynamic>.from(extra);
+    nextExtra[keyMonthlyEtims] = records.map((r) => r.toJson()).toList();
     return copyWith(updatedAt: nowIso, extra: nextExtra);
   }
 

@@ -1,8 +1,8 @@
 {
-  "version": "1.1.8",
-  "buildNumber": 2012,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.1.8/TownTreasureGroceries.apk",
-  "sha256": "130cac85748568ac1f90827a245979b6d7d2299b5c91b5b7553aecae2e97dd13",
-  "releaseNotes": "v1.1.8: Added E2EE Personal Documents Vault synced via Cloudflare R2 (biometric lock, multi-page PDF/camera scan, expiry countdown alerts) and KRA VAT3 Tax Center (Company KRA PIN, mixed 16% VAT / Exempt produce split, TAX INVOICE PDF + eTIMS CU/QR, VAT3 PDF & iTax CSV).",
+  "version": "1.1.9",
+  "buildNumber": 2013,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.1.9/TownTreasureGroceries.apk",
+  "sha256": "c71308b0c1885f20ca1e75e23ed06cc31d6cf4578af1bceea17eb72f4fd659c9",
+  "releaseNotes": "v1.1.9: Plain-English Personal Documents & KRA eTIMS updates — added ? Help guide on KRA & eTIMS Tax, removed unnecessary Vault expiry dates and technical jargon, uncluttered KRA & OSCU setup sheet, and added BOTH Daily (per-invoice) and Monthly (consolidated by hotel) eTIMS QR codes stamped onto Delivery Invoices and Monthly Statements.",
   "mandatory": false
 }

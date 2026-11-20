@@ -15,9 +15,8 @@ import '../../core/theme/app_theme.dart';
 import '../../core/user_friendly_error.dart';
 import '../../core/widgets/branded_pdf_viewer_screen.dart';
 import '../../core/widgets/scoped_text_controllers.dart';
-import '../invoices/invoice_formatters.dart';
 
-/// Abstraction over device biometric / PIN confirmation for Personal Vault entry.
+/// Abstraction over device biometric / PIN confirmation for Personal Documents entry.
 abstract class VaultAuthGateway {
   Future<bool> authenticate({required String reason});
 }
@@ -33,7 +32,6 @@ class LocalVaultAuthGateway implements VaultAuthGateway {
     try {
       final supported = await _auth.isDeviceSupported();
       if (!supported) {
-        // Fallback smoothly when device/emulator lacks PIN or biometrics.
         return true;
       }
       return await AppLockGuard.runWithoutRelock(
@@ -54,8 +52,8 @@ class LocalVaultAuthGateway implements VaultAuthGateway {
 typedef DocumentFilePicker = Future<StagedVaultFile?> Function();
 typedef VaultImagePagesPicker = Future<List<Uint8List>> Function();
 
-/// Encrypted Personal & Business Compliance Documents Vault backed by local
-/// AES-256-GCM `.enc` cache and Zero-Knowledge Cloudflare R2 Worker storage.
+/// Private fingerprint-locked folder for personal and business compliance documents.
+/// Documents remain saved indefinitely until deleted at the owner's discretion.
 class PersonalVaultScreen extends StatefulWidget {
   const PersonalVaultScreen({
     super.key,
@@ -124,14 +122,14 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
       _authError = null;
     });
     final ok = await _auth.authenticate(
-      reason: 'Verify biometrics or screen lock to open Personal Vault',
+      reason: 'Confirm fingerprint or phone PIN to open Personal Documents',
     );
     if (!mounted) return;
     setState(() {
       _isAuthenticating = false;
       _unlocked = ok;
       if (!ok) {
-        _authError = 'Vault remains locked. Tap Unlock to verify identity.';
+        _authError = 'Documents remain locked. Tap Unlock to verify identity.';
       }
     });
   }
@@ -188,75 +186,14 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
     return pages;
   }
 
-  Future<void> _openWorkerConfigDialog() async {
-    final saved = await showDialog<String>(
-      context: context,
-      builder: (ctx) => ScopedTextControllers(
-        initialTexts: [
-          PersonalVaultService.normalizeWorkerUrl(
-            widget.vault.personalDocsWorkerUrl,
-          ),
-        ],
-        builder: (ctx, ctrls) {
-          final ctrl = ctrls[0];
-          return AlertDialog(
-            title: const Text('Cloudflare R2 Sync Endpoint'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Files are always encrypted on this phone with AES-256-GCM before upload. Enter your deployed Cloudflare Worker URL to sync encrypted files across Owner devices via R2:',
-                  style: TextStyle(fontSize: 12.5, color: AppTheme.slateMuted),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  key: const Key('field_r2_worker_url'),
-                  controller: ctrl,
-                  keyboardType: TextInputType.url,
-                  decoration: const InputDecoration(
-                    labelText: 'Cloudflare Worker URL',
-                    hintText: 'https://ttg-vault-docs.<subdomain>.workers.dev',
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                key: const Key('btn_save_r2_url'),
-                onPressed: () => Navigator.of(ctx).pop(ctrl.text.trim()),
-                child: const Text('Save'),
-              ),
-            ],
-          );
-        },
-      ),
-    );
-    if (saved == null) return;
-    await widget.vault.savePersonalDocsWorkerUrl(saved);
-    _showSnack(
-      saved.isEmpty
-          ? 'Cloudflare R2 remote URL cleared (local encrypted mode).'
-          : 'Cloudflare R2 endpoint saved.',
-    );
-  }
-
-  Future<void> _syncAllUnsyncedToR2() async {
+  Future<void> _syncAllUnsyncedToCloud() async {
     final workerUrl = PersonalVaultService.normalizeWorkerUrl(
       widget.vault.personalDocsWorkerUrl,
     );
-    if (workerUrl.isEmpty) {
-      await _openWorkerConfigDialog();
-      return;
-    }
     final docs =
         widget.vault.personalDocuments.where((d) => !d.r2Synced).toList();
     if (docs.isEmpty) {
-      _showSnack('All documents are already synced to Cloudflare R2.');
+      _showSnack('All documents are already backed up to your private cloud.');
       return;
     }
 
@@ -281,8 +218,8 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
       }
       _showSnack(
         syncedCount > 0
-            ? 'Synced $syncedCount encrypted document(s) to Cloudflare R2.'
-            : 'No documents synced. Check Worker URL & network connection.',
+            ? 'Backed up $syncedCount document(s) to cloud.'
+            : 'Could not reach cloud backup right now. Your documents are still saved safely on this phone.',
         color: syncedCount > 0 ? AppTheme.forestGreen : AppTheme.warning,
       );
     } finally {
@@ -292,7 +229,6 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
 
   Future<void> _openAddDocumentSheet() async {
     var category = PersonalDocCategory.kraTax;
-    var alertDays = 30;
     StagedVaultFile? stagedFile;
     final cameraPages = <Uint8List>[];
     var isPacking = false;
@@ -306,349 +242,264 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       builder: (ctx) => ScopedTextControllers(
-        initialTexts: const ['', '', '', '', '', ''],
+        initialTexts: const ['', '', ''],
         builder: (ctx, ctrls) {
           final titleCtrl = ctrls[0];
           final numberCtrl = ctrls[1];
-          final issuerCtrl = ctrls[2];
-          final issueDateCtrl = ctrls[3];
-          final expiryDateCtrl = ctrls[4];
-          final notesCtrl = ctrls[5];
+          final notesCtrl = ctrls[2];
           return StatefulBuilder(
             builder: (ctx, setSheetState) {
-          Future<void> pickDate(TextEditingController target) async {
-            final now = DateTime.now();
-            final initial = DateTime.tryParse(target.text.trim()) ?? now;
-            final picked = await showDatePicker(
-              context: ctx,
-              initialDate: initial,
-              firstDate: DateTime(1990),
-              lastDate: DateTime(2060),
-            );
-            if (picked != null) {
-              setSheetState(
-                () => target.text = AppHelpers.normalizeAppDate(picked),
-              );
-            }
-          }
-
-          Future<void> attachFile() async {
-            try {
-              final picked = await _pickRawDocument();
-              if (picked != null) {
-                setSheetState(() {
-                  cameraPages.clear();
-                  stagedFile = picked;
-                  formError = null;
-                  if (titleCtrl.text.trim().isEmpty) {
-                    titleCtrl.text = picked.fileName.replaceAll(
-                      RegExp(r'\.[A-Za-z0-9]+$'),
-                      '',
-                    );
+              Future<void> attachFile() async {
+                try {
+                  final picked = await _pickRawDocument();
+                  if (picked != null) {
+                    setSheetState(() {
+                      cameraPages.clear();
+                      stagedFile = picked;
+                      formError = null;
+                      if (titleCtrl.text.trim().isEmpty) {
+                        titleCtrl.text = picked.fileName.replaceAll(
+                          RegExp(r'\.[A-Za-z0-9]+$'),
+                          '',
+                        );
+                      }
+                    });
                   }
-                });
+                } catch (e) {
+                  setSheetState(() => formError = UserFriendlyError.format(e));
+                }
               }
-            } catch (e) {
-              setSheetState(() => formError = UserFriendlyError.format(e));
-            }
-          }
 
-          Future<void> addCameraOrGallery(bool fromCamera) async {
-            try {
-              final pages = fromCamera
-                  ? await _pickCameraPage()
-                  : await _pickGalleryPages();
-              if (pages.isEmpty) return;
-              setSheetState(() {
-                isPacking = true;
-                formError = null;
-                cameraPages.addAll(pages);
-              });
-              final pdfBytes = await PersonalVaultService.packImagesToPdf(
-                cameraPages,
-                title: titleCtrl.text.trim().isEmpty
-                    ? 'Scanned Document'
-                    : titleCtrl.text.trim(),
-              );
-              setSheetState(() {
-                isPacking = false;
-                stagedFile = StagedVaultFile(
-                  bytes: pdfBytes,
-                  mimeType: 'application/pdf',
-                  fileName: 'scan_${cameraPages.length}p.pdf',
-                );
-              });
-            } catch (e) {
-              setSheetState(() {
-                isPacking = false;
-                formError = UserFriendlyError.format(e);
-              });
-            }
-          }
+              Future<void> addCameraOrGallery(bool fromCamera) async {
+                try {
+                  final pages = fromCamera
+                      ? await _pickCameraPage()
+                      : await _pickGalleryPages();
+                  if (pages.isEmpty) return;
+                  setSheetState(() {
+                    isPacking = true;
+                    formError = null;
+                    cameraPages.addAll(pages);
+                  });
+                  final pdfBytes = await PersonalVaultService.packImagesToPdf(
+                    cameraPages,
+                    title: titleCtrl.text.trim().isEmpty
+                        ? 'Scanned Document'
+                        : titleCtrl.text.trim(),
+                  );
+                  setSheetState(() {
+                    isPacking = false;
+                    stagedFile = StagedVaultFile(
+                      bytes: pdfBytes,
+                      mimeType: 'application/pdf',
+                      fileName: 'scan_${cameraPages.length}p.pdf',
+                    );
+                  });
+                } catch (e) {
+                  setSheetState(() {
+                    isPacking = false;
+                    formError = UserFriendlyError.format(e);
+                  });
+                }
+              }
 
-          Future<void> submit() async {
-            final title = titleCtrl.text.trim();
-            if (title.isEmpty) {
-              setSheetState(() => formError = 'Enter a document title.');
-              return;
-            }
-            if (stagedFile == null || stagedFile!.bytes.isEmpty) {
-              setSheetState(
-                () => formError =
-                    'Upload a PDF/image or scan pages first before saving.',
-              );
-              return;
-            }
-            setSheetState(() {
-              isPacking = true;
-              formError = null;
-            });
-            try {
-              final rawMeta = PersonalDocument(
-                id: 'doc_${AppHelpers.genId()}',
-                title: title,
-                category: category,
-                docNumber: numberCtrl.text.trim(),
-                issuer: issuerCtrl.text.trim(),
-                issueDate: issueDateCtrl.text.trim(),
-                expiryDate: expiryDateCtrl.text.trim(),
-                alertDaysBefore: alertDays,
-                mimeType: stagedFile!.mimeType,
-                originalFileName: stagedFile!.fileName,
-                notes: notesCtrl.text.trim(),
-              );
-              final savedMeta = await widget.vaultService.encryptStoreAndUpload(
-                meta: rawMeta,
-                plainBytes: stagedFile!.bytes,
-                workerUrl: widget.vault.personalDocsWorkerUrl,
-              );
-              await widget.vault.savePersonalDocumentMeta(savedMeta);
-              if (ctx.mounted) Navigator.of(ctx).pop();
-              _showSnack(
-                savedMeta.r2Synced
-                    ? 'Encrypted & synced to Cloudflare R2.'
-                    : 'Encrypted & stored locally (configure R2 URL to sync cloud).',
-              );
-            } catch (e) {
-              setSheetState(() {
-                isPacking = false;
-                formError = UserFriendlyError.format(e);
-              });
-            }
-          }
-
-          return Padding(
-            padding: EdgeInsets.fromLTRB(
-              18,
-              16,
-              18,
-              MediaQuery.of(ctx).viewInsets.bottom + 20,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const Text(
-                    'Add Encrypted Vault Document',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.slateInk,
+              Future<void> submit() async {
+                final title = titleCtrl.text.trim();
+                if (title.isEmpty) {
+                  setSheetState(() => formError = 'Enter a document name.');
+                  return;
+                }
+                if (stagedFile == null || stagedFile!.bytes.isEmpty) {
+                  setSheetState(
+                    () => formError =
+                        'Please upload a file, take a photo, or choose from gallery first.',
+                  );
+                  return;
+                }
+                setSheetState(() {
+                  isPacking = true;
+                  formError = null;
+                });
+                try {
+                  final rawMeta = PersonalDocument(
+                    id: 'doc_${AppHelpers.genId()}',
+                    title: title,
+                    category: category,
+                    docNumber: numberCtrl.text.trim(),
+                    mimeType: stagedFile!.mimeType,
+                    originalFileName: stagedFile!.fileName,
+                    notes: notesCtrl.text.trim(),
+                  );
+                  final savedMeta = await widget.vaultService.encryptStoreAndUpload(
+                    meta: rawMeta,
+                    plainBytes: stagedFile!.bytes,
+                    workerUrl: PersonalVaultService.normalizeWorkerUrl(
+                      widget.vault.personalDocsWorkerUrl,
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  const Text(
-                    'Encrypted locally on your phone (AES-256-GCM) before storage or Cloudflare R2 upload.',
-                    style: TextStyle(fontSize: 12, color: AppTheme.slateMuted),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+                  );
+                  await widget.vault.savePersonalDocumentMeta(savedMeta);
+                  if (ctx.mounted) Navigator.of(ctx).pop();
+                  _showSnack(
+                    savedMeta.r2Synced
+                        ? 'Document locked & backed up to cloud.'
+                        : 'Document locked & saved on this phone.',
+                  );
+                } catch (e) {
+                  setSheetState(() {
+                    isPacking = false;
+                    formError = UserFriendlyError.format(e);
+                  });
+                }
+              }
+
+              return Padding(
+                padding: EdgeInsets.fromLTRB(
+                  18,
+                  16,
+                  18,
+                  MediaQuery.of(ctx).viewInsets.bottom + 20,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      OutlinedButton.icon(
-                        key: const Key('btn_vault_pick_file'),
-                        onPressed: isPacking ? null : attachFile,
-                        icon: const Icon(Icons.upload_file_outlined, size: 18),
-                        label: const Text('PDF / File'),
-                      ),
-                      OutlinedButton.icon(
-                        key: const Key('btn_vault_scan_camera'),
-                        onPressed:
-                            isPacking ? null : () => addCameraOrGallery(true),
-                        icon: const Icon(Icons.camera_alt_outlined, size: 18),
-                        label: Text(
-                          cameraPages.isEmpty
-                              ? 'Scan Camera'
-                              : 'Add Scan (${cameraPages.length}p)',
+                      const Text(
+                        'Add Private Document',
+                        style: TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.slateInk,
                         ),
                       ),
-                      OutlinedButton.icon(
-                        key: const Key('btn_vault_pick_gallery'),
-                        onPressed:
-                            isPacking ? null : () => addCameraOrGallery(false),
-                        icon: const Icon(Icons.photo_library_outlined, size: 18),
-                        label: const Text('Gallery'),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Your document is locked automatically before saving and stays here until you choose to delete it.',
+                        style: TextStyle(fontSize: 12, color: AppTheme.slateMuted),
                       ),
-                    ],
-                  ),
-                  if (stagedFile != null) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: AppTheme.successSurface,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
                         children: [
-                          const Icon(
-                            Icons.verified_user_outlined,
-                            color: AppTheme.forestGreen,
-                            size: 18,
+                          OutlinedButton.icon(
+                            key: const Key('btn_vault_pick_file'),
+                            onPressed: isPacking ? null : attachFile,
+                            icon: const Icon(Icons.upload_file_outlined, size: 18),
+                            label: const Text('Upload PDF / File'),
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'Ready: ${stagedFile!.fileName} (${(stagedFile!.bytes.length / 1024).toStringAsFixed(1)} KB)',
-                              style: const TextStyle(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w600,
-                                color: AppTheme.forestGreenDeep,
-                              ),
+                          OutlinedButton.icon(
+                            key: const Key('btn_vault_scan_camera'),
+                            onPressed:
+                                isPacking ? null : () => addCameraOrGallery(true),
+                            icon: const Icon(Icons.camera_alt_outlined, size: 18),
+                            label: Text(
+                              cameraPages.isEmpty
+                                  ? 'Take Photo'
+                                  : 'Add Page (${cameraPages.length})',
                             ),
+                          ),
+                          OutlinedButton.icon(
+                            key: const Key('btn_vault_pick_gallery'),
+                            onPressed:
+                                isPacking ? null : () => addCameraOrGallery(false),
+                            icon: const Icon(Icons.photo_library_outlined, size: 18),
+                            label: const Text('Gallery'),
                           ),
                         ],
                       ),
-                    ),
-                  ],
-                  const SizedBox(height: 12),
-                  TextField(
-                    key: const Key('field_vault_title'),
-                    controller: titleCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Document Title *',
-                      hintText: 'e.g. KRA Tax Compliance Certificate 2026',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  DropdownButtonFormField<PersonalDocCategory>(
-                    initialValue: category,
-                    decoration: const InputDecoration(labelText: 'Category'),
-                    items: PersonalDocCategory.values
-                        .map(
-                          (c) => DropdownMenuItem(
-                            value: c,
-                            child: Text(c.label),
+                      if (stagedFile != null) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.successSurface,
+                            borderRadius: BorderRadius.circular(10),
                           ),
-                        )
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) setSheetState(() => category = v);
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: numberCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'Doc / Ref No.',
-                            hintText: 'e.g. KRA-TCC-9981',
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.check_circle_outline,
+                                color: AppTheme.forestGreen,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Ready: ${stagedFile!.fileName} (${(stagedFile!.bytes.length / 1024).toStringAsFixed(1)} KB)',
+                                  style: const TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppTheme.forestGreenDeep,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
+                      ],
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('field_vault_title'),
+                        controller: titleCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Document Name *',
+                          hintText: 'e.g. KRA PIN Certificate / Business Permit',
+                        ),
                       ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          controller: issuerCtrl,
-                          decoration: const InputDecoration(
-                            labelText: 'Issuer',
-                            hintText: 'e.g. KRA / BRS',
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<PersonalDocCategory>(
+                        initialValue: category,
+                        decoration: const InputDecoration(labelText: 'Folder / Type'),
+                        items: PersonalDocCategory.values
+                            .map(
+                              (c) => DropdownMenuItem(
+                                value: c,
+                                child: Text(c.label),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (v) {
+                          if (v != null) setSheetState(() => category = v);
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: numberCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Document / Ref Number (Optional)',
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      TextField(
+                        controller: notesCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Notes (Optional)',
+                        ),
+                      ),
+                      if (formError != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          formError!,
+                          style: const TextStyle(
+                            color: AppTheme.danger,
+                            fontSize: 12.5,
                           ),
+                        ),
+                      ],
+                      const SizedBox(height: 14),
+                      FilledButton.icon(
+                        key: const Key('btn_vault_save_doc'),
+                        onPressed: isPacking ? null : submit,
+                        icon: const Icon(Icons.lock_outline),
+                        label: Text(
+                          isPacking ? 'Saving...' : 'Lock & Save Document',
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 10),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: issueDateCtrl,
-                          readOnly: true,
-                          onTap: () => pickDate(issueDateCtrl),
-                          decoration: const InputDecoration(
-                            labelText: 'Issue Date',
-                            hintText: 'Optional',
-                            suffixIcon: Icon(Icons.calendar_today, size: 16),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: TextField(
-                          key: const Key('field_vault_expiry'),
-                          controller: expiryDateCtrl,
-                          readOnly: true,
-                          onTap: () => pickDate(expiryDateCtrl),
-                          decoration: const InputDecoration(
-                            labelText: 'Expiry Date',
-                            hintText: 'Triggers alerts',
-                            suffixIcon: Icon(Icons.event_available, size: 16),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 10),
-                  DropdownButtonFormField<int>(
-                    initialValue: alertDays,
-                    decoration: const InputDecoration(
-                      labelText: 'Expiry Reminder Lead Time',
-                    ),
-                    items: const [
-                      DropdownMenuItem(value: 7, child: Text('7 days before expiry')),
-                      DropdownMenuItem(value: 14, child: Text('14 days before expiry')),
-                      DropdownMenuItem(value: 30, child: Text('30 days before expiry')),
-                      DropdownMenuItem(value: 60, child: Text('60 days before expiry')),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) setSheetState(() => alertDays = v);
-                    },
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: notesCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Notes (Optional)',
-                    ),
-                  ),
-                  if (formError != null) ...[
-                    const SizedBox(height: 10),
-                    Text(
-                      formError!,
-                      style: const TextStyle(
-                        color: AppTheme.danger,
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 14),
-                  FilledButton.icon(
-                    key: const Key('btn_vault_save_doc'),
-                    onPressed: isPacking ? null : submit,
-                    icon: const Icon(Icons.lock_outline),
-                    label: Text(
-                      isPacking ? 'Encrypting & Saving...' : 'Encrypt & Save to Vault',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
+                ),
+              );
             },
           );
         },
@@ -661,7 +512,9 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
     try {
       final plainBytes = await widget.vaultService.loadAndDecryptDocument(
         doc,
-        workerUrl: widget.vault.personalDocsWorkerUrl,
+        workerUrl: PersonalVaultService.normalizeWorkerUrl(
+          widget.vault.personalDocsWorkerUrl,
+        ),
       );
       if (!mounted) return;
       setState(() => _isBusy = false);
@@ -723,9 +576,9 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Remove Document?'),
+        title: const Text('Delete Document?'),
         content: Text(
-          'Delete "${doc.title}" from this device and Cloudflare R2? This cannot be undone.',
+          'Permanently delete "${doc.title}" from your phone and cloud backup?',
         ),
         actions: [
           TextButton(
@@ -743,10 +596,12 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
     if (confirm != true) return;
     await widget.vaultService.deleteEncryptedBlob(
       doc.id,
-      workerUrl: widget.vault.personalDocsWorkerUrl,
+      workerUrl: PersonalVaultService.normalizeWorkerUrl(
+        widget.vault.personalDocsWorkerUrl,
+      ),
     );
     await widget.vault.deletePersonalDocumentMeta(doc.id);
-    _showSnack('Removed "${doc.title}" from encrypted vault.');
+    _showSnack('Deleted "${doc.title}".');
   }
 
   @override
@@ -760,45 +615,32 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
       if (query.isNotEmpty) {
         return d.title.toLowerCase().contains(query) ||
             d.docNumber.toLowerCase().contains(query) ||
-            d.issuer.toLowerCase().contains(query);
+            d.notes.toLowerCase().contains(query);
       }
       return true;
     }).toList();
 
-    final now = DateTime.now();
-    final expiredCount = docs.where((d) => d.isExpired(now)).length;
-    final soonCount =
-        docs.where((d) => !d.isExpired(now) && d.isExpiringSoon(now)).length;
-    final hasWorker = PersonalVaultService.normalizeWorkerUrl(
-      widget.vault.personalDocsWorkerUrl,
-    ).isNotEmpty;
+    final backedUpCount = docs.where((d) => d.r2Synced).length;
 
     return Scaffold(
       backgroundColor: AppTheme.surfaceSage,
       appBar: AppBar(
-        title: const Text('Personal Documents Vault'),
+        title: const Text('Personal Documents'),
         actions: [
-          if (_unlocked) ...[
+          if (_unlocked)
             IconButton(
               key: const Key('btn_vault_r2_sync'),
-              tooltip: 'Sync Encrypted Files to Cloudflare R2',
-              onPressed: _isBusy ? null : _syncAllUnsyncedToR2,
+              tooltip: 'Back Up Documents to Cloud',
+              onPressed: _isBusy ? null : _syncAllUnsyncedToCloud,
               icon: const Icon(Icons.cloud_upload_outlined),
             ),
-            IconButton(
-              key: const Key('btn_vault_r2_settings'),
-              tooltip: 'Cloudflare R2 Endpoint Settings',
-              onPressed: _openWorkerConfigDialog,
-              icon: const Icon(Icons.settings_outlined),
-            ),
-          ],
         ],
       ),
       floatingActionButton: _unlocked
           ? FloatingActionButton.extended(
               key: const Key('fab_add_vault_doc'),
               onPressed: _isBusy ? null : _openAddDocumentSheet,
-              icon: const Icon(Icons.add_moderator_outlined),
+              icon: const Icon(Icons.add),
               label: const Text('Add Document'),
             )
           : null,
@@ -823,7 +665,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                             CircleAvatar(
                               backgroundColor: AppTheme.sageTint,
                               foregroundColor: AppTheme.forestGreenDeep,
-                              child: const Icon(Icons.enhanced_encryption_outlined),
+                              child: const Icon(Icons.lock_outline),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
@@ -831,27 +673,19 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    '${docs.length} E2EE Document${docs.length == 1 ? '' : 's'}',
+                                    'Private Folder · ${docs.length} Saved',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w700,
                                       color: AppTheme.slateInk,
                                     ),
                                   ),
                                   Text(
-                                    [
-                                      if (expiredCount > 0) '$expiredCount expired',
-                                      if (soonCount > 0) '$soonCount expiring soon',
-                                      hasWorker
-                                          ? 'Cloudflare R2 connected'
-                                          : 'Local E2EE mode (tap gear for R2)',
-                                    ].join(' · '),
-                                    style: TextStyle(
+                                    docs.isEmpty
+                                        ? 'Only you can view files saved here — they stay until you delete them.'
+                                        : '$backedUpCount of ${docs.length} backed up safely to cloud',
+                                    style: const TextStyle(
                                       fontSize: 12,
-                                      color: expiredCount > 0
-                                          ? AppTheme.danger
-                                          : (soonCount > 0
-                                              ? AppTheme.warning
-                                              : AppTheme.slateMuted),
+                                      color: AppTheme.slateMuted,
                                     ),
                                   ),
                                 ],
@@ -866,7 +700,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                         onChanged: (_) => setState(() {}),
                         decoration: const InputDecoration(
                           prefixIcon: Icon(Icons.search),
-                          hintText: 'Search title, number or issuer...',
+                          hintText: 'Search documents...',
                           isDense: true,
                         ),
                       ),
@@ -911,7 +745,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                             padding: const EdgeInsets.all(24),
                             child: Text(
                               docs.isEmpty
-                                  ? 'Store KRA TCCs, Business Permits, National IDs, CR12, Contracts & Food Handler certificates encrypted on-device and in Cloudflare R2.'
+                                  ? 'Tap + Add Document to store KRA certificates, Business Permits, National IDs, Contracts, or Food Handler cards privately.'
                                   : 'No documents match your filter.',
                               textAlign: TextAlign.center,
                               style: const TextStyle(color: AppTheme.slateMuted),
@@ -923,7 +757,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                           itemCount: filtered.length,
                           separatorBuilder: (_, _) => const SizedBox(height: 8),
                           itemBuilder: (_, idx) =>
-                              _buildDocumentTile(filtered[idx], now),
+                              _buildDocumentTile(filtered[idx]),
                         ),
                 ),
               ],
@@ -963,7 +797,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
             const SizedBox(height: 8),
             Text(
               _authError ??
-                  'Use fingerprint, face unlock, or device PIN to access encrypted personal and compliance documents.',
+                  'Use your fingerprint, face unlock, or phone PIN to open your private documents.',
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
@@ -976,7 +810,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
               onPressed: _isAuthenticating ? null : _promptUnlock,
               icon: const Icon(Icons.lock_open_outlined),
               label: Text(
-                _isAuthenticating ? 'Verifying...' : 'Unlock Personal Vault',
+                _isAuthenticating ? 'Verifying...' : 'Unlock Documents',
               ),
             ),
           ],
@@ -985,30 +819,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
     );
   }
 
-  Widget _buildDocumentTile(PersonalDocument doc, DateTime now) {
-    final daysLeft = doc.daysUntilExpiry(now);
-    String? badgeLabel;
-    Color badgeBg = AppTheme.sageTint;
-    Color badgeFg = AppTheme.forestGreenDeep;
-
-    if (daysLeft != null) {
-      if (daysLeft < 0) {
-        badgeLabel = 'EXPIRED ${daysLeft.abs()}d ago';
-        badgeBg = AppTheme.dangerSurface;
-        badgeFg = AppTheme.danger;
-      } else if (daysLeft == 0) {
-        badgeLabel = 'EXPIRES TODAY';
-        badgeBg = AppTheme.dangerSurface;
-        badgeFg = AppTheme.danger;
-      } else if (daysLeft <= doc.alertDaysBefore) {
-        badgeLabel = 'Expires in ${daysLeft}d';
-        badgeBg = AppTheme.warningSurface;
-        badgeFg = AppTheme.warning;
-      } else {
-        badgeLabel = 'Valid (${InvoiceFormatters.formatDisplayDate(doc.expiryDate)})';
-      }
-    }
-
+  Widget _buildDocumentTile(PersonalDocument doc) {
     return Card(
       child: ListTile(
         key: Key('vault_doc_${doc.id}'),
@@ -1027,37 +838,13 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
             color: AppTheme.slateInk,
           ),
         ),
-        subtitle: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              [
-                doc.category.label,
-                if (doc.docNumber.isNotEmpty) doc.docNumber,
-                if (doc.issuer.isNotEmpty) doc.issuer,
-                doc.r2Synced ? 'R2 Cloud' : 'Local .enc',
-              ].join(' · '),
-              style: const TextStyle(fontSize: 12, color: AppTheme.slateMuted),
-            ),
-            if (badgeLabel != null) ...[
-              const SizedBox(height: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: badgeBg,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  badgeLabel,
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: badgeFg,
-                  ),
-                ),
-              ),
-            ],
-          ],
+        subtitle: Text(
+          [
+            doc.category.label,
+            if (doc.docNumber.isNotEmpty) doc.docNumber,
+            doc.r2Synced ? 'Cloud Backed Up' : 'On Phone',
+          ].join(' · '),
+          style: const TextStyle(fontSize: 12, color: AppTheme.slateMuted),
         ),
         trailing: IconButton(
           key: Key('btn_delete_doc_${doc.id}'),

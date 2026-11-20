@@ -28,6 +28,8 @@ class Invoice {
     this.cuInvoiceNumber,
     this.cuSerial,
     this.etimsQrData,
+    this.etimsRcptSign,
+    this.etimsIntrData,
     this.etimsSubmittedAt,
   });
 
@@ -55,6 +57,8 @@ class Invoice {
   final String? cuInvoiceNumber;
   final String? cuSerial;
   final String? etimsQrData;
+  final String? etimsRcptSign;
+  final String? etimsIntrData;
   final String? etimsSubmittedAt;
 
   bool get isDraft => status == 'draft';
@@ -102,6 +106,8 @@ class Invoice {
       cuInvoiceNumber: json['cuInvoiceNumber']?.toString(),
       cuSerial: json['cuSerial']?.toString(),
       etimsQrData: json['etimsQrData']?.toString(),
+      etimsRcptSign: json['etimsRcptSign']?.toString(),
+      etimsIntrData: json['etimsIntrData']?.toString(),
       etimsSubmittedAt: json['etimsSubmittedAt']?.toString(),
     );
   }
@@ -134,6 +140,10 @@ class Invoice {
       if (cuSerial != null && cuSerial!.isNotEmpty) 'cuSerial': cuSerial,
       if (etimsQrData != null && etimsQrData!.isNotEmpty)
         'etimsQrData': etimsQrData,
+      if (etimsRcptSign != null && etimsRcptSign!.isNotEmpty)
+        'etimsRcptSign': etimsRcptSign,
+      if (etimsIntrData != null && etimsIntrData!.isNotEmpty)
+        'etimsIntrData': etimsIntrData,
       if (etimsSubmittedAt != null && etimsSubmittedAt!.isNotEmpty)
         'etimsSubmittedAt': etimsSubmittedAt,
     };
@@ -167,6 +177,8 @@ class Invoice {
     String? cuInvoiceNumber,
     String? cuSerial,
     String? etimsQrData,
+    String? etimsRcptSign,
+    String? etimsIntrData,
     String? etimsSubmittedAt,
     bool clearEtims = false,
   }) {
@@ -197,6 +209,10 @@ class Invoice {
           clearEtims ? null : (cuInvoiceNumber ?? this.cuInvoiceNumber),
       cuSerial: clearEtims ? null : (cuSerial ?? this.cuSerial),
       etimsQrData: clearEtims ? null : (etimsQrData ?? this.etimsQrData),
+      etimsRcptSign:
+          clearEtims ? null : (etimsRcptSign ?? this.etimsRcptSign),
+      etimsIntrData:
+          clearEtims ? null : (etimsIntrData ?? this.etimsIntrData),
       etimsSubmittedAt:
           clearEtims ? null : (etimsSubmittedAt ?? this.etimsSubmittedAt),
     );

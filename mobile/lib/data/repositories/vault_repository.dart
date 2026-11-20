@@ -387,6 +387,25 @@ class VaultRepository extends ChangeNotifier {
     await setSettings(_settings.withKraProfile(profile), sync: sync);
   }
 
+  List<MonthlyClientEtims> get monthlyEtimsRecords =>
+      _settings.monthlyEtimsRecords;
+
+  Future<void> saveMonthlyEtimsRecord(
+    MonthlyClientEtims record, {
+    bool sync = true,
+  }) async {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final updated = record.copyWith(updatedAt: nowIso);
+    final records = List<MonthlyClientEtims>.from(_settings.monthlyEtimsRecords);
+    final idx = records.indexWhere((r) => r.id == updated.id);
+    if (idx >= 0) {
+      records[idx] = updated;
+    } else {
+      records.insert(0, updated);
+    }
+    await setSettings(_settings.withMonthlyEtims(records), sync: sync);
+  }
+
   Future<void> savePersonalDocsWorkerUrl(
     String workerUrl, {
     bool sync = true,
@@ -686,6 +705,24 @@ class VaultRepository extends ChangeNotifier {
     if (docsById.isNotEmpty) {
       merged[VaultSettings.keyPersonalDocs] =
           docsById.values.map((d) => d.toJson()).toList();
+    }
+
+    // Merge consolidated monthly eTIMS records by `id` using latest `updatedAt`.
+    final monthlyById = <String, MonthlyClientEtims>{};
+    for (final rec in [
+      ...remote.monthlyEtimsRecords,
+      ...local.monthlyEtimsRecords,
+    ]) {
+      final existing = monthlyById[rec.id];
+      if (existing == null ||
+          AppHelpers.parseTimestampMs(rec.updatedAt) >=
+              AppHelpers.parseTimestampMs(existing.updatedAt)) {
+        monthlyById[rec.id] = rec;
+      }
+    }
+    if (monthlyById.isNotEmpty) {
+      merged[VaultSettings.keyMonthlyEtims] =
+          monthlyById.values.map((r) => r.toJson()).toList();
     }
 
     return VaultSettings.fromJson(merged);
