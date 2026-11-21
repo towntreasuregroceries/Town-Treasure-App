@@ -1,4 +1,8 @@
+import 'dart:math' as math;
+
+import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../../../data/repositories/auth_repository.dart';
@@ -40,6 +44,7 @@ class DashboardScreen extends StatefulWidget {
     this.onOpenExpensesHub,
     this.onOpenStatements,
     this.onOpenKraTaxCenter,
+    this.onOpenReports,
     this.onOpenInvoice,
     this.onCreateInvoice,
     this.onSignedOut,
@@ -55,6 +60,7 @@ class DashboardScreen extends StatefulWidget {
   final void Function(int tabIndex)? onOpenExpensesHub;
   final VoidCallback? onOpenStatements;
   final VoidCallback? onOpenKraTaxCenter;
+  final VoidCallback? onOpenReports;
   final void Function(Invoice invoice)? onOpenInvoice;
   final VoidCallback? onCreateInvoice;
   final VoidCallback? onSignedOut;
@@ -196,10 +202,20 @@ class _DashboardScreenState extends State<DashboardScreen>
       floatingActionButton: widget.onCreateInvoice != null
           ? FloatingActionButton.extended(
               key: const Key('fab_create_invoice'),
-              backgroundColor: AppTheme.forestGreen,
+              backgroundColor: redesignedActive
+                  ? const Color(0xFF0F3D24)
+                  : AppTheme.forestGreen,
               foregroundColor: Colors.white,
+              elevation: redesignedActive ? 2 : null,
+              shape: redesignedActive
+                  ? RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    )
+                  : null,
               onPressed: widget.onCreateInvoice,
-              icon: const Icon(Icons.add_circle_outline),
+              icon: Icon(
+                redesignedActive ? Icons.add_rounded : Icons.add_circle_outline,
+              ),
               label: const Text('New Invoice'),
             )
           : null,
@@ -209,14 +225,17 @@ class _DashboardScreenState extends State<DashboardScreen>
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-            _buildBrandedSliverHeader(context),
+            if (redesignedActive)
+              _buildEditorialSliverHeader(context, metrics)
+            else
+              _buildBrandedSliverHeader(context),
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
                   if (isDev)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 14),
+                      padding: const EdgeInsets.only(bottom: 12),
                       child: _DeveloperPreviewRibbon(
                         redesignedEnabled: redesignedActive,
                         onToggle: devPreview?.toggleRedesignedUi,
@@ -224,10 +243,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                   if (redesignedActive)
                     Padding(
-                      padding: const EdgeInsets.only(bottom: 16),
+                      padding: const EdgeInsets.only(bottom: 14),
                       child: _ExecutiveHeroCard(
                         metrics: metrics,
-                        onCreateInvoice: widget.onCreateInvoice,
+                        onOpenReports: widget.onOpenReports,
                         onOpenKraTaxCenter: widget.onOpenKraTaxCenter,
                         onOpenStatements: widget.onOpenStatements,
                         onOpenExpenses: widget.onOpenExpensesHub != null
@@ -241,7 +260,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     child: _vm.hasUpdateAvailable &&
                             _vm.availableUpdate?.manifest != null
                         ? Padding(
-                            padding: const EdgeInsets.only(bottom: 16),
+                            padding: const EdgeInsets.only(bottom: 14),
                             child: UpdateAvailableBanner(
                               version: _vm.availableUpdate!.manifest!.version,
                               releaseNotes:
@@ -256,7 +275,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     curve: AppMotion.standardCurve,
                     child: _vm.pendingClerkCount > 0
                         ? Padding(
-                            padding: const EdgeInsets.only(bottom: 16),
+                            padding: const EdgeInsets.only(bottom: 14),
                             child: _PendingClerkBanner(
                               pendingCount: _vm.pendingClerkCount,
                               onOpenInbox: widget.onOpenClerkInbox,
@@ -278,20 +297,6 @@ class _DashboardScreenState extends State<DashboardScreen>
                     ),
                     const SizedBox(height: 16),
                   ] else ...[
-                    _ExecutivePulseRow(
-                      metrics: metrics,
-                      onOpenInvoices: widget.onOpenInvoicesTab,
-                      onOpenKraTaxCenter: widget.onOpenKraTaxCenter,
-                      onOpenExpenses: widget.onOpenExpensesHub != null
-                          ? () => widget.onOpenExpensesHub!(0)
-                          : null,
-                    ),
-                    const SizedBox(height: 16),
-                    _TopClientsMonthCard(
-                      clients: metrics.topClients,
-                      onOpenStatements: widget.onOpenStatements,
-                    ),
-                    const SizedBox(height: 16),
                     _CompactUtilitiesBar(
                       isExporting: _vm.isExporting,
                       alertCount: _vm.activeAlerts.length,
@@ -300,7 +305,27 @@ class _DashboardScreenState extends State<DashboardScreen>
                       onOpenAlerts: _openNotificationCenter,
                       onCheckUpdates: _openUpdateChecker,
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
+                    _ExecutivePulseRow(
+                      metrics: metrics,
+                      onOpenInvoices: widget.onOpenInvoicesTab,
+                      onOpenKraTaxCenter: widget.onOpenKraTaxCenter,
+                      onOpenExpenses: widget.onOpenExpensesHub != null
+                          ? () => widget.onOpenExpensesHub!(0)
+                          : null,
+                    ),
+                    const SizedBox(height: 14),
+                    _CashflowTrendCard(
+                      trend: metrics.monthlyTrend,
+                      onOpenReports: widget.onOpenReports,
+                    ),
+                    const SizedBox(height: 14),
+                    _TopClientsMonthCard(
+                      clients: metrics.topClients,
+                      totalMonthRevenue: metrics.thisMonthRevenue,
+                      onOpenStatements: widget.onOpenStatements,
+                    ),
+                    const SizedBox(height: 14),
                   ],
                   _RecentInvoicesSection(
                     invoices: metrics.recentInvoices,
@@ -316,6 +341,87 @@ class _DashboardScreenState extends State<DashboardScreen>
           ],
         ),
       ),
+    );
+  }
+
+  SliverAppBar _buildEditorialSliverHeader(
+    BuildContext context,
+    DashboardMetrics metrics,
+  ) {
+    final bgColor = Theme.of(context).scaffoldBackgroundColor;
+    final subtitle =
+        metrics.monthLabel.isNotEmpty ? metrics.monthLabel : 'Business Overview';
+    return SliverAppBar(
+      pinned: true,
+      elevation: 0,
+      scrolledUnderElevation: 0.5,
+      toolbarHeight: 62,
+      backgroundColor: bgColor,
+      surfaceTintColor: Colors.transparent,
+      foregroundColor: AppTheme.slateInk,
+      systemOverlayStyle: SystemUiOverlayStyle.dark,
+      title: FadeTransition(
+        opacity: _headerFade,
+        child: SlideTransition(
+          position: _headerSlide,
+          child: Row(
+            children: [
+              Container(
+                width: 34,
+                height: 34,
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE2EAE2)),
+                ),
+                child: Image.asset(
+                  'assets/logo.png',
+                  fit: BoxFit.contain,
+                  errorBuilder: (context, error, stackTrace) {
+                    return const Icon(
+                      Icons.storefront_outlined,
+                      size: 20,
+                      color: AppTheme.forestGreen,
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Town Treasure',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 16.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.slateInk,
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w500,
+                        color: AppTheme.slateMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: _buildHeaderActions(lightSurface: true),
     );
   }
 
@@ -395,149 +501,157 @@ class _DashboardScreenState extends State<DashboardScreen>
           ),
         ),
       ),
-      actions: [
-        IconButton(
-          key: const Key('btn_dashboard_notify_toggle'),
-          tooltip: 'Notification Center (${_vm.activeAlerts.length})',
-          onPressed: _openNotificationCenter,
-          icon: Badge.count(
-            count: _vm.activeAlerts.length,
-            isLabelVisible: _vm.activeAlerts.isNotEmpty,
-            backgroundColor: _vm.hasUpdateAvailable
-                ? AppTheme.info
-                : AppTheme.warning,
-            child: Icon(
-              _vm.activeAlerts.isNotEmpty || _vm.overdueNotificationsEnabled
-                  ? Icons.notifications_active
-                  : Icons.notifications_none_outlined,
-              color: _vm.overdueNotificationsEnabled || _vm.activeAlerts.isNotEmpty
-                  ? const Color(0xFFBBF7D0)
-                  : Colors.white,
-            ),
-          ),
-        ),
-        IconButton(
-          key: const Key('btn_dashboard_sync'),
-          tooltip: 'Sync encrypted vault',
-          onPressed: _vm.isSyncing ? null : _vm.refresh,
-          icon: _vm.isSyncing
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Icon(Icons.sync),
-        ),
-        PopupMenuButton<_DashboardMenuAction>(
-          key: const Key('btn_dashboard_menu'),
-          tooltip: 'Account & Tools',
-          icon: CircleAvatar(
-            radius: 15,
-            backgroundColor: AppTheme.leafGreen,
-            foregroundColor: Colors.white,
-            child: Text(
-              _vm.userInitials,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-            ),
-          ),
-          onSelected: _handleMenuSelection,
-          itemBuilder: (context) => [
-            if (_vm.userEmail != null && _vm.userEmail!.isNotEmpty)
-              PopupMenuItem<_DashboardMenuAction>(
-                enabled: false,
-                child: Text(
-                  _vm.userEmail!,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12.5,
-                    color: AppTheme.slateInk,
-                  ),
-                ),
-              ),
-            const PopupMenuDivider(),
-            const PopupMenuItem(
-              value: _DashboardMenuAction.signature,
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.draw_outlined),
-                title: Text('My Signature'),
-              ),
-            ),
-            const PopupMenuItem(
-              value: _DashboardMenuAction.exportExcel,
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.table_view_outlined),
-                title: Text('Export Excel (.xlsx)'),
-              ),
-            ),
-            PopupMenuItem(
-              value: _DashboardMenuAction.notifications,
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(
-                  _vm.overdueNotificationsEnabled
-                      ? Icons.notifications_active_outlined
-                      : Icons.notifications_off_outlined,
-                ),
-                title: const Text('Notification Center'),
-              ),
-            ),
-            PopupMenuItem(
-              value: _DashboardMenuAction.biometrics,
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.fingerprint),
-                title: Text(
-                  _vm.biometricEnabled
-                      ? 'Disable Screen Lock'
-                      : 'Enable Screen Lock',
-                ),
-              ),
-            ),
-            const PopupMenuItem(
-              value: _DashboardMenuAction.changePassword,
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.lock_reset_outlined),
-                title: Text('Change Password'),
-              ),
-            ),
-            const PopupMenuItem(
-              value: _DashboardMenuAction.updates,
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.system_update_outlined),
-                title: Text('Check for Updates'),
-              ),
-            ),
-            const PopupMenuDivider(),
-            const PopupMenuItem(
-              value: _DashboardMenuAction.signOut,
-              child: ListTile(
-                dense: true,
-                contentPadding: EdgeInsets.zero,
-                leading: Icon(Icons.logout, color: AppTheme.danger),
-                title: Text(
-                  'Sign Out',
-                  style: TextStyle(color: AppTheme.danger),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(width: 4),
-      ],
+      actions: _buildHeaderActions(lightSurface: false),
     );
+  }
+
+  List<Widget> _buildHeaderActions({required bool lightSurface}) {
+    final bellColor = _vm.overdueNotificationsEnabled || _vm.activeAlerts.isNotEmpty
+        ? (lightSurface ? AppTheme.forestGreen : const Color(0xFFBBF7D0))
+        : (lightSurface ? AppTheme.slateInk : Colors.white);
+    final syncColor = lightSurface ? AppTheme.slateInk : Colors.white;
+    final spinnerColor = lightSurface ? AppTheme.forestGreen : Colors.white;
+    final avatarBg = lightSurface ? const Color(0xFF0F3D24) : AppTheme.leafGreen;
+
+    return [
+      IconButton(
+        key: const Key('btn_dashboard_notify_toggle'),
+        tooltip: 'Notification Center (${_vm.activeAlerts.length})',
+        onPressed: _openNotificationCenter,
+        icon: Badge.count(
+          count: _vm.activeAlerts.length,
+          isLabelVisible: _vm.activeAlerts.isNotEmpty,
+          backgroundColor:
+              _vm.hasUpdateAvailable ? AppTheme.info : AppTheme.warning,
+          child: Icon(
+            _vm.activeAlerts.isNotEmpty || _vm.overdueNotificationsEnabled
+                ? Icons.notifications_active
+                : Icons.notifications_none_outlined,
+            color: bellColor,
+          ),
+        ),
+      ),
+      IconButton(
+        key: const Key('btn_dashboard_sync'),
+        tooltip: 'Sync encrypted vault',
+        onPressed: _vm.isSyncing ? null : _vm.refresh,
+        icon: _vm.isSyncing
+            ? SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: spinnerColor,
+                ),
+              )
+            : Icon(Icons.sync, color: syncColor),
+      ),
+      PopupMenuButton<_DashboardMenuAction>(
+        key: const Key('btn_dashboard_menu'),
+        tooltip: 'Account & Tools',
+        icon: CircleAvatar(
+          radius: 15,
+          backgroundColor: avatarBg,
+          foregroundColor: Colors.white,
+          child: Text(
+            _vm.userInitials,
+            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+          ),
+        ),
+        onSelected: _handleMenuSelection,
+        itemBuilder: (context) => [
+          if (_vm.userEmail != null && _vm.userEmail!.isNotEmpty)
+            PopupMenuItem<_DashboardMenuAction>(
+              enabled: false,
+              child: Text(
+                _vm.userEmail!,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12.5,
+                  color: AppTheme.slateInk,
+                ),
+              ),
+            ),
+          const PopupMenuDivider(),
+          const PopupMenuItem(
+            value: _DashboardMenuAction.signature,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.draw_outlined),
+              title: Text('My Signature'),
+            ),
+          ),
+          const PopupMenuItem(
+            value: _DashboardMenuAction.exportExcel,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.table_view_outlined),
+              title: Text('Export Excel (.xlsx)'),
+            ),
+          ),
+          PopupMenuItem(
+            value: _DashboardMenuAction.notifications,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(
+                _vm.overdueNotificationsEnabled
+                    ? Icons.notifications_active_outlined
+                    : Icons.notifications_off_outlined,
+              ),
+              title: const Text('Notification Center'),
+            ),
+          ),
+          PopupMenuItem(
+            value: _DashboardMenuAction.biometrics,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.fingerprint),
+              title: Text(
+                _vm.biometricEnabled
+                    ? 'Disable Screen Lock'
+                    : 'Enable Screen Lock',
+              ),
+            ),
+          ),
+          const PopupMenuItem(
+            value: _DashboardMenuAction.changePassword,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.lock_reset_outlined),
+              title: Text('Change Password'),
+            ),
+          ),
+          const PopupMenuItem(
+            value: _DashboardMenuAction.updates,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.system_update_outlined),
+              title: Text('Check for Updates'),
+            ),
+          ),
+          const PopupMenuDivider(),
+          const PopupMenuItem(
+            value: _DashboardMenuAction.signOut,
+            child: ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.logout, color: AppTheme.danger),
+              title: Text(
+                'Sign Out',
+                style: TextStyle(color: AppTheme.danger),
+              ),
+            ),
+          ),
+        ],
+      ),
+      const SizedBox(width: 4),
+    ];
   }
 
   Future<void> _handleMenuSelection(_DashboardMenuAction action) async {
@@ -1084,7 +1198,7 @@ class _RecentInvoicesSection extends StatelessWidget {
                     onPressed: onViewAll,
                     child: const Text('View All'),
                   ),
-                if (onCreateInvoice != null)
+                if (!redesigned && onCreateInvoice != null)
                   TextButton.icon(
                     key: const Key('btn_recent_create_invoice'),
                     onPressed: onCreateInvoice,
@@ -1193,9 +1307,12 @@ class _RecentInvoicesSection extends StatelessWidget {
                     ),
                     subtitle: Text(
                       '${inv.date} · Profit KES ${DashboardViewModel.formatMoney(inv.profit)}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
                         color: AppTheme.slateMuted,
+                        fontFeatures: redesigned
+                            ? const [FontFeature.tabularFigures()]
+                            : null,
                       ),
                     ),
                     trailing: Column(
@@ -1204,10 +1321,13 @@ class _RecentInvoicesSection extends StatelessWidget {
                       children: [
                         Text(
                           'KES ${DashboardViewModel.formatMoney(inv.totalSell)}',
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 13,
                             color: AppTheme.slateInk,
+                            fontFeatures: redesigned
+                                ? const [FontFeature.tabularFigures()]
+                                : null,
                           ),
                         ),
                         const SizedBox(height: 4),
@@ -1269,48 +1389,69 @@ class _DeveloperPreviewRibbon extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       key: const Key('dev_preview_banner'),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
       decoration: BoxDecoration(
-        color: const Color(0xFFECFDF5),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFA7F3D0)),
+        color: const Color(0xFFF0F7F2),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFD5E5DA)),
       ),
       child: Row(
         children: [
           const Icon(
-            Icons.science_outlined,
-            size: 18,
+            Icons.tune_rounded,
+            size: 16,
             color: Color(0xFF0F3D24),
           ),
-          const SizedBox(width: 10),
+          const SizedBox(width: 8),
           const Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
-                  'Developer Preview · v1.2.1',
+                  'Developer Preview · v1.2.2',
                   style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w800,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
                     color: Color(0xFF0F3D24),
                   ),
                 ),
                 Text(
-                  'Visible only to onderegerald@gmail.com before rollout',
+                  'Private preview for onderegerald@gmail.com',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                   style: TextStyle(
-                    fontSize: 11,
-                    color: Color(0xFF047857),
+                    fontSize: 10.5,
+                    color: AppTheme.slateMuted,
                   ),
                 ),
               ],
             ),
           ),
-          if (onToggle != null)
-            ActionChip(
+          if (onToggle != null) ...[
+            const SizedBox(width: 8),
+            InkWell(
               key: const Key('btn_toggle_dev_ui_mode'),
-              label: Text(redesignedEnabled ? 'UI v2' : 'Classic'),
-              onPressed: onToggle,
+              borderRadius: BorderRadius.circular(20),
+              onTap: onToggle,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: const Color(0xFFCCE0D2)),
+                ),
+                child: Text(
+                  redesignedEnabled ? 'UI v2' : 'Classic',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF0F3D24),
+                  ),
+                ),
+              ),
             ),
+          ],
         ],
       ),
     );
@@ -1320,14 +1461,14 @@ class _DeveloperPreviewRibbon extends StatelessWidget {
 class _ExecutiveHeroCard extends StatelessWidget {
   const _ExecutiveHeroCard({
     required this.metrics,
-    this.onCreateInvoice,
+    this.onOpenReports,
     this.onOpenKraTaxCenter,
     this.onOpenStatements,
     this.onOpenExpenses,
   });
 
   final DashboardMetrics metrics;
-  final VoidCallback? onCreateInvoice;
+  final VoidCallback? onOpenReports;
   final VoidCallback? onOpenKraTaxCenter;
   final VoidCallback? onOpenStatements;
   final VoidCallback? onOpenExpenses;
@@ -1340,20 +1481,25 @@ class _ExecutiveHeroCard extends StatelessWidget {
     final marginLabel = metrics.thisMonthMarginPercent != null
         ? '${metrics.thisMonthMarginPercent!.toStringAsFixed(1)}% margin'
         : 'Margin N/A';
+    final revDelta = metrics.revenueChangePercent;
+    final deltaPrefix = (revDelta ?? 0) >= 0 ? '+' : '';
+    final deltaText = revDelta != null
+        ? '$deltaPrefix${revDelta.round()}% vs ${metrics.previousMonthShortLabel}'
+        : null;
 
     return Container(
       key: const Key('dev_executive_hero_card'),
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF0F3D24), Color(0xFF166534)],
+          colors: [Color(0xFF0F3D24), Color(0xFF165B33)],
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x220F3D24),
+            color: Color(0x1E0F3D24),
             blurRadius: 16,
             offset: Offset(0, 6),
           ),
@@ -1375,10 +1521,32 @@ class _ExecutiveHeroCard extends StatelessWidget {
                   ),
                 ),
               ),
+              if (deltaText != null) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    deltaText,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFFD1FAE5),
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
+              ],
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.14),
+                  color: Colors.white.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
@@ -1387,27 +1555,34 @@ class _ExecutiveHeroCard extends StatelessWidget {
                     fontSize: 11.5,
                     fontWeight: FontWeight.w700,
                     color: Colors.white,
+                    fontFeatures: [FontFeature.tabularFigures()],
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(
-            'KES ${DashboardViewModel.formatMoney(metrics.thisMonthRevenue)}',
-            style: const TextStyle(
-              fontSize: 26,
-              fontWeight: FontWeight.w800,
-              color: Colors.white,
-              letterSpacing: -0.5,
+          const SizedBox(height: 10),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'KES ${DashboardViewModel.formatMoney(metrics.thisMonthRevenue)}',
+              style: const TextStyle(
+                fontSize: 27,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+                letterSpacing: -0.6,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 5),
           Text(
             'Net Profit: KES ${DashboardViewModel.formatMoney(metrics.thisMonthProfit)} · $paid/$total settled',
             style: const TextStyle(
               fontSize: 12.5,
               color: Color(0xFFD1FAE5),
+              fontFeatures: [FontFeature.tabularFigures()],
             ),
           ),
           const SizedBox(height: 12),
@@ -1415,7 +1590,7 @@ class _ExecutiveHeroCard extends StatelessWidget {
             borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
               value: ratio,
-              minHeight: 7,
+              minHeight: 6,
               backgroundColor: Colors.white.withValues(alpha: 0.18),
               valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF86EFAC)),
             ),
@@ -1424,24 +1599,28 @@ class _ExecutiveHeroCard extends StatelessWidget {
           Row(
             children: [
               _HeroActionPill(
-                icon: Icons.add_box_outlined,
-                label: 'Invoice',
-                onTap: onCreateInvoice,
+                key: const Key('hero_pill_reports'),
+                icon: Icons.bar_chart_rounded,
+                label: 'Reports',
+                onTap: onOpenReports,
               ),
               const SizedBox(width: 8),
               _HeroActionPill(
+                key: const Key('hero_pill_etims'),
                 icon: Icons.qr_code_2,
                 label: 'eTIMS Tax',
                 onTap: onOpenKraTaxCenter,
               ),
               const SizedBox(width: 8),
               _HeroActionPill(
+                key: const Key('hero_pill_statements'),
                 icon: Icons.description_outlined,
                 label: 'Statements',
                 onTap: onOpenStatements,
               ),
               const SizedBox(width: 8),
               _HeroActionPill(
+                key: const Key('hero_pill_expenses'),
                 icon: Icons.account_balance_wallet_outlined,
                 label: 'Expenses',
                 onTap: onOpenExpenses,
@@ -1456,6 +1635,7 @@ class _ExecutiveHeroCard extends StatelessWidget {
 
 class _HeroActionPill extends StatelessWidget {
   const _HeroActionPill({
+    super.key,
     required this.icon,
     required this.label,
     this.onTap,
@@ -1516,46 +1696,450 @@ class _ExecutivePulseRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasOverdue = metrics.overdueBillsCount > 0;
-    return Row(
+    final etimsTotal = metrics.thisMonthInvoiceCount;
+    final etimsReady = metrics.thisMonthEtimsReadyCount;
+    final etimsRatio =
+        etimsTotal > 0 ? (etimsReady / etimsTotal).clamp(0.0, 1.0) : 0.0;
+    final etimsPctLabel = '${(etimsRatio * 100).round()}%';
+
+    final expRatioLabel = metrics.thisMonthRevenue > 0
+        ? '${((metrics.thisMonthExpenses / metrics.thisMonthRevenue) * 100).toStringAsFixed(1)}% of revenue'
+        : 'Recorded this month';
+
+    return Card(
       key: const Key('dev_executive_pulse_row'),
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: _PulseTile(
-            icon: Icons.pending_actions_outlined,
-            accent: hasOverdue ? AppTheme.danger : AppTheme.warning,
-            tint: hasOverdue ? AppTheme.dangerSurface : AppTheme.warningSurface,
-            label: 'Pending',
-            value: 'KES ${DashboardViewModel.formatMoney(metrics.pendingBillsAmount)}',
-            caption: hasOverdue
-                ? '${metrics.overdueBillsCount} overdue'
-                : '${metrics.pendingBillsCount} open',
-            onTap: onOpenInvoices,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        children: [
+          IntrinsicHeight(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: onOpenInvoices,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'RECEIVABLES',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.7,
+                              color: AppTheme.slateMuted,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'KES ${DashboardViewModel.formatMoney(metrics.pendingBillsAmount)}',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.slateInk,
+                                fontFeatures: [FontFeature.tabularFigures()],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            hasOverdue
+                                ? '${metrics.overdueBillsCount} overdue · ${metrics.pendingBillsCount} open'
+                                : '${metrics.pendingBillsCount} open',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: hasOverdue
+                                  ? AppTheme.danger
+                                  : AppTheme.slateMuted,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const VerticalDivider(
+                  width: 1,
+                  thickness: 1,
+                  color: Color(0xFFE4EAE4),
+                ),
+                Expanded(
+                  child: InkWell(
+                    onTap: onOpenExpenses,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'OPERATING COSTS',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.7,
+                              color: AppTheme.slateMuted,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          FittedBox(
+                            fit: BoxFit.scaleDown,
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              'KES ${DashboardViewModel.formatMoney(metrics.thisMonthExpenses)}',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                                color: AppTheme.slateInk,
+                                fontFeatures: [FontFeature.tabularFigures()],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            expRatioLabel,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.slateMuted,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _PulseTile(
-            icon: Icons.qr_code_2_outlined,
-            accent: AppTheme.forestGreenDeep,
-            tint: AppTheme.sageTint,
-            label: 'eTIMS QR',
-            value:
-                '${metrics.thisMonthEtimsReadyCount} / ${metrics.thisMonthInvoiceCount}',
-            caption: 'QR issued',
+          const Divider(height: 1, thickness: 1, color: Color(0xFFE4EAE4)),
+          InkWell(
             onTap: onOpenKraTaxCenter,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.qr_code_2_outlined,
+                        size: 16,
+                        color: Color(0xFF0F3D24),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'KRA eTIMS Compliance · $etimsReady of $etimsTotal fiscalized',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: AppTheme.slateInk,
+                            fontFeatures: [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        etimsPctLabel,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF0F3D24),
+                          fontFeatures: [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: etimsRatio,
+                      minHeight: 5,
+                      backgroundColor: const Color(0xFFEDF2ED),
+                      valueColor: const AlwaysStoppedAnimation<Color>(
+                        Color(0xFF0F3D24),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CashflowTrendCard extends StatelessWidget {
+  const _CashflowTrendCard({
+    required this.trend,
+    this.onOpenReports,
+  });
+
+  final List<DashboardMonthPoint> trend;
+  final VoidCallback? onOpenReports;
+
+  String _formatAxisCompact(double value) {
+    if (value >= 1000000) {
+      return '${(value / 1000000).toStringAsFixed(1)}M';
+    }
+    if (value >= 1000) {
+      return '${(value / 1000).toStringAsFixed(0)}k';
+    }
+    return value.toStringAsFixed(0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final hasData =
+        trend.isNotEmpty && trend.any((p) => p.revenue > 0 || p.netProfit > 0);
+    final rawMax = trend.fold<double>(
+      0,
+      (m, p) => math.max(m, math.max(p.revenue, math.max(p.netProfit, 0))),
+    );
+    final maxY = rawMax <= 0 ? 1000.0 : rawMax * 1.18;
+
+    return Card(
+      key: const Key('dev_cashflow_trend_card'),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.bar_chart_rounded,
+                  size: 18,
+                  color: Color(0xFF0F3D24),
+                ),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    '6-Month Cashflow',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: AppTheme.slateInk,
+                    ),
+                  ),
+                ),
+                if (onOpenReports != null)
+                  TextButton(
+                    onPressed: onOpenReports,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Reports'),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            const Row(
+              children: [
+                _ChartLegendItem(color: Color(0xFF0F3D24), label: 'Revenue'),
+                SizedBox(width: 14),
+                _ChartLegendItem(color: AppTheme.leafGreen, label: 'Net Profit'),
+              ],
+            ),
+            const SizedBox(height: 14),
+            if (!hasData)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 14),
+                child: Text(
+                  'Monthly cashflow trends appear once invoices are recorded.',
+                  style: TextStyle(fontSize: 12.5, color: AppTheme.slateMuted),
+                ),
+              )
+            else
+              SizedBox(
+                height: 152,
+                child: BarChart(
+                  BarChartData(
+                    maxY: maxY,
+                    alignment: BarChartAlignment.spaceAround,
+                    barTouchData: BarTouchData(
+                      touchTooltipData: BarTouchTooltipData(
+                        getTooltipColor: (_) => const Color(0xFF0F172A),
+                        tooltipRoundedRadius: 10,
+                        tooltipPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 7,
+                        ),
+                        getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                          final pt = trend[groupIndex];
+                          final label = rodIndex == 0 ? 'Revenue' : 'Net Profit';
+                          return BarTooltipItem(
+                            '${pt.label} · $label\nKES ${DashboardViewModel.formatMoney(rod.toY)}',
+                            const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 11.5,
+                              fontFeatures: [FontFeature.tabularFigures()],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    titlesData: FlTitlesData(
+                      topTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      rightTitles: const AxisTitles(
+                        sideTitles: SideTitles(showTitles: false),
+                      ),
+                      leftTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 40,
+                          getTitlesWidget: (val, meta) {
+                            if (val >= meta.max * 0.96 && val > 0) {
+                              return const SizedBox.shrink();
+                            }
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 6),
+                              child: Text(
+                                _formatAxisCompact(val),
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  color: AppTheme.slateMuted,
+                                  fontFeatures: [FontFeature.tabularFigures()],
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                      bottomTitles: AxisTitles(
+                        sideTitles: SideTitles(
+                          showTitles: true,
+                          reservedSize: 22,
+                          getTitlesWidget: (val, meta) {
+                            final idx = val.toInt();
+                            if (idx < 0 || idx >= trend.length) {
+                              return const SizedBox.shrink();
+                            }
+                            final isCurrent = idx == trend.length - 1;
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Text(
+                                trend[idx].label,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: isCurrent
+                                      ? FontWeight.w800
+                                      : FontWeight.w500,
+                                  color: isCurrent
+                                      ? AppTheme.slateInk
+                                      : AppTheme.slateMuted,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                    gridData: FlGridData(
+                      show: true,
+                      drawVerticalLine: false,
+                      getDrawingHorizontalLine: (value) => const FlLine(
+                        color: Color(0xFFE8ECE8),
+                        strokeWidth: 1,
+                        dashArray: [3, 3],
+                      ),
+                    ),
+                    borderData: FlBorderData(show: false),
+                    barGroups: [
+                      for (var i = 0; i < trend.length; i++)
+                        BarChartGroupData(
+                          x: i,
+                          barsSpace: 3,
+                          barRods: [
+                            BarChartRodData(
+                              toY: trend[i].revenue.clamp(0.0, double.infinity),
+                              color: i == trend.length - 1
+                                  ? const Color(0xFF0F3D24)
+                                  : const Color(0xFF0F3D24)
+                                      .withValues(alpha: 0.68),
+                              width: 9,
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(3),
+                              ),
+                            ),
+                            BarChartRodData(
+                              toY: trend[i].netProfit > 0
+                                  ? trend[i].netProfit
+                                  : 0,
+                              color: i == trend.length - 1
+                                  ? AppTheme.leafGreen
+                                  : AppTheme.leafGreen.withValues(alpha: 0.68),
+                              width: 9,
+                              borderRadius: const BorderRadius.vertical(
+                                top: Radius.circular(3),
+                              ),
+                            ),
+                          ],
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChartLegendItem extends StatelessWidget {
+  const _ChartLegendItem({
+    required this.color,
+    required this.label,
+  });
+
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(2),
           ),
         ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: _PulseTile(
-            icon: Icons.receipt_outlined,
-            accent: AppTheme.slateDark,
-            tint: const Color(0xFFF1F5F9),
-            label: 'Expenses',
-            value: 'KES ${DashboardViewModel.formatMoney(metrics.thisMonthExpenses)}',
-            caption: 'This month',
-            onTap: onOpenExpenses,
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 11.5,
+            fontWeight: FontWeight.w600,
+            color: AppTheme.slateMuted,
           ),
         ),
       ],
@@ -1563,104 +2147,15 @@ class _ExecutivePulseRow extends StatelessWidget {
   }
 }
 
-class _PulseTile extends StatelessWidget {
-  const _PulseTile({
-    required this.icon,
-    required this.accent,
-    required this.tint,
-    required this.label,
-    required this.value,
-    required this.caption,
-    this.onTap,
-  });
-
-  final IconData icon;
-  final Color accent;
-  final Color tint;
-  final String label;
-  final String value;
-  final String caption;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: tint,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(icon, size: 16, color: accent),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.slateMuted,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              SizedBox(
-                height: 22,
-                child: FittedBox(
-                  fit: BoxFit.scaleDown,
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    value,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                      color: AppTheme.slateInk,
-                    ),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                caption,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: accent,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _TopClientsMonthCard extends StatelessWidget {
   const _TopClientsMonthCard({
     required this.clients,
+    this.totalMonthRevenue = 0,
     this.onOpenStatements,
   });
 
   final List<DashboardTopClient> clients;
+  final double totalMonthRevenue;
   final VoidCallback? onOpenStatements;
 
   @override
@@ -1671,7 +2166,7 @@ class _TopClientsMonthCard extends StatelessWidget {
     return Card(
       key: const Key('dev_top_clients_card'),
       child: Padding(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -1680,7 +2175,7 @@ class _TopClientsMonthCard extends StatelessWidget {
                 const Icon(
                   Icons.apartment_outlined,
                   size: 18,
-                  color: AppTheme.forestGreen,
+                  color: Color(0xFF0F3D24),
                 ),
                 const SizedBox(width: 8),
                 const Expanded(
@@ -1689,18 +2184,26 @@ class _TopClientsMonthCard extends StatelessWidget {
                     style: TextStyle(
                       fontWeight: FontWeight.w700,
                       fontSize: 14,
-                      color: AppTheme.slateDark,
+                      color: AppTheme.slateInk,
                     ),
                   ),
                 ),
                 if (onOpenStatements != null)
                   TextButton(
                     onPressed: onOpenStatements,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 4,
+                      ),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
                     child: const Text('Statements'),
                   ),
               ],
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 10),
             if (clients.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 10),
@@ -1712,8 +2215,11 @@ class _TopClientsMonthCard extends StatelessWidget {
             else
               ...clients.map((c) {
                 final barRatio = (c.revenue / maxRevenue).clamp(0.06, 1.0);
+                final shareText = totalMonthRevenue > 0
+                    ? ' · ${((c.revenue / totalMonthRevenue) * 100).round()}%'
+                    : '';
                 return Padding(
-                  padding: const EdgeInsets.only(bottom: 10),
+                  padding: const EdgeInsets.only(bottom: 11),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -1733,35 +2239,37 @@ class _TopClientsMonthCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            'KES ${DashboardViewModel.formatMoney(c.revenue)}',
+                            'KES ${DashboardViewModel.formatMoney(c.revenue)}$shareText',
                             style: const TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w700,
-                              color: AppTheme.forestGreenDeep,
+                              color: Color(0xFF0F3D24),
+                              fontFeatures: [FontFeature.tabularFigures()],
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
+                      const SizedBox(height: 5),
                       ClipRRect(
                         borderRadius: BorderRadius.circular(4),
                         child: LinearProgressIndicator(
                           value: barRatio,
-                          minHeight: 5,
-                          backgroundColor: AppTheme.sageTint,
+                          minHeight: 4,
+                          backgroundColor: const Color(0xFFEDF2ED),
                           valueColor: const AlwaysStoppedAnimation<Color>(
                             AppTheme.forestGreen,
                           ),
                         ),
                       ),
                       if (c.unpaidAmount > 0) ...[
-                        const SizedBox(height: 2),
+                        const SizedBox(height: 3),
                         Text(
                           'KES ${DashboardViewModel.formatMoney(c.unpaidAmount)} unpaid balance',
                           style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
                             color: AppTheme.warning,
+                            fontFeatures: [FontFeature.tabularFigures()],
                           ),
                         ),
                       ],
@@ -1798,7 +2306,7 @@ class _CompactUtilitiesBar extends StatelessWidget {
     return Card(
       key: const Key('dev_quick_utilities_bar'),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         child: Row(
           children: [
             _UtilityIconBtn(
@@ -1846,18 +2354,27 @@ class _UtilityIconBtn extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = highlight ? AppTheme.warning : AppTheme.forestGreenDeep;
+    final fg = highlight ? AppTheme.warning : const Color(0xFF0F3D24);
+    final wellBg = highlight ? AppTheme.warningSurface : const Color(0xFFEFF5EF);
     return Expanded(
       child: InkWell(
-        borderRadius: BorderRadius.circular(10),
+        borderRadius: BorderRadius.circular(12),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 20, color: fg),
-              const SizedBox(height: 4),
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: wellBg,
+                  borderRadius: BorderRadius.circular(11),
+                ),
+                child: Icon(icon, size: 18, color: fg),
+              ),
+              const SizedBox(height: 5),
               Text(
                 label,
                 maxLines: 1,

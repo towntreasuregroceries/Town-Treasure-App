@@ -33,6 +33,21 @@ class DashboardTopClient {
   final int invoiceCount;
 }
 
+/// Monthly revenue and net-profit snapshot for the 6-month executive chart.
+class DashboardMonthPoint {
+  const DashboardMonthPoint({
+    required this.monthKey,
+    required this.label,
+    required this.revenue,
+    required this.netProfit,
+  });
+
+  final String monthKey;
+  final String label;
+  final double revenue;
+  final double netProfit;
+}
+
 /// Immutable snapshot of Dashboard KPIs and recent activity.
 class DashboardMetrics {
   const DashboardMetrics({
@@ -48,6 +63,11 @@ class DashboardMetrics {
     this.thisMonthExpenses = 0,
     this.thisMonthEtimsReadyCount = 0,
     this.topClients = const [],
+    this.monthLabel = '',
+    this.previousMonthRevenue = 0,
+    this.previousMonthShortLabel = '',
+    this.revenueChangePercent,
+    this.monthlyTrend = const [],
   });
 
   final double thisMonthRevenue;
@@ -62,6 +82,11 @@ class DashboardMetrics {
   final double thisMonthExpenses;
   final int thisMonthEtimsReadyCount;
   final List<DashboardTopClient> topClients;
+  final String monthLabel;
+  final double previousMonthRevenue;
+  final String previousMonthShortLabel;
+  final double? revenueChangePercent;
+  final List<DashboardMonthPoint> monthlyTrend;
 }
 
 /// ViewModel for the Town Treasure Dashboard, mirroring `dashboard.js`,
@@ -430,6 +455,55 @@ class DashboardViewModel extends ChangeNotifier {
         .toList()
       ..sort((a, b) => b.revenue.compareTo(a.revenue));
 
+    final monthSlots = List<DateTime>.generate(
+      6,
+      (i) => DateTime(now.year, now.month - (5 - i), 1),
+    );
+    final revByMonth = <String, double>{};
+    final grossByMonth = <String, double>{};
+    final expByMonth = <String, double>{};
+    for (final dt in monthSlots) {
+      final key = DateFormat('yyyy-MM').format(dt);
+      revByMonth[key] = 0;
+      grossByMonth[key] = 0;
+      expByMonth[key] = 0;
+    }
+    for (final inv in nonDrafts) {
+      final parsed = AppHelpers.parseAppDate(inv.date);
+      if (parsed == null) continue;
+      final key = DateFormat('yyyy-MM').format(parsed);
+      if (revByMonth.containsKey(key)) {
+        revByMonth[key] = revByMonth[key]! + inv.totalSell;
+        grossByMonth[key] = grossByMonth[key]! + inv.profit;
+      }
+    }
+    for (final exp in _vault.expenses) {
+      if (exp.type != 'expense') continue;
+      final parsed = AppHelpers.parseAppDate(exp.date);
+      if (parsed == null) continue;
+      final key = DateFormat('yyyy-MM').format(parsed);
+      if (expByMonth.containsKey(key)) {
+        expByMonth[key] = expByMonth[key]! + exp.amount;
+      }
+    }
+    final monthlyTrend = [
+      for (final dt in monthSlots)
+        () {
+          final key = DateFormat('yyyy-MM').format(dt);
+          return DashboardMonthPoint(
+            monthKey: key,
+            label: DateFormat('MMM').format(dt),
+            revenue: revByMonth[key] ?? 0,
+            netProfit: (grossByMonth[key] ?? 0) - (expByMonth[key] ?? 0),
+          );
+        }(),
+    ];
+    final prevDate = DateTime(now.year, now.month - 1, 1);
+    final prevKey = DateFormat('yyyy-MM').format(prevDate);
+    final prevRev = revByMonth[prevKey] ?? 0;
+    final revChangePct =
+        prevRev > 0 ? ((totalSales - prevRev) / prevRev) * 100.0 : null;
+
     return DashboardMetrics(
       thisMonthRevenue: totalSales,
       thisMonthProfit: netProfit,
@@ -443,6 +517,11 @@ class DashboardViewModel extends ChangeNotifier {
       thisMonthExpenses: thisMonthExpenses,
       thisMonthEtimsReadyCount: etimsReadyCount,
       topClients: topClients.take(4).toList(),
+      monthLabel: DateFormat('MMMM yyyy').format(now),
+      previousMonthRevenue: prevRev,
+      previousMonthShortLabel: DateFormat('MMM').format(prevDate),
+      revenueChangePercent: revChangePct,
+      monthlyTrend: monthlyTrend,
     );
   }
 

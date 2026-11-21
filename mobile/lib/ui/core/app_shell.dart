@@ -690,6 +690,7 @@ class _AppShellState extends State<AppShell> {
                       _openExpensesHub(initialTabIndex: tabIndex),
                   onOpenStatements: _openStatements,
                   onOpenKraTaxCenter: _openKraTaxCenter,
+                  onOpenReports: _openReports,
                   onOpenInvoice: (inv) => _openInvoiceDetailById(inv.id),
                   onCreateInvoice: () => _openInvoiceEditor(),
                   onSignedOut: widget.onSignedOut,

@@ -564,6 +564,14 @@ void main() {
       expect(m.overdueBillsCount, 1);
       expect(m.pendingBillsAmount, 9000);
       expect(m.recentInvoices.map((e) => e.id).toList(), ['inv-2', 'inv-1']);
+      expect(m.monthLabel, 'November 2026');
+      expect(m.previousMonthRevenue, 4000);
+      expect(m.previousMonthShortLabel, 'Oct');
+      expect(m.revenueChangePercent, closeTo(275.0, 0.01));
+      expect(m.monthlyTrend, hasLength(6));
+      expect(m.monthlyTrend.last.monthKey, '2026-11');
+      expect(m.monthlyTrend.last.revenue, 15000);
+      expect(m.monthlyTrend.last.netProfit, 4000);
 
       final enabled = await vm.toggleOverdueNotifications(true);
       expect(enabled, isTrue);
@@ -1329,7 +1337,7 @@ void main() {
     });
 
     testWidgets(
-        'Developer-only Dashboard shows Executive Hero, Pulse Row, Top Clients, and Compact Utilities without duplicating KPI Grid',
+        'Developer-only Dashboard shows Executive Hero with Reports, Compact Utilities, Snapshot Ledger, Cashflow Chart, and Top Clients without redundant Create buttons',
         (tester) async {
       final f = await _createFixture();
       addTearDown(f.storage.close);
@@ -1343,6 +1351,17 @@ void main() {
       await f.storage.setUserEmail(DeveloperPreviewConfig.developerEmail);
 
       await f.vault.setInvoices([
+        const Invoice(
+          id: 'inv-dev-0',
+          number: 'TTG-199',
+          restaurantId: 'r1',
+          restaurantName: 'Serena Hotel',
+          date: '2026-10-20',
+          totalSell: 20000,
+          totalBuy: 15000,
+          profit: 5000,
+          status: 'paid',
+        ),
         const Invoice(
           id: 'inv-dev-1',
           number: 'TTG-201',
@@ -1369,6 +1388,8 @@ void main() {
         ),
       ], sync: false);
 
+      var reportsOpened = false;
+      var createInvoiceTapped = false;
       final devCtrl = DeveloperPreviewController();
       final vm = DashboardViewModel(
         vaultRepository: f.vault,
@@ -1387,6 +1408,11 @@ void main() {
             theme: AppTheme.redesignedLight(),
             home: DashboardScreen(
               viewModel: vm,
+              onCreateInvoice: () => createInvoiceTapped = true,
+              onOpenReports: () => reportsOpened = true,
+              onOpenKraTaxCenter: () {},
+              onOpenStatements: () {},
+              onOpenExpensesHub: (_) {},
               autoInitialize: false,
             ),
           ),
@@ -1396,16 +1422,52 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('dev_preview_banner')), findsOneWidget);
+      expect(find.textContaining('v1.2.2'), findsOneWidget);
       expect(find.byKey(const Key('dev_executive_hero_card')), findsOneWidget);
-      expect(find.byKey(const Key('dev_executive_pulse_row')), findsOneWidget);
-      expect(find.byKey(const Key('dev_top_clients_card')), findsOneWidget);
-      expect(find.byKey(const Key('kpi_revenue')), findsNothing);
-      expect(find.textContaining('Serena Hotel'), findsWidgets);
-      await tester.scrollUntilVisible(
-        find.byKey(const Key('dev_quick_utilities_bar')),
-        250,
+      expect(find.byKey(const Key('fab_create_invoice')), findsOneWidget);
+      expect(find.byKey(const Key('hero_pill_reports')), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('dev_executive_hero_card')),
+          matching: find.text('Invoice'),
+        ),
+        findsNothing,
       );
       expect(find.byKey(const Key('dev_quick_utilities_bar')), findsOneWidget);
+      expect(find.byKey(const Key('dev_executive_pulse_row')), findsOneWidget);
+      expect(find.byKey(const Key('kpi_revenue')), findsNothing);
+      expect(find.byKey(const Key('btn_recent_create_invoice')), findsNothing);
+
+      await _tapKey(tester, const Key('hero_pill_reports'));
+      await tester.pump();
+      expect(reportsOpened, isTrue);
+
+      final mainScrollable = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('dev_cashflow_trend_card')),
+        250,
+        scrollable: mainScrollable,
+      );
+      expect(find.byKey(const Key('dev_cashflow_trend_card')), findsOneWidget);
+
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('dev_top_clients_card')),
+        250,
+        scrollable: mainScrollable,
+      );
+      expect(find.byKey(const Key('dev_top_clients_card')), findsOneWidget);
+      expect(find.textContaining('Serena Hotel'), findsWidgets);
+
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('recent_invoice_inv-dev-1')),
+        250,
+        scrollable: mainScrollable,
+      );
+      expect(find.byKey(const Key('btn_recent_create_invoice')), findsNothing);
+
+      await _tapKey(tester, const Key('fab_create_invoice'));
+      await tester.pump();
+      expect(createInvoiceTapped, isTrue);
     });
   });
 }

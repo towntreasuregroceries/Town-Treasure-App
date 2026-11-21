@@ -1,8 +1,8 @@
 {
-  "version": "1.2.1",
-  "buildNumber": 2015,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.1-preview/TownTreasureGroceries.apk",
-  "sha256": "016441dc8c304d3ee915426de54c24e076ac74174efc25e315e41e624e42404a",
-  "releaseNotes": "Developer Preview v1.2.1+15 (onderegerald@gmail.com only): Fixed closed-app Android background notifications (15-min WorkManager + pre-created channels + 10s Test in Notification Center), unified PDF Viewer onto one Print button opening Print & Dispatch Center, and upgraded Executive Dashboard with Operational Pulse, Top Hotels & Compact Utilities while keeping the Hero performance card.",
+  "version": "1.2.2",
+  "buildNumber": 2016,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.2-preview/TownTreasureGroceries.apk",
+  "sha256": "b67505a37f6ee78ad77113f71a3a733c5b593fd19945b72cddd4e3ec8bcf2a8b",
+  "releaseNotes": "Developer Preview v1.2.2+16 (onderegerald@gmail.com only): Executive Dashboard UI v2 redesign keeping the unified This Month Performance hero card and green + New Invoice FAB while removing old KPI cards and redundant New Invoice triggers (replaced hero Invoice pill with Reports, hid duplicate + Create in Recent Invoices), added sleek Quick Tools directly beneath Hero, Financial Snapshot Ledger (Receivables, Operating Costs %, KRA eTIMS Compliance), 6-Month Cashflow trend chart, plus all v1.2.1 fixes (closed-app background alerts and unified PDF printing).",
   "mandatory": false
 }
