@@ -752,7 +752,7 @@ void main() {
       expect(recordedRequests.length, 5);
     });
 
-    test('DeveloperPreviewConfig gates dev update channel & Redesigned UI strictly to onderegerald@gmail.com', () {
+    test('DeveloperPreviewConfig gates dev update channel to onderegerald@gmail.com while Executive UI v2 is enabled for all owners', () {
       expect(DeveloperPreviewConfig.isDeveloperEmail('onderegerald@gmail.com'), isTrue);
       expect(DeveloperPreviewConfig.isDeveloperEmail(' ONDEREGERALD@GMAIL.COM '), isTrue);
       expect(DeveloperPreviewConfig.isDeveloperEmail('vero@towntreasure.co.ke'), isFalse);
@@ -774,9 +774,10 @@ void main() {
 
       final ctrl = DeveloperPreviewController();
       expect(ctrl.isRedesignedUiActiveFor('onderegerald@gmail.com'), isTrue);
-      expect(ctrl.isRedesignedUiActiveFor('vero@towntreasure.co.ke'), isFalse);
+      expect(ctrl.isRedesignedUiActiveFor('vero@towntreasure.co.ke'), isTrue);
       ctrl.toggleRedesignedUi();
       expect(ctrl.isRedesignedUiActiveFor('onderegerald@gmail.com'), isFalse);
+      expect(ctrl.isRedesignedUiActiveFor('vero@towntreasure.co.ke'), isFalse);
     });
   });
 }

@@ -733,7 +733,7 @@ void main() {
       );
     });
 
-    testWidgets('DashboardScreen displays pending clerk banner, KPIs, recent invoices, and callbacks',
+    testWidgets('DashboardScreen displays official Executive UI v2, pending clerk banner, recent invoices, and callbacks for all owners',
         (tester) async {
       final f = await _createFixture();
       addTearDown(f.storage.close);
@@ -786,7 +786,7 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
-          theme: AppTheme.light(),
+          theme: AppTheme.redesignedLight(),
           home: DashboardScreen(
             viewModel: vm,
             onOpenClerkInbox: () => clerkInboxOpened = true,
@@ -800,16 +800,24 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('banner_pending_clerk_dockets')), findsOneWidget);
-      expect(find.byKey(const Key('kpi_revenue')), findsOneWidget);
-      expect(find.byKey(const Key('kpi_profit')), findsOneWidget);
-      expect(find.byKey(const Key('kpi_pending_bills')), findsOneWidget);
-      expect(find.byKey(const Key('kpi_paid_count')), findsOneWidget);
+      expect(find.byKey(const Key('dev_executive_hero_card')), findsOneWidget);
+      expect(find.byKey(const Key('dev_quick_utilities_bar')), findsOneWidget);
+      expect(find.byKey(const Key('dev_executive_pulse_row')), findsOneWidget);
+      expect(find.byKey(const Key('dev_preview_banner')), findsNothing);
+      expect(find.byKey(const Key('kpi_revenue')), findsNothing);
+      expect(find.byKey(const Key('btn_recent_create_invoice')), findsNothing);
       expect(find.textContaining('8,500.00'), findsWidgets);
 
       await _tapKey(tester, const Key('btn_open_clerk_inbox'));
       await tester.pump();
       expect(clerkInboxOpened, isTrue);
 
+      final mainScrollable = find.byType(Scrollable).first;
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('recent_invoice_inv-101')),
+        250,
+        scrollable: mainScrollable,
+      );
       await _tapKey(tester, const Key('recent_invoice_inv-101'));
       await tester.pump();
       expect(openedInvoice?.id, 'inv-101');
@@ -1337,18 +1345,18 @@ void main() {
     });
 
     testWidgets(
-        'Developer-only Dashboard shows Executive Hero with Reports, Compact Utilities, Snapshot Ledger, Cashflow Chart, and Top Clients without redundant Create buttons',
+        'Official Executive Dashboard masks/unmasks all balances via eye toggle, persists preference, and keeps Hero Reports without redundant Create buttons',
         (tester) async {
       final f = await _createFixture();
       addTearDown(f.storage.close);
       addTearDown(f.vault.dispose);
 
       f.supabase.user = const AuthUserInfo(
-        id: 'dev-1',
-        email: DeveloperPreviewConfig.developerEmail,
+        id: 'owner-2',
+        email: 'veronicah@ttg.test',
       );
-      await f.storage.setUserId('dev-1');
-      await f.storage.setUserEmail(DeveloperPreviewConfig.developerEmail);
+      await f.storage.setUserId('owner-2');
+      await f.storage.setUserEmail('veronicah@ttg.test');
 
       await f.vault.setInvoices([
         const Invoice(
@@ -1421,9 +1429,9 @@ void main() {
       await vm.initialize(syncRemote: false);
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('dev_preview_banner')), findsOneWidget);
-      expect(find.textContaining('v1.2.2'), findsOneWidget);
+      expect(find.byKey(const Key('dev_preview_banner')), findsNothing);
       expect(find.byKey(const Key('dev_executive_hero_card')), findsOneWidget);
+      expect(find.byKey(const Key('btn_toggle_metrics_privacy')), findsOneWidget);
       expect(find.byKey(const Key('fab_create_invoice')), findsOneWidget);
       expect(find.byKey(const Key('hero_pill_reports')), findsOneWidget);
       expect(
@@ -1438,17 +1446,29 @@ void main() {
       expect(find.byKey(const Key('kpi_revenue')), findsNothing);
       expect(find.byKey(const Key('btn_recent_create_invoice')), findsNothing);
 
-      await _tapKey(tester, const Key('hero_pill_reports'));
-      await tester.pump();
-      expect(reportsOpened, isTrue);
+      // Initially balances are visible.
+      expect(find.textContaining('34,000.00'), findsWidgets);
+      expect(find.textContaining('8,500.00'), findsWidgets);
+
+      // Tap M-Pesa style eye icon to mask all metrics and persist setting.
+      await _tapKey(tester, const Key('btn_toggle_metrics_privacy'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining(DashboardViewModel.maskedAmount), findsWidgets);
+      expect(find.textContaining('34,000.00'), findsNothing);
+      expect(find.textContaining('8,500.00'), findsNothing);
+      expect(
+        await f.storage.getRaw(DashboardViewModel.keyHideDashboardBalances),
+        'true',
+      );
 
       final mainScrollable = find.byType(Scrollable).first;
       await tester.scrollUntilVisible(
-        find.byKey(const Key('dev_cashflow_trend_card')),
+        find.byKey(const Key('cashflow_hidden_placeholder')),
         250,
         scrollable: mainScrollable,
       );
-      expect(find.byKey(const Key('dev_cashflow_trend_card')), findsOneWidget);
+      expect(find.byKey(const Key('cashflow_hidden_placeholder')), findsOneWidget);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('dev_top_clients_card')),
@@ -1456,7 +1476,7 @@ void main() {
         scrollable: mainScrollable,
       );
       expect(find.byKey(const Key('dev_top_clients_card')), findsOneWidget);
-      expect(find.textContaining('Serena Hotel'), findsWidgets);
+      expect(find.textContaining('24,000.00'), findsNothing);
 
       await tester.scrollUntilVisible(
         find.byKey(const Key('recent_invoice_inv-dev-1')),
@@ -1464,6 +1484,28 @@ void main() {
         scrollable: mainScrollable,
       );
       expect(find.byKey(const Key('btn_recent_create_invoice')), findsNothing);
+      expect(find.textContaining('24,000.00'), findsNothing);
+
+      // Scroll back up to top and reveal balances again via the eye button.
+      await tester.drag(mainScrollable, const Offset(0, 900));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(
+        find.byKey(const Key('btn_toggle_metrics_privacy')),
+      );
+      await tester.pumpAndSettle();
+      await _tapKey(tester, const Key('btn_toggle_metrics_privacy'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('34,000.00'), findsWidgets);
+      expect(find.byKey(const Key('cashflow_hidden_placeholder')), findsNothing);
+      expect(
+        await f.storage.getRaw(DashboardViewModel.keyHideDashboardBalances),
+        'false',
+      );
+
+      await _tapKey(tester, const Key('hero_pill_reports'));
+      await tester.pump();
+      expect(reportsOpened, isTrue);
 
       await _tapKey(tester, const Key('fab_create_invoice'));
       await tester.pump();

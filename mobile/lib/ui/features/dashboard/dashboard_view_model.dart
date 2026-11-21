@@ -118,6 +118,8 @@ class DashboardViewModel extends ChangeNotifier {
   }
 
   static const String keyOverdueNotifications = 'ttg_overdue_notifications';
+  static const String keyHideDashboardBalances = 'ttg_hide_dashboard_balances';
+  static const String maskedAmount = '••••••';
   static const String keyLastPendingNotificationAt = 'ttg_last_pending_notif_at';
   static const String keyLastUpdateCheckAt = 'ttg_last_update_check_at';
   static const String keyLastNotifiedClerkSig = 'ttg_last_notified_clerk_sig';
@@ -148,6 +150,7 @@ class DashboardViewModel extends ChangeNotifier {
   bool _isSyncing = false;
   bool _isExporting = false;
   bool _overdueNotificationsEnabled = false;
+  bool _hideBalances = false;
   NotificationPreferences _notificationPrefs = const NotificationPreferences();
   UpdateCheckResult? _availableUpdate;
   bool _biometricEnabled = false;
@@ -162,6 +165,7 @@ class DashboardViewModel extends ChangeNotifier {
   bool get isSyncing => _isSyncing || _vault.isSyncing;
   bool get isExporting => _isExporting;
   bool get overdueNotificationsEnabled => _overdueNotificationsEnabled;
+  bool get hideBalances => _hideBalances;
   NotificationPreferences get notificationPrefs => _notificationPrefs;
   UpdateCheckResult? get availableUpdate => _availableUpdate;
   bool get hasUpdateAvailable => _availableUpdate?.updateAvailable == true;
@@ -387,6 +391,10 @@ class DashboardViewModel extends ChangeNotifier {
     return NumberFormat('#,##0.00', 'en_US').format(amount);
   }
 
+  static String formatMoneyOrMask(double amount, {required bool hidden}) {
+    return hidden ? maskedAmount : formatMoney(amount);
+  }
+
   /// Computes KPIs and recent invoices matching `refreshDashboard()` in `dashboard.js`.
   DashboardMetrics get metrics {
     final now = _clock();
@@ -534,6 +542,7 @@ class DashboardViewModel extends ChangeNotifier {
     _userEmail = await _auth.getUserEmail();
     _canUseBiometrics = await _auth.canUseBiometrics();
     _biometricEnabled = await _auth.isBiometricEnabled();
+    _hideBalances = (await _storage?.getRaw(keyHideDashboardBalances)) == 'true';
 
     await _loadNotificationPrefs();
 
@@ -864,6 +873,15 @@ class DashboardViewModel extends ChangeNotifier {
     }
     notifyListeners();
     return true;
+  }
+
+  Future<void> toggleHideBalances() async {
+    _hideBalances = !_hideBalances;
+    await _storage?.setRaw(
+      keyHideDashboardBalances,
+      _hideBalances ? 'true' : 'false',
+    );
+    notifyListeners();
   }
 
   Future<bool> toggleBiometricLock(bool enabled) async {

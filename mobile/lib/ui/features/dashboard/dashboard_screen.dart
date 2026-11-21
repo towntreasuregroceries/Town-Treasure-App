@@ -193,9 +193,8 @@ class _DashboardScreenState extends State<DashboardScreen>
     } catch (_) {
       devPreview = null;
     }
-    final isDev = _vm.isDeveloperAccount;
-    final redesignedActive = devPreview?.isRedesignedUiActiveFor(_vm.userEmail) ??
-        DeveloperPreviewConfig.isDeveloperEmail(_vm.userEmail);
+    final redesignedActive = devPreview?.isRedesignedUiActiveFor(_vm.userEmail) ?? true;
+    final hideBalances = _vm.hideBalances;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -233,19 +232,13 @@ class _DashboardScreenState extends State<DashboardScreen>
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
-                  if (isDev)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: _DeveloperPreviewRibbon(
-                        redesignedEnabled: redesignedActive,
-                        onToggle: devPreview?.toggleRedesignedUi,
-                      ),
-                    ),
                   if (redesignedActive)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 14),
                       child: _ExecutiveHeroCard(
                         metrics: metrics,
+                        hideBalances: hideBalances,
+                        onToggleHideBalances: _vm.toggleHideBalances,
                         onOpenReports: widget.onOpenReports,
                         onOpenKraTaxCenter: widget.onOpenKraTaxCenter,
                         onOpenStatements: widget.onOpenStatements,
@@ -284,7 +277,10 @@ class _DashboardScreenState extends State<DashboardScreen>
                         : const SizedBox.shrink(),
                   ),
                   if (!redesignedActive) ...[
-                    _KpiGrid(metrics: metrics),
+                    _KpiGrid(
+                      metrics: metrics,
+                      hideBalances: hideBalances,
+                    ),
                     const SizedBox(height: 16),
                     _QuickToolsCard(
                       overdueAlertsEnabled: _vm.overdueNotificationsEnabled,
@@ -308,6 +304,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     const SizedBox(height: 14),
                     _ExecutivePulseRow(
                       metrics: metrics,
+                      hideBalances: hideBalances,
                       onOpenInvoices: widget.onOpenInvoicesTab,
                       onOpenKraTaxCenter: widget.onOpenKraTaxCenter,
                       onOpenExpenses: widget.onOpenExpensesHub != null
@@ -317,12 +314,15 @@ class _DashboardScreenState extends State<DashboardScreen>
                     const SizedBox(height: 14),
                     _CashflowTrendCard(
                       trend: metrics.monthlyTrend,
+                      hideBalances: hideBalances,
+                      onToggleHideBalances: _vm.toggleHideBalances,
                       onOpenReports: widget.onOpenReports,
                     ),
                     const SizedBox(height: 14),
                     _TopClientsMonthCard(
                       clients: metrics.topClients,
                       totalMonthRevenue: metrics.thisMonthRevenue,
+                      hideBalances: hideBalances,
                       onOpenStatements: widget.onOpenStatements,
                     ),
                     const SizedBox(height: 14),
@@ -331,6 +331,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     invoices: metrics.recentInvoices,
                     restaurantNameBuilder: _vm.restaurantDisplayName,
                     redesigned: redesignedActive,
+                    hideBalances: hideBalances,
                     onViewAll: widget.onOpenInvoicesTab,
                     onOpenInvoice: widget.onOpenInvoice,
                     onCreateInvoice: widget.onCreateInvoice,
@@ -827,24 +828,35 @@ class _PendingClerkBanner extends StatelessWidget {
 }
 
 class _KpiGrid extends StatelessWidget {
-  const _KpiGrid({required this.metrics});
+  const _KpiGrid({
+    required this.metrics,
+    this.hideBalances = false,
+  });
 
   final DashboardMetrics metrics;
+  final bool hideBalances;
 
   @override
   Widget build(BuildContext context) {
-    final marginText = metrics.thisMonthMarginPercent != null
-        ? '${metrics.thisMonthMarginPercent!.toStringAsFixed(1)}% margin'
-        : 'No margin data yet';
+    final marginText = hideBalances
+        ? '••% margin'
+        : (metrics.thisMonthMarginPercent != null
+            ? '${metrics.thisMonthMarginPercent!.toStringAsFixed(1)}% margin'
+            : 'No margin data yet');
+    final pendingAmt = DashboardViewModel.formatMoneyOrMask(
+      metrics.pendingBillsAmount,
+      hidden: hideBalances,
+    );
     final pendingSubtitle = metrics.overdueBillsCount > 0
-        ? '${metrics.overdueBillsCount} overdue · KES ${DashboardViewModel.formatMoney(metrics.pendingBillsAmount)}'
-        : 'KES ${DashboardViewModel.formatMoney(metrics.pendingBillsAmount)}';
+        ? '${metrics.overdueBillsCount} overdue · KES $pendingAmt'
+        : 'KES $pendingAmt';
 
     final cards = [
       _KpiCardData(
         key: const Key('kpi_revenue'),
         title: 'Revenue (Month)',
-        value: 'KES ${DashboardViewModel.formatMoney(metrics.thisMonthRevenue)}',
+        value:
+            'KES ${DashboardViewModel.formatMoneyOrMask(metrics.thisMonthRevenue, hidden: hideBalances)}',
         subtitle:
             '${metrics.thisMonthInvoiceCount} ${metrics.thisMonthInvoiceCount == 1 ? 'invoice' : 'invoices'}',
         icon: Icons.trending_up_rounded,
@@ -854,7 +866,8 @@ class _KpiGrid extends StatelessWidget {
       _KpiCardData(
         key: const Key('kpi_profit'),
         title: 'Net Profit',
-        value: 'KES ${DashboardViewModel.formatMoney(metrics.thisMonthProfit)}',
+        value:
+            'KES ${DashboardViewModel.formatMoneyOrMask(metrics.thisMonthProfit, hidden: hideBalances)}',
         subtitle: marginText,
         icon: Icons.account_balance_wallet_outlined,
         accentColor: metrics.thisMonthProfit >= 0
@@ -1147,6 +1160,7 @@ class _RecentInvoicesSection extends StatelessWidget {
     required this.invoices,
     required this.restaurantNameBuilder,
     this.redesigned = false,
+    this.hideBalances = false,
     this.onViewAll,
     this.onOpenInvoice,
     this.onCreateInvoice,
@@ -1155,6 +1169,7 @@ class _RecentInvoicesSection extends StatelessWidget {
   final List<Invoice> invoices;
   final String Function(Invoice invoice) restaurantNameBuilder;
   final bool redesigned;
+  final bool hideBalances;
   final VoidCallback? onViewAll;
   final void Function(Invoice invoice)? onOpenInvoice;
   final VoidCallback? onCreateInvoice;
@@ -1306,7 +1321,7 @@ class _RecentInvoicesSection extends StatelessWidget {
                       ],
                     ),
                     subtitle: Text(
-                      '${inv.date} · Profit KES ${DashboardViewModel.formatMoney(inv.profit)}',
+                      '${inv.date} · Profit KES ${DashboardViewModel.formatMoneyOrMask(inv.profit, hidden: hideBalances)}',
                       style: TextStyle(
                         fontSize: 12,
                         color: AppTheme.slateMuted,
@@ -1320,7 +1335,7 @@ class _RecentInvoicesSection extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         Text(
-                          'KES ${DashboardViewModel.formatMoney(inv.totalSell)}',
+                          'KES ${DashboardViewModel.formatMoneyOrMask(inv.totalSell, hidden: hideBalances)}',
                           style: TextStyle(
                             fontWeight: FontWeight.w700,
                             fontSize: 13,
@@ -1376,91 +1391,11 @@ class _StatusBadge extends StatelessWidget {
   }
 }
 
-class _DeveloperPreviewRibbon extends StatelessWidget {
-  const _DeveloperPreviewRibbon({
-    required this.redesignedEnabled,
-    this.onToggle,
-  });
-
-  final bool redesignedEnabled;
-  final VoidCallback? onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      key: const Key('dev_preview_banner'),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF0F7F2),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFD5E5DA)),
-      ),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.tune_rounded,
-            size: 16,
-            color: Color(0xFF0F3D24),
-          ),
-          const SizedBox(width: 8),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Developer Preview · v1.2.2',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0F3D24),
-                  ),
-                ),
-                Text(
-                  'Private preview for onderegerald@gmail.com',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    color: AppTheme.slateMuted,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (onToggle != null) ...[
-            const SizedBox(width: 8),
-            InkWell(
-              key: const Key('btn_toggle_dev_ui_mode'),
-              borderRadius: BorderRadius.circular(20),
-              onTap: onToggle,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFFCCE0D2)),
-                ),
-                child: Text(
-                  redesignedEnabled ? 'UI v2' : 'Classic',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0F3D24),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _ExecutiveHeroCard extends StatelessWidget {
   const _ExecutiveHeroCard({
     required this.metrics,
+    this.hideBalances = false,
+    this.onToggleHideBalances,
     this.onOpenReports,
     this.onOpenKraTaxCenter,
     this.onOpenStatements,
@@ -1468,6 +1403,8 @@ class _ExecutiveHeroCard extends StatelessWidget {
   });
 
   final DashboardMetrics metrics;
+  final bool hideBalances;
+  final VoidCallback? onToggleHideBalances;
   final VoidCallback? onOpenReports;
   final VoidCallback? onOpenKraTaxCenter;
   final VoidCallback? onOpenStatements;
@@ -1478,9 +1415,11 @@ class _ExecutiveHeroCard extends StatelessWidget {
     final total = metrics.thisMonthInvoiceCount;
     final paid = metrics.thisMonthPaidCount;
     final ratio = total > 0 ? (paid / total).clamp(0.0, 1.0) : 0.0;
-    final marginLabel = metrics.thisMonthMarginPercent != null
-        ? '${metrics.thisMonthMarginPercent!.toStringAsFixed(1)}% margin'
-        : 'Margin N/A';
+    final marginLabel = hideBalances
+        ? '••% margin'
+        : (metrics.thisMonthMarginPercent != null
+            ? '${metrics.thisMonthMarginPercent!.toStringAsFixed(1)}% margin'
+            : 'Margin N/A');
     final revDelta = metrics.revenueChangePercent;
     final deltaPrefix = (revDelta ?? 0) >= 0 ? '+' : '';
     final deltaText = revDelta != null
@@ -1521,7 +1460,7 @@ class _ExecutiveHeroCard extends StatelessWidget {
                   ),
                 ),
               ),
-              if (deltaText != null) ...[
+              if (!hideBalances && deltaText != null) ...[
                 Container(
                   padding: const EdgeInsets.symmetric(
                     horizontal: 8,
@@ -1562,23 +1501,59 @@ class _ExecutiveHeroCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 10),
-          FittedBox(
-            fit: BoxFit.scaleDown,
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'KES ${DashboardViewModel.formatMoney(metrics.thisMonthRevenue)}',
-              style: const TextStyle(
-                fontSize: 27,
-                fontWeight: FontWeight.w800,
-                color: Colors.white,
-                letterSpacing: -0.6,
-                fontFeatures: [FontFeature.tabularFigures()],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerLeft,
+                  child: AnimatedSwitcher(
+                    duration: AppMotion.fast,
+                    child: Text(
+                      'KES ${DashboardViewModel.formatMoneyOrMask(metrics.thisMonthRevenue, hidden: hideBalances)}',
+                      key: ValueKey<bool>(hideBalances),
+                      style: const TextStyle(
+                        fontSize: 27,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                        letterSpacing: -0.6,
+                        fontFeatures: [FontFeature.tabularFigures()],
+                      ),
+                    ),
+                  ),
+                ),
               ),
-            ),
+              if (onToggleHideBalances != null) ...[
+                const SizedBox(width: 10),
+                Tooltip(
+                  message: hideBalances ? 'Show balances' : 'Hide balances',
+                  child: Material(
+                    color: Colors.white.withValues(alpha: 0.14),
+                    shape: const CircleBorder(),
+                    clipBehavior: Clip.antiAlias,
+                    child: InkWell(
+                      key: const Key('btn_toggle_metrics_privacy'),
+                      onTap: onToggleHideBalances,
+                      child: Padding(
+                        padding: const EdgeInsets.all(9),
+                        child: Icon(
+                          hideBalances
+                              ? Icons.visibility_off_outlined
+                              : Icons.visibility_outlined,
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
           const SizedBox(height: 5),
           Text(
-            'Net Profit: KES ${DashboardViewModel.formatMoney(metrics.thisMonthProfit)} · $paid/$total settled',
+            'Net Profit: KES ${DashboardViewModel.formatMoneyOrMask(metrics.thisMonthProfit, hidden: hideBalances)} · $paid/$total settled',
             style: const TextStyle(
               fontSize: 12.5,
               color: Color(0xFFD1FAE5),
@@ -1683,12 +1658,14 @@ class _HeroActionPill extends StatelessWidget {
 class _ExecutivePulseRow extends StatelessWidget {
   const _ExecutivePulseRow({
     required this.metrics,
+    this.hideBalances = false,
     this.onOpenInvoices,
     this.onOpenKraTaxCenter,
     this.onOpenExpenses,
   });
 
   final DashboardMetrics metrics;
+  final bool hideBalances;
   final VoidCallback? onOpenInvoices;
   final VoidCallback? onOpenKraTaxCenter;
   final VoidCallback? onOpenExpenses;
@@ -1702,9 +1679,11 @@ class _ExecutivePulseRow extends StatelessWidget {
         etimsTotal > 0 ? (etimsReady / etimsTotal).clamp(0.0, 1.0) : 0.0;
     final etimsPctLabel = '${(etimsRatio * 100).round()}%';
 
-    final expRatioLabel = metrics.thisMonthRevenue > 0
-        ? '${((metrics.thisMonthExpenses / metrics.thisMonthRevenue) * 100).toStringAsFixed(1)}% of revenue'
-        : 'Recorded this month';
+    final expRatioLabel = hideBalances
+        ? 'Amounts hidden'
+        : (metrics.thisMonthRevenue > 0
+            ? '${((metrics.thisMonthExpenses / metrics.thisMonthRevenue) * 100).toStringAsFixed(1)}% of revenue'
+            : 'Recorded this month');
 
     return Card(
       key: const Key('dev_executive_pulse_row'),
@@ -1737,7 +1716,7 @@ class _ExecutivePulseRow extends StatelessWidget {
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
                             child: Text(
-                              'KES ${DashboardViewModel.formatMoney(metrics.pendingBillsAmount)}',
+                              'KES ${DashboardViewModel.formatMoneyOrMask(metrics.pendingBillsAmount, hidden: hideBalances)}',
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w800,
@@ -1793,7 +1772,7 @@ class _ExecutivePulseRow extends StatelessWidget {
                             fit: BoxFit.scaleDown,
                             alignment: Alignment.centerLeft,
                             child: Text(
-                              'KES ${DashboardViewModel.formatMoney(metrics.thisMonthExpenses)}',
+                              'KES ${DashboardViewModel.formatMoneyOrMask(metrics.thisMonthExpenses, hidden: hideBalances)}',
                               style: const TextStyle(
                                 fontSize: 16,
                                 fontWeight: FontWeight.w800,
@@ -1888,10 +1867,14 @@ class _ExecutivePulseRow extends StatelessWidget {
 class _CashflowTrendCard extends StatelessWidget {
   const _CashflowTrendCard({
     required this.trend,
+    this.hideBalances = false,
+    this.onToggleHideBalances,
     this.onOpenReports,
   });
 
   final List<DashboardMonthPoint> trend;
+  final bool hideBalances;
+  final VoidCallback? onToggleHideBalances;
   final VoidCallback? onOpenReports;
 
   String _formatAxisCompact(double value) {
@@ -1963,7 +1946,55 @@ class _CashflowTrendCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 14),
-            if (!hasData)
+            if (hideBalances)
+              Container(
+                key: const Key('cashflow_hidden_placeholder'),
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 22,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF4F7F4),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE4EAE4)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.visibility_off_outlined,
+                      size: 20,
+                      color: AppTheme.slateMuted,
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Amounts hidden',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.slateMuted,
+                      ),
+                    ),
+                    if (onToggleHideBalances != null) ...[
+                      const SizedBox(height: 2),
+                      TextButton(
+                        onPressed: onToggleHideBalances,
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 4,
+                          ),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        child: const Text('Show'),
+                      ),
+                    ],
+                  ],
+                ),
+              )
+            else if (!hasData)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 14),
                 child: Text(
@@ -2151,11 +2182,13 @@ class _TopClientsMonthCard extends StatelessWidget {
   const _TopClientsMonthCard({
     required this.clients,
     this.totalMonthRevenue = 0,
+    this.hideBalances = false,
     this.onOpenStatements,
   });
 
   final List<DashboardTopClient> clients;
   final double totalMonthRevenue;
+  final bool hideBalances;
   final VoidCallback? onOpenStatements;
 
   @override
@@ -2239,7 +2272,9 @@ class _TopClientsMonthCard extends StatelessWidget {
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            'KES ${DashboardViewModel.formatMoney(c.revenue)}$shareText',
+                            hideBalances
+                                ? 'KES ${DashboardViewModel.maskedAmount}'
+                                : 'KES ${DashboardViewModel.formatMoney(c.revenue)}$shareText',
                             style: const TextStyle(
                               fontSize: 12.5,
                               fontWeight: FontWeight.w700,
@@ -2253,7 +2288,7 @@ class _TopClientsMonthCard extends StatelessWidget {
                       ClipRRect(
                         borderRadius: BorderRadius.circular(4),
                         child: LinearProgressIndicator(
-                          value: barRatio,
+                          value: hideBalances ? 0.0 : barRatio,
                           minHeight: 4,
                           backgroundColor: const Color(0xFFEDF2ED),
                           valueColor: const AlwaysStoppedAnimation<Color>(
@@ -2264,7 +2299,9 @@ class _TopClientsMonthCard extends StatelessWidget {
                       if (c.unpaidAmount > 0) ...[
                         const SizedBox(height: 3),
                         Text(
-                          'KES ${DashboardViewModel.formatMoney(c.unpaidAmount)} unpaid balance',
+                          hideBalances
+                              ? 'KES ${DashboardViewModel.maskedAmount} unpaid balance'
+                              : 'KES ${DashboardViewModel.formatMoney(c.unpaidAmount)} unpaid balance',
                           style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,

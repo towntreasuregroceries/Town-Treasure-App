@@ -2,8 +2,9 @@ import 'package:flutter/foundation.dart';
 
 import '../../data/services/remote_update_service.dart';
 
-/// Controls developer-only preview access for redesigned UI themes/widgets and
-/// isolated preview OTA manifest routing before broad rollout to Veronica & staff.
+/// Controls developer-only preview OTA manifest routing (`dev-update.json`) and
+/// exposes the live Executive Dashboard UI toggle (`UI v2` default for all
+/// owners, with optional Classic UI comparison fallback for the developer).
 class DeveloperPreviewConfig {
   DeveloperPreviewConfig._();
 
@@ -30,16 +31,14 @@ class DeveloperPreviewConfig {
   }
 }
 
-/// Live toggle so the developer (`onderegerald@gmail.com`) can flip between the
-/// Redesigned v2 UI and Classic UI on-device while non-developer accounts always
-/// stay on the approved Classic UI.
+/// Official Executive Dashboard controller (`UI v2` enabled by default for all
+/// owner accounts, with a developer fallback toggle to compare Classic UI).
 class DeveloperPreviewController extends ChangeNotifier {
   bool _redesignedUiEnabled = true;
 
   bool get redesignedUiEnabled => _redesignedUiEnabled;
 
-  bool isRedesignedUiActiveFor(String? email) =>
-      DeveloperPreviewConfig.isDeveloperEmail(email) && _redesignedUiEnabled;
+  bool isRedesignedUiActiveFor(String? email) => _redesignedUiEnabled;
 
   void setRedesignedUiEnabled(bool enabled) {
     if (_redesignedUiEnabled == enabled) return;

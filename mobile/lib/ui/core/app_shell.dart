@@ -832,7 +832,7 @@ class _MoreHubScreen extends StatelessWidget {
     );
     final redesignedUi =
         devPreview?.isRedesignedUiActiveFor(dashboardViewModel.userEmail) ??
-            isDeveloper;
+            true;
     final binCount = vault.deletedInvoices.length +
         vault.deletedStaff.length +
         vault.deletedPriceLists.length;
@@ -925,11 +925,11 @@ class _MoreHubScreen extends StatelessWidget {
                           color: AppTheme.forestGreen,
                         ),
                         title: const Text(
-                          'Redesigned UI (v2 Preview)',
+                          'Executive Dashboard (UI v2)',
                           style: TextStyle(fontWeight: FontWeight.w700),
                         ),
                         subtitle: const Text(
-                          'Only visible to onderegerald@gmail.com · Toggle off to compare Classic UI',
+                          'Official default for all owners · Toggle off to compare Classic UI',
                           style: TextStyle(fontSize: 12),
                         ),
                         value: redesignedUi,
