@@ -287,6 +287,62 @@ class NotificationCenterSheet extends StatelessWidget {
                       label: const Text('Check for App Updates Now'),
                     ),
                   ],
+                  const SizedBox(height: 12),
+                  Card(
+                    elevation: 0,
+                    color: AppTheme.surfaceSage,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: const BorderSide(color: AppTheme.borderSubtle),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.schedule_send_outlined,
+                            color: AppTheme.forestGreen,
+                            size: 20,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  'Background Monitoring (Every 15 min)',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppTheme.slateInk,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  viewModel.lastBackgroundCheckLabel,
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: AppTheme.slateMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton(
+                            key: const Key('btn_test_bg_notifications'),
+                            onPressed: () async {
+                              await viewModel.triggerBackgroundAlertTest();
+                              if (context.mounted) {
+                                Navigator.of(context).pop();
+                              }
+                            },
+                            child: const Text('Test in 10s'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),

@@ -370,5 +370,58 @@ void main() {
       await tester.pumpAndSettle();
       expect(requestedFormats, [PdfPageFormat.a4, PdfPageFormat.roll80]);
     });
+
+    testWidgets('BrandedPdfViewerScreen uses a single unified Print button and hides split Wi-Fi button',
+        (tester) async {
+      final samplePng = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+      );
+      PrintPaperFormat? forwardedFormat;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Builder(
+            builder: (context) => BrandedPdfViewerScreen(
+              title: 'Unified Print Check',
+              filename: 'Unified.pdf',
+              initialPaperFormat: PrintPaperFormat.roll80,
+              buildPdf: (_) async => Uint8List.fromList([0x25, 0x50, 0x44, 0x46]),
+              rasterStreamProvider: (_, _) => Stream.fromIterable([
+                RasterizedPdfPage(pngBytes: samplePng, width: 226, height: 400),
+              ]),
+              onOpenPrintCenter: (fmt) {
+                forwardedFormat = fmt;
+                showPrintOptionsSheet(
+                  context,
+                  document: PrintableDocument(
+                    title: 'Unified Print Check',
+                    filename: 'Unified.pdf',
+                    buildPdf: (_) async =>
+                        Uint8List.fromList([0x25, 0x50, 0x44, 0x46]),
+                  ),
+                  initialPaperFormat: fmt,
+                  fromPreview: true,
+                  printService: PrintService(),
+                );
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('btn_viewer_print')), findsOneWidget);
+      expect(find.byKey(const Key('btn_viewer_wifi_print')), findsNothing);
+      expect(find.byKey(const Key('btn_viewer_share')), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('btn_viewer_print')));
+      await tester.pumpAndSettle();
+
+      expect(forwardedFormat, PrintPaperFormat.roll80);
+      expect(find.text('Print & Dispatch Center'), findsOneWidget);
+      expect(find.byKey(const Key('btn_print_preview')), findsNothing);
+      expect(find.byKey(const Key('btn_system_print')), findsOneWidget);
+    });
   });
 }

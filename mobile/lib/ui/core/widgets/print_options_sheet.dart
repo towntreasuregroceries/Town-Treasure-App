@@ -35,6 +35,8 @@ class PrintableDocument {
 Future<void> showPrintOptionsSheet(
   BuildContext context, {
   required PrintableDocument document,
+  PrintPaperFormat? initialPaperFormat,
+  bool fromPreview = false,
   PrintService? printService,
 }) {
   VaultRepository? vault;
@@ -56,6 +58,8 @@ Future<void> showPrintOptionsSheet(
       document: document,
       printService: printService ?? PrintService(),
       vault: vault,
+      initialPaperFormat: initialPaperFormat,
+      fromPreview: fromPreview,
     ),
   );
 }
@@ -66,11 +70,15 @@ class PrintOptionsSheet extends StatefulWidget {
     required this.document,
     required this.printService,
     this.vault,
+    this.initialPaperFormat,
+    this.fromPreview = false,
   });
 
   final PrintableDocument document;
   final PrintService printService;
   final VaultRepository? vault;
+  final PrintPaperFormat? initialPaperFormat;
+  final bool fromPreview;
 
   @override
   State<PrintOptionsSheet> createState() => _PrintOptionsSheetState();
@@ -92,6 +100,9 @@ class _PrintOptionsSheetState extends State<PrintOptionsSheet> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialPaperFormat != null) {
+      _paperFormat = widget.initialPaperFormat!;
+    }
     _loadSavedPrinter();
   }
 
@@ -114,7 +125,9 @@ class _PrintOptionsSheetState extends State<PrintOptionsSheet> {
       }
       _protocol = saved.protocol;
       _portCtrl.text = saved.port.toString();
-      if (widget.document.supportsThermalRoll || !saved.paperFormat.isThermalRoll) {
+      if (widget.initialPaperFormat == null &&
+          (widget.document.supportsThermalRoll ||
+              !saved.paperFormat.isThermalRoll)) {
         _paperFormat = saved.paperFormat;
       }
     });
@@ -467,12 +480,13 @@ class _PrintOptionsSheetState extends State<PrintOptionsSheet> {
                   icon: const Icon(Icons.print_outlined, size: 18),
                   label: const Text('System / Wi-Fi Print'),
                 ),
-                OutlinedButton.icon(
-                  key: const Key('btn_print_preview'),
-                  onPressed: _busy ? null : _handleInteractivePreview,
-                  icon: const Icon(Icons.visibility_outlined, size: 18),
-                  label: const Text('View PDF in App'),
-                ),
+                if (!widget.fromPreview)
+                  OutlinedButton.icon(
+                    key: const Key('btn_print_preview'),
+                    onPressed: _busy ? null : _handleInteractivePreview,
+                    icon: const Icon(Icons.visibility_outlined, size: 18),
+                    label: const Text('View PDF in App'),
+                  ),
                 OutlinedButton.icon(
                   key: const Key('btn_share_printer_app'),
                   onPressed: _busy ? null : _handleShareToPrinterApp,

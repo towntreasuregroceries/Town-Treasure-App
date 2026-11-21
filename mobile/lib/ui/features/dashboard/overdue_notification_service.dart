@@ -133,9 +133,11 @@ class FlutterLocalOverdueNotificationGateway
   final FlutterLocalNotificationsPlugin _plugin;
   bool _initialized = false;
 
-  @override
-  Future<bool> initializeAndRequestPermission() async {
-    if (kIsWeb) return false;
+  /// Initializes the local notification plugin and ensures all Android channels
+  /// exist without requiring an Activity/UI context (safe inside WorkManager
+  /// headless background isolates).
+  Future<void> initializeForBackground() async {
+    if (kIsWeb) return;
 
     if (!_initialized) {
       const androidSettings = AndroidInitializationSettings(
@@ -163,8 +165,75 @@ class FlutterLocalOverdueNotificationGateway
     final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
         AndroidFlutterLocalNotificationsPlugin>();
     if (androidPlugin != null) {
-      final granted = await androidPlugin.requestNotificationsPermission();
-      return granted ?? true;
+      const channels = [
+        AndroidNotificationChannel(
+          _channelId,
+          _channelName,
+          description: _channelDescription,
+          importance: Importance.high,
+        ),
+        AndroidNotificationChannel(
+          'ttg_app_updates',
+          'App Updates',
+          description: 'Silent background release update alerts.',
+          importance: Importance.high,
+        ),
+        AndroidNotificationChannel(
+          'ttg_clerk_submissions',
+          'Field Clerk Dockets',
+          description: 'Alerts when new field clerk dockets await approval.',
+          importance: Importance.high,
+        ),
+        AndroidNotificationChannel(
+          'ttg_bills_payroll',
+          'Payroll & Recurring Bills',
+          description: 'Reminders for staff paydays and recurring expenses.',
+          importance: Importance.high,
+        ),
+        AndroidNotificationChannel(
+          'ttg_sync_health',
+          'Cloud Sync Status',
+          description: 'Reminders when offline changes need cloud sync.',
+          importance: Importance.high,
+        ),
+        AndroidNotificationChannel(
+          'ttg_statements',
+          'Monthly Client Statements',
+          description: 'Start-of-month reminders to send client statements.',
+          importance: Importance.high,
+        ),
+        AndroidNotificationChannel(
+          'ttg_vault_expiry',
+          'Vault Document Expiries',
+          description:
+              'Alerts when personal or KRA compliance documents are expiring soon.',
+          importance: Importance.high,
+        ),
+      ];
+      for (final ch in channels) {
+        try {
+          await androidPlugin.createNotificationChannel(ch);
+        } catch (_) {}
+      }
+    }
+  }
+
+  @override
+  Future<bool> initializeAndRequestPermission() async {
+    if (kIsWeb) return false;
+
+    await initializeForBackground();
+
+    final androidPlugin = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (androidPlugin != null) {
+      try {
+        final granted = await androidPlugin.requestNotificationsPermission();
+        return granted ?? true;
+      } catch (_) {
+        // Headless WorkManager background isolates have no Activity to prompt.
+        return true;
+      }
     }
 
     return true;
@@ -175,7 +244,10 @@ class FlutterLocalOverdueNotificationGateway
     required int overdueCount,
     required int pendingCount,
   }) async {
-    if (overdueCount <= 0 && pendingCount <= 0) return;
+    if (kIsWeb || (overdueCount <= 0 && pendingCount <= 0)) return;
+    if (!_initialized) {
+      await initializeForBackground();
+    }
 
     final parts = <String>[];
     if (overdueCount > 0) {
@@ -219,7 +291,7 @@ class FlutterLocalOverdueNotificationGateway
   }) async {
     if (kIsWeb) return;
     if (!_initialized) {
-      await initializeAndRequestPermission();
+      await initializeForBackground();
     }
     final (channelId, channelName, channelDesc, id) = switch (category) {
       NotificationCategory.appUpdates => (

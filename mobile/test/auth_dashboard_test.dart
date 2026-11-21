@@ -15,6 +15,7 @@ import 'package:town_treasure_groceries/data/services/local_storage_service.dart
 import 'package:town_treasure_groceries/data/services/remote_update_service.dart';
 import 'package:town_treasure_groceries/data/services/supabase_service.dart';
 import 'package:town_treasure_groceries/domain/models/models.dart';
+import 'package:town_treasure_groceries/ui/core/developer_preview.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
 import 'package:town_treasure_groceries/ui/features/auth/auth_screen.dart';
 import 'package:town_treasure_groceries/ui/features/auth/auth_view_model.dart';
@@ -1280,6 +1281,131 @@ void main() {
       );
       expect(notifications.showCalls, 1);
       expect(notifications.categoryCalls.length, 5);
+    });
+
+    test(
+        'BackgroundAlertRunner detects >30-day overdue invoices even when status is pending',
+        () async {
+      final f = await _createFixture(fastCryptoForWidgetTest: false);
+      addTearDown(f.storage.close);
+      addTearDown(f.vault.dispose);
+
+      await f.auth.signIn('owner@ttg.test', 'vault-pass');
+      await f.storage.setRaw('ttg_overdue_notifications', 'true');
+      await f.vault.setInvoices([
+        const Invoice(
+          id: 'inv-old-pending',
+          number: 'TTG-999',
+          restaurantId: 'r1',
+          restaurantName: 'Legacy Hotel',
+          date: '2026-09-01',
+          totalSell: 12000,
+          totalBuy: 9000,
+          profit: 3000,
+          status: 'pending',
+        ),
+      ], sync: false);
+
+      final notifications = FakeOverdueNotificationGateway();
+      await BackgroundAlertRunner.runCheck(
+        storage: f.storage,
+        vault: f.vault,
+        supabase: f.supabase,
+        updateService: FakeRemoteUpdateService(
+          result: const UpdateCheckResult(
+            updateAvailable: false,
+            currentVersion: '1.2.1',
+            currentBuildNumber: 2015,
+          ),
+        ),
+        overdueNotifier: notifications,
+        smartNotifier: notifications,
+        clock: () => DateTime(2026, 11, 21, 10, 0),
+      );
+
+      expect(notifications.showCalls, 1);
+      expect(notifications.lastOverdueCount, 1);
+      expect(notifications.lastPendingCount, 1);
+    });
+
+    testWidgets(
+        'Developer-only Dashboard shows Executive Hero, Pulse Row, Top Clients, and Compact Utilities without duplicating KPI Grid',
+        (tester) async {
+      final f = await _createFixture();
+      addTearDown(f.storage.close);
+      addTearDown(f.vault.dispose);
+
+      f.supabase.user = const AuthUserInfo(
+        id: 'dev-1',
+        email: DeveloperPreviewConfig.developerEmail,
+      );
+      await f.storage.setUserId('dev-1');
+      await f.storage.setUserEmail(DeveloperPreviewConfig.developerEmail);
+
+      await f.vault.setInvoices([
+        const Invoice(
+          id: 'inv-dev-1',
+          number: 'TTG-201',
+          restaurantId: 'r1',
+          restaurantName: 'Serena Hotel',
+          date: '2026-11-18',
+          totalSell: 24000,
+          totalBuy: 18000,
+          profit: 6000,
+          status: 'paid',
+          cuInvoiceNumber: 'KRAMW001/201',
+          etimsQrData: 'https://etims.kra.go.ke/qr?Data=1',
+        ),
+        const Invoice(
+          id: 'inv-dev-2',
+          number: 'TTG-202',
+          restaurantId: 'r2',
+          restaurantName: 'Artisan Bistro',
+          date: '2026-11-19',
+          totalSell: 10000,
+          totalBuy: 7500,
+          profit: 2500,
+          status: 'pending',
+        ),
+      ], sync: false);
+
+      final devCtrl = DeveloperPreviewController();
+      final vm = DashboardViewModel(
+        vaultRepository: f.vault,
+        authRepository: f.auth,
+        stagingRepository: f.staging,
+        localStorage: f.storage,
+        notificationGateway: FakeOverdueNotificationGateway(),
+        clock: () => DateTime(2026, 11, 21),
+      );
+      addTearDown(vm.dispose);
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider.value(
+          value: devCtrl,
+          child: MaterialApp(
+            theme: AppTheme.redesignedLight(),
+            home: DashboardScreen(
+              viewModel: vm,
+              autoInitialize: false,
+            ),
+          ),
+        ),
+      );
+      await vm.initialize(syncRemote: false);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('dev_preview_banner')), findsOneWidget);
+      expect(find.byKey(const Key('dev_executive_hero_card')), findsOneWidget);
+      expect(find.byKey(const Key('dev_executive_pulse_row')), findsOneWidget);
+      expect(find.byKey(const Key('dev_top_clients_card')), findsOneWidget);
+      expect(find.byKey(const Key('kpi_revenue')), findsNothing);
+      expect(find.textContaining('Serena Hotel'), findsWidgets);
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('dev_quick_utilities_bar')),
+        250,
+      );
+      expect(find.byKey(const Key('dev_quick_utilities_bar')), findsOneWidget);
     });
   });
 }

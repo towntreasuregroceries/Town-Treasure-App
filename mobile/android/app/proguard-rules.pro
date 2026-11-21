@@ -10,6 +10,8 @@
 # Keep ONNX Runtime JNI and PaddleOCR channel classes intact under R8
 -keep class ai.onnxruntime.** { *; }
 -keep class com.towntreasuregroceries.town_treasure_groceries.** { *; }
+-keep class dev.fluttercommunity.workmanager.** { *; }
+-keep class com.dexterous.flutterlocalnotifications.** { *; }
 
 # Suppress R8 missing-class warnings for unused optional non-Latin ML Kit script modules
 -dontwarn com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions

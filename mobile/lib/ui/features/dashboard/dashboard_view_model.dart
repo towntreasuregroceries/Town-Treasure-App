@@ -18,6 +18,21 @@ import 'background_update_worker.dart';
 import 'excel_exporter.dart';
 import 'overdue_notification_service.dart';
 
+/// Summary of a client hotel/restaurant's activity in the current month.
+class DashboardTopClient {
+  const DashboardTopClient({
+    required this.name,
+    required this.revenue,
+    required this.unpaidAmount,
+    required this.invoiceCount,
+  });
+
+  final String name;
+  final double revenue;
+  final double unpaidAmount;
+  final int invoiceCount;
+}
+
 /// Immutable snapshot of Dashboard KPIs and recent activity.
 class DashboardMetrics {
   const DashboardMetrics({
@@ -30,6 +45,9 @@ class DashboardMetrics {
     required this.overdueBillsCount,
     required this.pendingBillsAmount,
     required this.recentInvoices,
+    this.thisMonthExpenses = 0,
+    this.thisMonthEtimsReadyCount = 0,
+    this.topClients = const [],
   });
 
   final double thisMonthRevenue;
@@ -41,6 +59,9 @@ class DashboardMetrics {
   final int overdueBillsCount;
   final double pendingBillsAmount;
   final List<Invoice> recentInvoices;
+  final double thisMonthExpenses;
+  final int thisMonthEtimsReadyCount;
+  final List<DashboardTopClient> topClients;
 }
 
 /// ViewModel for the Town Treasure Dashboard, mirroring `dashboard.js`,
@@ -107,6 +128,8 @@ class DashboardViewModel extends ChangeNotifier {
   bool _biometricEnabled = false;
   bool _canUseBiometrics = false;
   String? _userEmail;
+  String? _lastBgRunAt;
+  String? _lastBgRunStatus;
   String? _statusMessage;
   String? _errorMessage;
 
@@ -120,6 +143,19 @@ class DashboardViewModel extends ChangeNotifier {
   bool get biometricEnabled => _biometricEnabled;
   bool get canUseBiometrics => _canUseBiometrics;
   String? get userEmail => _userEmail;
+  String get lastBackgroundCheckLabel {
+    final raw = (_lastBgRunAt ?? '').trim();
+    if (raw.isEmpty) {
+      return 'Scheduled every 15 min (awaiting first background wake)';
+    }
+    final parsed = DateTime.tryParse(raw);
+    if (parsed == null) {
+      return 'Scheduled every 15 min';
+    }
+    final statusSuffix =
+        (_lastBgRunStatus ?? '').trim().isNotEmpty ? ' · ${_lastBgRunStatus!.trim()}' : '';
+    return 'Last wake: ${DateFormat('MMM d, HH:mm').format(parsed.toLocal())}$statusSuffix';
+  }
   bool get isDeveloperAccount =>
       DeveloperPreviewConfig.isDeveloperEmail(_userEmail);
   String get effectiveUpdateManifestUrl =>
@@ -369,6 +405,31 @@ class DashboardViewModel extends ChangeNotifier {
         return (b.createdAt ?? '').compareTo(a.createdAt ?? '');
       });
 
+    final etimsReadyCount = thisMonth.where((i) => i.isFiscalized).length;
+
+    final clientBuckets = <String, ({double rev, double unpaid, int count})>{};
+    for (final inv in thisMonth) {
+      final clientName = restaurantDisplayName(inv);
+      final cur = clientBuckets[clientName] ?? (rev: 0.0, unpaid: 0.0, count: 0);
+      final isUnpaid = inv.status == 'pending' || inv.status == 'overdue';
+      clientBuckets[clientName] = (
+        rev: cur.rev + inv.totalSell,
+        unpaid: cur.unpaid + (isUnpaid ? inv.totalSell : 0.0),
+        count: cur.count + 1,
+      );
+    }
+    final topClients = clientBuckets.entries
+        .map(
+          (e) => DashboardTopClient(
+            name: e.key,
+            revenue: e.value.rev,
+            unpaidAmount: e.value.unpaid,
+            invoiceCount: e.value.count,
+          ),
+        )
+        .toList()
+      ..sort((a, b) => b.revenue.compareTo(a.revenue));
+
     return DashboardMetrics(
       thisMonthRevenue: totalSales,
       thisMonthProfit: netProfit,
@@ -379,6 +440,9 @@ class DashboardViewModel extends ChangeNotifier {
       overdueBillsCount: overdueCount,
       pendingBillsAmount: pendingAmount,
       recentInvoices: recent.take(8).toList(),
+      thisMonthExpenses: thisMonthExpenses,
+      thisMonthEtimsReadyCount: etimsReadyCount,
+      topClients: topClients.take(4).toList(),
     );
   }
 
@@ -393,6 +457,16 @@ class DashboardViewModel extends ChangeNotifier {
     _biometricEnabled = await _auth.isBiometricEnabled();
 
     await _loadNotificationPrefs();
+
+    if (_notificationPrefs.appUpdatesEnabled ||
+        _notificationPrefs.clerkAlertsEnabled ||
+        _notificationPrefs.overdueAlertsEnabled ||
+        _notificationPrefs.payrollAndBillsEnabled ||
+        _notificationPrefs.statementAlertsEnabled) {
+      try {
+        await _notifications.initializeAndRequestPermission();
+      } catch (_) {}
+    }
 
     if (syncRemote) {
       await _vault.loadFromSupabase();
@@ -413,6 +487,8 @@ class DashboardViewModel extends ChangeNotifier {
 
   Future<void> _loadNotificationPrefs() async {
     if (_storage == null) return;
+    _lastBgRunAt = await _storage.getRaw(ttgKeyLastBgRunAt);
+    _lastBgRunStatus = await _storage.getRaw(ttgKeyLastBgRunStatus);
     final rawToggle = await _storage.getRaw(keyOverdueNotifications);
     final legacyEnabled = rawToggle == 'true';
     final rawPrefs = await _storage.getRaw(ttgKeyNotifPrefs);
@@ -609,6 +685,26 @@ class DashboardViewModel extends ChangeNotifier {
       keyLastPendingNotificationAt,
       now.toUtc().toIso8601String(),
     );
+  }
+
+  /// Schedules a 10-second one-off WorkManager task so the user can close the
+  /// app and confirm background notifications arrive from the Android OS.
+  Future<void> triggerBackgroundAlertTest() async {
+    _errorMessage = null;
+    _statusMessage = null;
+    final granted = await _notifications.initializeAndRequestPermission();
+    if (!granted) {
+      _errorMessage =
+          'Please allow Notifications in Android settings to receive background alerts.';
+      notifyListeners();
+      return;
+    }
+    await BackgroundUpdateWorker.scheduleOneOffVerificationTest(
+      manifestUrl: effectiveUpdateManifestUrl,
+    );
+    _statusMessage =
+        'Background test scheduled — close the app now; notification arrives in ~10s.';
+    notifyListeners();
   }
 
   Future<void> refresh() async {

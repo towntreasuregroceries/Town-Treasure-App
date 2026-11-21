@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:ui';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -7,30 +8,41 @@ import 'package:workmanager/workmanager.dart';
 
 import '../../../data/repositories/staging_repository.dart';
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/services/cloudflare_backend_service.dart';
 import '../../../data/services/crypto_service.dart';
 import '../../../data/services/local_storage_service.dart';
 import '../../../data/services/remote_update_service.dart';
-import '../../../data/services/cloudflare_backend_service.dart';
 import '../../../data/services/supabase_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/developer_preview.dart';
 import 'overdue_notification_service.dart';
 
 const String ttgBackgroundUpdateTask = 'ttg_periodic_update_check';
+const String ttgBackgroundOneOffTestTask = 'ttg_background_alert_test';
 const String ttgDefaultManifestUrl =
     'https://towntreasuregroceries.github.io/Town-Treasure-App/app-update.json';
 const String ttgKeyNotifPrefs = 'ttg_notif_prefs';
 const String ttgKeyLastNotifiedUpdateBuild = 'ttg_last_notified_update_build';
+const String ttgKeyLastBgRunAt = 'ttg_last_bg_run_at';
+const String ttgKeyLastBgRunStatus = 'ttg_last_bg_run_status';
+const String ttgKeyBgWorkerVersion = 'ttg_bg_worker_version';
 
 @pragma('vm:entry-point')
 void ttgBackgroundCallbackDispatcher() {
   Workmanager().executeTask((task, inputData) async {
+    LocalStorageService? storage;
     try {
       WidgetsFlutterBinding.ensureInitialized();
-      if (task != ttgBackgroundUpdateTask) return true;
+      DartPluginRegistrant.ensureInitialized();
+      if (task != ttgBackgroundUpdateTask && task != ttgBackgroundOneOffTestTask) {
+        return true;
+      }
 
-      final storage = LocalStorageService();
+      storage = LocalStorageService();
       await storage.init();
+      final notifier = FlutterLocalOverdueNotificationGateway();
+      await notifier.initializeForBackground();
+
       try {
         try {
           await SupabaseService.initialize();
@@ -47,7 +59,6 @@ void ttgBackgroundCallbackDispatcher() {
         );
         await vault.loadFromLocalCache();
 
-        final notifier = FlutterLocalOverdueNotificationGateway();
         final manifestUrl =
             (inputData?['manifestUrl'] as String?)?.trim() ?? '';
 
@@ -60,12 +71,40 @@ void ttgBackgroundCallbackDispatcher() {
           smartNotifier: notifier,
           manifestUrl: manifestUrl.isNotEmpty ? manifestUrl : ttgDefaultManifestUrl,
         );
+        if (task == ttgBackgroundOneOffTestTask) {
+          await notifier.showCategoryNotification(
+            category: NotificationCategory.syncHealth,
+            title: 'Background Alerts Active',
+            body:
+                'Town Treasure background monitoring ran successfully while the app was closed.',
+          );
+        }
+        await storage.setRaw(
+          ttgKeyLastBgRunAt,
+          DateTime.now().toUtc().toIso8601String(),
+        );
+        await storage.setRaw(ttgKeyLastBgRunStatus, 'ok');
         vault.dispose();
+      } catch (e) {
+        await storage.setRaw(
+          ttgKeyLastBgRunAt,
+          DateTime.now().toUtc().toIso8601String(),
+        );
+        await storage.setRaw(
+          ttgKeyLastBgRunStatus,
+          'error: ${e.toString().split('\n').first}',
+        );
       } finally {
         // Keep the shared SQLite handle open so foreground VaultRepository never hits database_closed.
       }
-    } catch (_) {
-      // Background failures are silently retried on the next 30-min WorkManager window.
+    } catch (e) {
+      try {
+        await storage?.setRaw(
+          ttgKeyLastBgRunAt,
+          DateTime.now().toUtc().toIso8601String(),
+        );
+        await storage?.setRaw(ttgKeyLastBgRunStatus, 'error: $e');
+      } catch (_) {}
     }
     return true;
   });
@@ -108,8 +147,13 @@ class BackgroundAlertRunner {
       final pendingBills = nonDrafts
           .where((i) => i.status == 'pending' || i.status == 'overdue')
           .toList();
-      final overdueCount =
-          pendingBills.where((i) => i.status == 'overdue').length;
+      final overdueCount = pendingBills.where((i) {
+        if (i.status == 'overdue') return true;
+        final due = AppHelpers.parseAppDate(i.dueDate);
+        if (due != null && due.isBefore(now)) return true;
+        final invDate = AppHelpers.parseAppDate(i.date);
+        return invDate != null && now.difference(invDate).inDays > 30;
+      }).length;
       if (pendingBills.isNotEmpty) {
         final rawLast = await storage.getRaw(_keyLastPendingAt);
         final lastAt = DateTime.tryParse(rawLast ?? '');
@@ -326,30 +370,67 @@ class BackgroundAlertRunner {
   }
 }
 
-/// Schedules Android WorkManager background monitoring every 30 minutes so
+/// Schedules Android WorkManager background monitoring every 15 minutes so
 /// clerk dockets, overdue bills, payroll, recurring bills, statements, and app
 /// updates notify Veronica even when the app is completely closed or inactive.
 class BackgroundUpdateWorker {
   BackgroundUpdateWorker._();
 
+  static bool _workerInitialized = false;
+
+  static Future<void> _ensureWorkerInitialized() async {
+    if (_workerInitialized) return;
+    await Workmanager().initialize(ttgBackgroundCallbackDispatcher);
+    _workerInitialized = true;
+  }
+
   static Future<void> initializeAndSchedule({
     String manifestUrl = ttgDefaultManifestUrl,
+    LocalStorageService? localStorage,
   }) async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
     try {
-      await Workmanager().initialize(ttgBackgroundCallbackDispatcher);
+      await _ensureWorkerInitialized();
+      final storage = localStorage ?? LocalStorageService();
+      if (localStorage == null) {
+        await storage.init();
+      }
+      final currentVer = await storage.getRaw(ttgKeyBgWorkerVersion) ?? '';
+      final policy = currentVer == '2'
+          ? ExistingPeriodicWorkPolicy.keep
+          : ExistingPeriodicWorkPolicy.update;
       await Workmanager().registerPeriodicTask(
         ttgBackgroundUpdateTask,
         ttgBackgroundUpdateTask,
-        frequency: const Duration(minutes: 30),
-        existingWorkPolicy: ExistingPeriodicWorkPolicy.update,
+        frequency: const Duration(minutes: 15),
+        existingWorkPolicy: policy,
+        backoffPolicy: BackoffPolicy.exponential,
         constraints: Constraints(
           networkType: NetworkType.notRequired,
         ),
         inputData: <String, dynamic>{'manifestUrl': manifestUrl},
       );
+      if (currentVer != '2') {
+        await storage.setRaw(ttgKeyBgWorkerVersion, '2');
+      }
     } catch (_) {
       // Never block app startup if background scheduler is unavailable.
     }
+  }
+
+  /// Schedules a 10-second one-off WorkManager task so the user can close the
+  /// app and verify real closed-app OS notifications end-to-end.
+  static Future<void> scheduleOneOffVerificationTest({
+    String manifestUrl = ttgDefaultManifestUrl,
+  }) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    await _ensureWorkerInitialized();
+    await Workmanager().registerOneOffTask(
+      'ttg_bg_test_once',
+      ttgBackgroundOneOffTestTask,
+      initialDelay: const Duration(seconds: 10),
+      existingWorkPolicy: ExistingWorkPolicy.replace,
+      inputData: <String, dynamic>{'manifestUrl': manifestUrl},
+    );
   }
 }

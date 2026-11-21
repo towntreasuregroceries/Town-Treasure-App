@@ -51,7 +51,7 @@ class BrandedPdfViewerScreen extends StatefulWidget {
   final bool supportsThermalRoll;
   final PrintService? printService;
   final PdfRasterStreamProvider? rasterStreamProvider;
-  final VoidCallback? onOpenPrintCenter;
+  final void Function(PrintPaperFormat format)? onOpenPrintCenter;
 
   @override
   State<BrandedPdfViewerScreen> createState() => _BrandedPdfViewerScreenState();
@@ -368,20 +368,19 @@ class _BrandedPdfViewerScreenState extends State<BrandedPdfViewerScreen> {
               Expanded(
                 child: FilledButton.icon(
                   key: const Key('btn_viewer_print'),
-                  onPressed: _actionBusy ? null : _handleSystemPrint,
+                  onPressed: _actionBusy
+                      ? null
+                      : () {
+                          if (widget.onOpenPrintCenter != null) {
+                            widget.onOpenPrintCenter!(_paperFormat);
+                          } else {
+                            _handleSystemPrint();
+                          }
+                        },
                   icon: const Icon(Icons.print_outlined, size: 18),
                   label: const Text('Print'),
                 ),
               ),
-              if (widget.onOpenPrintCenter != null) ...[
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  key: const Key('btn_viewer_wifi_print'),
-                  onPressed: _actionBusy ? null : widget.onOpenPrintCenter,
-                  icon: const Icon(Icons.wifi_outlined, size: 18),
-                  label: const Text('Wi-Fi'),
-                ),
-              ],
               const SizedBox(width: 8),
               OutlinedButton.icon(
                 key: const Key('btn_viewer_share'),

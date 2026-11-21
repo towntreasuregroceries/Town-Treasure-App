@@ -129,7 +129,18 @@ class SupabaseService implements SupabaseGateway {
 
   @override
   Future<String?> getAccessToken() async {
-    return client.auth.currentSession?.accessToken;
+    var session = client.auth.currentSession;
+    if (session != null) {
+      final expiresAt = session.expiresAt;
+      final nowSec = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      if (expiresAt != null && expiresAt - nowSec <= 90) {
+        try {
+          final refreshed = await client.auth.refreshSession();
+          session = refreshed.session ?? session;
+        } catch (_) {}
+      }
+    }
+    return session?.accessToken;
   }
 
   @override

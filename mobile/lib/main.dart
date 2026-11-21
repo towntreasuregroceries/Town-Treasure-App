@@ -54,7 +54,9 @@ Future<void> main() async {
   final ocrService = OcrConsensusService();
   final duplicateDetectorService = DuplicateDetectorService();
 
-  await BackgroundUpdateWorker.initializeAndSchedule();
+  await BackgroundUpdateWorker.initializeAndSchedule(
+    localStorage: localStorageService,
+  );
 
   runApp(
     TownTreasureApp(

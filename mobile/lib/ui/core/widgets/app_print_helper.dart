@@ -25,9 +25,11 @@ class AppPrintHelper {
           supportsThermalRoll: document.supportsThermalRoll,
           buildPdf: document.buildPdf,
           printService: printService,
-          onOpenPrintCenter: () => showPrintOptionsSheet(
+          onOpenPrintCenter: (fmt) => showPrintOptionsSheet(
             viewerCtx,
             document: document,
+            initialPaperFormat: fmt,
+            fromPreview: true,
             printService: printService,
           ),
         ),
