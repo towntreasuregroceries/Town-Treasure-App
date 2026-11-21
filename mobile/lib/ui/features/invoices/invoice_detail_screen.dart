@@ -7,8 +7,9 @@ import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/print_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/widgets/branded_pdf_viewer_screen.dart';
+import '../../core/widgets/app_print_helper.dart';
 import '../../core/widgets/print_options_sheet.dart';
+import '../kra/kra_tax_center_screen.dart';
 import 'invoice_editor_screen.dart';
 import 'invoice_formatters.dart';
 import 'invoice_pdf_builder.dart';
@@ -117,6 +118,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
       buildEscPos: (cols) => EscPosReceiptBuilder.buildInvoicesReceipt(
         invoices: [inv],
         restaurants: vault.restaurants,
+        settings: vault.settings,
         lineWidth: cols,
       ),
     );
@@ -125,25 +127,12 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   Future<void> _handleViewPdf(Invoice inv, Restaurant? rest) async {
     final vault = context.read<VaultRepository>();
     final doc = _buildPrintableDoc(inv, rest, vault);
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        builder: (viewerCtx) => BrandedPdfViewerScreen(
-          title: doc.title,
-          filename: doc.filename,
-          supportsThermalRoll: doc.supportsThermalRoll,
-          buildPdf: doc.buildPdf,
-          onOpenPrintCenter: () => showPrintOptionsSheet(
-            viewerCtx,
-            document: doc,
-          ),
-        ),
-      ),
-    );
+    await AppPrintHelper.openPreview(context, document: doc);
   }
 
   Future<void> _handlePrintPdf(Invoice inv, Restaurant? rest) async {
     final vault = context.read<VaultRepository>();
-    await showPrintOptionsSheet(
+    await AppPrintHelper.openPrintCenter(
       context,
       document: _buildPrintableDoc(inv, rest, vault),
     );
@@ -181,7 +170,102 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     }
   }
 
-  Future<void> _handleDelete(Invoice inv) async {
+  Future<bool> _confirmFiscalizedAction(
+    Invoice inv,
+    VaultRepository vault,
+    String verb,
+  ) async {
+    if (!inv.isFiscalized) return true;
+    final hasLiveOscu = (inv.etimsInvcNo ?? 0) > 0;
+    final choice = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('eTIMS Invoice Locked'),
+        content: Text(
+          'Invoice ${inv.number} already has an official KRA eTIMS record (${inv.cuInvoiceNumber}). '
+          'In KRA rules, issued invoices cannot be ${verb.toLowerCase()} directly — issue a Credit Note in KRA Tax Center instead.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop('cancel'),
+            child: const Text('Close'),
+          ),
+          if (!hasLiveOscu)
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop('unlock'),
+              child: Text('$verb Manual Entry'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop('kra'),
+            child: const Text('Open KRA Tax Center'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return false;
+    if (choice == 'kra') {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => KraTaxCenterScreen(vault: vault),
+        ),
+      );
+      return false;
+    }
+    return choice == 'unlock';
+  }
+
+  Future<void> _handleIssueDailyEtims(Invoice inv, VaultRepository vault) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirm Invoice Before eTIMS'),
+        content: Text(
+          'Check that items, weights, and prices for ${inv.number} (${inv.restaurantName}) are final. '
+          'Once eTIMS is issued, this invoice will be locked.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Review First'),
+          ),
+          FilledButton(
+            key: const Key('btn_confirm_issue_daily_etims'),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Continue to eTIMS'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !mounted) return;
+    await KraTaxCenterScreen.showInvoiceEtimsSheet(
+      context,
+      vault: vault,
+      invoice: inv,
+      onFeedback: (msg, {isError = false}) => _showSnack(msg, isError: isError),
+    );
+  }
+
+  Future<void> _handleEdit(Invoice inv, VaultRepository vault) async {
+    if (!await _confirmFiscalizedAction(inv, vault, 'Edit')) return;
+    if (!mounted) return;
+    if (widget.onEdit != null) {
+      widget.onEdit!(inv);
+      return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => InvoiceEditorScreen(
+          viewModel: _vm,
+          initialInvoice: inv,
+          onOpenScanner: widget.onOpenScanner,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _handleDelete(Invoice inv, VaultRepository vault) async {
+    if (!await _confirmFiscalizedAction(inv, vault, 'Delete')) return;
+    if (!mounted) return;
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -240,27 +324,15 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
             actions: [
               IconButton(
                 tooltip: 'Edit invoice',
-                icon: const Icon(Icons.edit_outlined),
-                onPressed: () {
-                  if (widget.onEdit != null) {
-                    widget.onEdit!(inv);
-                    return;
-                  }
-                  Navigator.of(context).push(
-                    MaterialPageRoute<void>(
-                      builder: (_) => InvoiceEditorScreen(
-                        viewModel: _vm,
-                        initialInvoice: inv,
-                        onOpenScanner: widget.onOpenScanner,
-                      ),
-                    ),
-                  );
-                },
+                icon: Icon(
+                  inv.isFiscalized ? Icons.lock_outline : Icons.edit_outlined,
+                ),
+                onPressed: () => _handleEdit(inv, vault),
               ),
               IconButton(
                 tooltip: 'Delete invoice',
                 icon: const Icon(Icons.delete_outline),
-                onPressed: () => _handleDelete(inv),
+                onPressed: () => _handleDelete(inv, vault),
               ),
             ],
           ),
@@ -330,6 +402,77 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: [
+              if (inv.isFiscalized)
+                Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  color: AppTheme.sageTint,
+                  child: ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.qr_code_2, color: AppTheme.forestGreen),
+                    title: Text(
+                      inv.hasCreditNote
+                          ? 'eTIMS Reversed (Credit Note Issued)'
+                          : 'eTIMS QR Issued',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.forestGreenDeep,
+                      ),
+                    ),
+                    subtitle: Text(
+                      'CU: ${inv.cuInvoiceNumber ?? ''}${inv.hasCreditNote ? ' · CN: ${inv.etimsCreditNoteCuNo}' : ''}',
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    trailing: TextButton(
+                      onPressed: () => KraTaxCenterScreen.showInvoiceEtimsSheet(
+                        context,
+                        vault: vault,
+                        invoice: inv,
+                        onFeedback: (msg, {isError = false}) =>
+                            _showSnack(msg, isError: isError),
+                      ),
+                      child: const Text('View'),
+                    ),
+                  ),
+                )
+              else if (!inv.isDraft && rest?.etimsCadence == EtimsCadence.daily)
+                Card(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  color: AppTheme.warningSurface,
+                  child: ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.qr_code_scanner, color: AppTheme.warning),
+                    title: const Text(
+                      'Daily eTIMS QR Needed',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: const Text(
+                      'Confirm quantities & prices before issuing KRA eTIMS.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                    trailing: FilledButton(
+                      key: const Key('btn_invoice_detail_issue_etims'),
+                      onPressed: () => _handleIssueDailyEtims(inv, vault),
+                      child: const Text('Issue eTIMS'),
+                    ),
+                  ),
+                )
+              else if (!inv.isDraft && rest?.etimsCadence == EtimsCadence.monthly)
+                const Card(
+                  margin: EdgeInsets.only(bottom: 12),
+                  color: AppTheme.infoSurface,
+                  child: ListTile(
+                    dense: true,
+                    leading: Icon(Icons.apartment_outlined, color: AppTheme.info),
+                    title: Text(
+                      'Monthly Statement eTIMS Client',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      'Combined at month-end under KRA & eTIMS Tax -> Monthly Hotel.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
+                ),
               Card(
                 clipBehavior: Clip.antiAlias,
                 child: Column(

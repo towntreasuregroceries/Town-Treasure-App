@@ -14,6 +14,8 @@ class Expense {
     required this.amount,
     this.inputVatAmount,
     this.supplierKraPin,
+    this.supplierName,
+    this.supplierCuInvoiceNumber,
     this.createdAt,
     this.updatedAt,
   });
@@ -29,6 +31,8 @@ class Expense {
   final double amount;
   final double? inputVatAmount;
   final String? supplierKraPin;
+  final String? supplierName;
+  final String? supplierCuInvoiceNumber;
   final String? createdAt;
   final String? updatedAt;
 
@@ -37,6 +41,8 @@ class Expense {
   factory Expense.fromJson(Map<String, dynamic> json) {
     final rawVat = json['inputVatAmount'];
     final rawPin = json['supplierKraPin']?.toString().trim();
+    final rawSupName = json['supplierName']?.toString().trim();
+    final rawSupCu = json['supplierCuInvoiceNumber']?.toString().trim();
     return Expense(
       id: (json['id'] ?? '').toString(),
       invId: json['invId']?.toString(),
@@ -51,6 +57,10 @@ class Expense {
           rawVat != null ? AppHelpers.parseDouble(rawVat) : null,
       supplierKraPin:
           (rawPin != null && rawPin.isNotEmpty) ? rawPin : null,
+      supplierName:
+          (rawSupName != null && rawSupName.isNotEmpty) ? rawSupName : null,
+      supplierCuInvoiceNumber:
+          (rawSupCu != null && rawSupCu.isNotEmpty) ? rawSupCu : null,
       createdAt: json['createdAt']?.toString(),
       updatedAt: json['updatedAt']?.toString(),
     );
@@ -71,6 +81,11 @@ class Expense {
         'inputVatAmount': inputVatAmount,
       if (supplierKraPin != null && supplierKraPin!.isNotEmpty)
         'supplierKraPin': supplierKraPin,
+      if (supplierName != null && supplierName!.isNotEmpty)
+        'supplierName': supplierName,
+      if (supplierCuInvoiceNumber != null &&
+          supplierCuInvoiceNumber!.isNotEmpty)
+        'supplierCuInvoiceNumber': supplierCuInvoiceNumber,
       if (createdAt != null) 'createdAt': createdAt,
       if (updatedAt != null) 'updatedAt': updatedAt,
     };
@@ -88,6 +103,8 @@ class Expense {
     double? amount,
     double? inputVatAmount,
     String? supplierKraPin,
+    String? supplierName,
+    String? supplierCuInvoiceNumber,
     String? createdAt,
     String? updatedAt,
   }) {
@@ -103,6 +120,9 @@ class Expense {
       amount: amount ?? this.amount,
       inputVatAmount: inputVatAmount ?? this.inputVatAmount,
       supplierKraPin: supplierKraPin ?? this.supplierKraPin,
+      supplierName: supplierName ?? this.supplierName,
+      supplierCuInvoiceNumber:
+          supplierCuInvoiceNumber ?? this.supplierCuInvoiceNumber,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

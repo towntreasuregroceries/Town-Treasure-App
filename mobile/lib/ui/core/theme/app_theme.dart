@@ -198,4 +198,113 @@ class AppTheme {
       ),
     );
   }
+
+  /// Redesigned modern executive botanical theme previewed exclusively for the
+  /// developer account before rolling out broadly.
+  static ThemeData redesignedLight() {
+    const obsidianGreen = Color(0xFF0F3D24);
+    const emeraldAccent = Color(0xFF166534);
+    const mistBg = Color(0xFFF6F8F6);
+    const softBorder = Color(0xFFE2EAE2);
+
+    final base = light();
+    final scheme = base.colorScheme.copyWith(
+      primary: obsidianGreen,
+      secondary: emeraldAccent,
+      primaryContainer: const Color(0xFFDCFCE7),
+      onPrimaryContainer: obsidianGreen,
+      surfaceContainerLow: mistBg,
+      outline: softBorder,
+    );
+
+    return base.copyWith(
+      colorScheme: scheme,
+      scaffoldBackgroundColor: mistBg,
+      appBarTheme: const AppBarTheme(
+        backgroundColor: obsidianGreen,
+        foregroundColor: Colors.white,
+        elevation: 0,
+        scrolledUnderElevation: 1,
+        centerTitle: false,
+        titleTextStyle: TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.w800,
+          color: Colors.white,
+          letterSpacing: -0.3,
+        ),
+      ),
+      cardTheme: CardThemeData(
+        color: surfaceCard,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0.6,
+        shadowColor: const Color(0x140F3D24),
+        margin: EdgeInsets.zero,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: const BorderSide(color: softBorder),
+        ),
+      ),
+      inputDecorationTheme: base.inputDecorationTheme.copyWith(
+        fillColor: const Color(0xFFF9FBF9),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: softBorder),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: softBorder),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: emeraldAccent, width: 1.8),
+        ),
+      ),
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          backgroundColor: obsidianGreen,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          textStyle: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
+          ),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          foregroundColor: obsidianGreen,
+          side: const BorderSide(color: softBorder),
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+        ),
+      ),
+      chipTheme: base.chipTheme.copyWith(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+        ),
+      ),
+      navigationBarTheme: NavigationBarThemeData(
+        height: 68,
+        backgroundColor: surfaceCard,
+        indicatorColor: const Color(0xFFDCFCE7),
+        labelTextStyle: WidgetStateProperty.resolveWith((states) {
+          final selected = states.contains(WidgetState.selected);
+          return TextStyle(
+            fontSize: 12,
+            fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
+            color: selected ? obsidianGreen : slateMuted,
+          );
+        }),
+      ),
+      dividerTheme: const DividerThemeData(
+        color: softBorder,
+        thickness: 1,
+      ),
+    );
+  }
 }

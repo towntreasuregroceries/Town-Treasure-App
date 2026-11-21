@@ -12,6 +12,7 @@ class VaultSettings {
 
   static const String keyKraProfile = 'kraProfile';
   static const String keyMonthlyEtims = 'kraMonthlyEtims';
+  static const String keyTaxableKeywords = 'kraTaxableKeywords';
   static const String keyPersonalDocs = 'personalDocs';
   static const String keyPersonalDocsWorkerUrl = 'personalDocsWorkerUrl';
 
@@ -29,6 +30,17 @@ class VaultSettings {
 
   String get personalDocsWorkerUrl =>
       (extra[keyPersonalDocsWorkerUrl] ?? '').toString().trim();
+
+  /// Self-learned keywords for items that carry 16% VAT.
+  List<String> get kraTaxableKeywords {
+    final raw = extra[keyTaxableKeywords];
+    if (raw is! List) return const [];
+    return raw
+        .map((e) => (e ?? '').toString().trim().toLowerCase())
+        .where((e) => e.length >= 3)
+        .toSet()
+        .toList();
+  }
 
   /// Returns all saved consolidated monthly client eTIMS records.
   List<MonthlyClientEtims> get monthlyEtimsRecords {
@@ -137,6 +149,18 @@ class VaultSettings {
     final nowIso = DateTime.now().toUtc().toIso8601String();
     final nextExtra = Map<String, dynamic>.from(extra);
     nextExtra[keyMonthlyEtims] = records.map((r) => r.toJson()).toList();
+    return copyWith(updatedAt: nowIso, extra: nextExtra);
+  }
+
+  VaultSettings withKraTaxableKeywords(List<String> keywords) {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final nextExtra = Map<String, dynamic>.from(extra);
+    nextExtra[keyTaxableKeywords] = keywords
+        .map((e) => e.trim().toLowerCase())
+        .where((e) => e.length >= 3)
+        .toSet()
+        .take(200)
+        .toList();
     return copyWith(updatedAt: nowIso, extra: nextExtra);
   }
 

@@ -9,6 +9,7 @@ import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/user_friendly_error.dart';
+import '../../core/widgets/app_print_helper.dart';
 import '../../core/widgets/print_options_sheet.dart';
 import '../invoices/invoice_formatters.dart';
 import 'reports_view_model.dart';
@@ -104,7 +105,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
       return;
     }
     final stmt = _vm.buildStatement(rest, _selectedMonth);
-    await showPrintOptionsSheet(
+    await AppPrintHelper.openPreview(
       context,
       document: PrintableDocument(
         title: 'Statement - ${rest.name} (${stmt.monthName})',

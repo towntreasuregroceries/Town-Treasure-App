@@ -192,6 +192,7 @@ class RestaurantsViewModel extends ChangeNotifier {
     required String name,
     String aliasesRaw = '',
     String kraPinRaw = '',
+    EtimsCadence etimsCadence = EtimsCadence.none,
     String contact = '',
     String phone = '',
     String address = '',
@@ -261,6 +262,7 @@ class RestaurantsViewModel extends ChangeNotifier {
       id: hasId ? existingId : AppHelpers.genId(),
       name: trimmedName,
       kraPin: kraPin,
+      etimsCadence: etimsCadence,
       aliases: finalAliases,
       contact: contact.trim(),
       phone: phone.trim(),
@@ -338,16 +340,21 @@ class RestaurantsViewModel extends ChangeNotifier {
       }
 
       var fallbackPin = '';
+      var fallbackCadence = candidate.etimsCadence;
       for (final dup in duplicates) {
         final normPin = Restaurant.normalizeKraPin(dup.kraPin);
-        if (normPin.isNotEmpty) {
+        if (fallbackPin.isEmpty && normPin.isNotEmpty) {
           fallbackPin = normPin;
-          break;
+        }
+        if (fallbackCadence == EtimsCadence.none &&
+            dup.etimsCadence != EtimsCadence.none) {
+          fallbackCadence = dup.etimsCadence;
         }
       }
 
       final finalRecord = candidate.copyWith(
         kraPin: candidate.kraPin.isNotEmpty ? candidate.kraPin : fallbackPin,
+        etimsCadence: fallbackCadence,
         aliases: mergedAliases,
         updatedAt: now,
       );

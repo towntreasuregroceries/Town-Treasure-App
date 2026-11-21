@@ -7,6 +7,7 @@ import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/local_storage_service.dart';
 import '../../../data/services/remote_update_service.dart';
 import '../../../domain/models/models.dart';
+import '../../core/developer_preview.dart';
 import '../../core/theme/app_theme.dart';
 import 'change_password_dialog.dart';
 import 'dashboard_view_model.dart';
@@ -38,6 +39,7 @@ class DashboardScreen extends StatefulWidget {
     this.onOpenInvoicesTab,
     this.onOpenExpensesHub,
     this.onOpenStatements,
+    this.onOpenKraTaxCenter,
     this.onOpenInvoice,
     this.onCreateInvoice,
     this.onSignedOut,
@@ -52,6 +54,7 @@ class DashboardScreen extends StatefulWidget {
   final VoidCallback? onOpenInvoicesTab;
   final void Function(int tabIndex)? onOpenExpensesHub;
   final VoidCallback? onOpenStatements;
+  final VoidCallback? onOpenKraTaxCenter;
   final void Function(Invoice invoice)? onOpenInvoice;
   final VoidCallback? onCreateInvoice;
   final VoidCallback? onSignedOut;
@@ -178,9 +181,18 @@ class _DashboardScreenState extends State<DashboardScreen>
   @override
   Widget build(BuildContext context) {
     final metrics = _vm.metrics;
+    DeveloperPreviewController? devPreview;
+    try {
+      devPreview = context.watch<DeveloperPreviewController>();
+    } catch (_) {
+      devPreview = null;
+    }
+    final isDev = _vm.isDeveloperAccount;
+    final redesignedActive = devPreview?.isRedesignedUiActiveFor(_vm.userEmail) ??
+        DeveloperPreviewConfig.isDeveloperEmail(_vm.userEmail);
 
     return Scaffold(
-      backgroundColor: AppTheme.surfaceSage,
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       floatingActionButton: widget.onCreateInvoice != null
           ? FloatingActionButton.extended(
               key: const Key('fab_create_invoice'),
@@ -202,6 +214,27 @@ class _DashboardScreenState extends State<DashboardScreen>
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
+                  if (isDev)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: _DeveloperPreviewRibbon(
+                        redesignedEnabled: redesignedActive,
+                        onToggle: devPreview?.toggleRedesignedUi,
+                      ),
+                    ),
+                  if (redesignedActive)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: _ExecutiveHeroCard(
+                        metrics: metrics,
+                        onCreateInvoice: widget.onCreateInvoice,
+                        onOpenKraTaxCenter: widget.onOpenKraTaxCenter,
+                        onOpenStatements: widget.onOpenStatements,
+                        onOpenExpenses: widget.onOpenExpensesHub != null
+                            ? () => widget.onOpenExpensesHub!(0)
+                            : null,
+                      ),
+                    ),
                   AnimatedSize(
                     duration: AppMotion.standard,
                     curve: AppMotion.standardCurve,
@@ -530,7 +563,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     await UpdateCheckerSheet.show(
       context,
       updateService: service,
-      manifestUrl: widget.updateManifestUrl,
+      manifestUrl: _vm.effectiveUpdateManifestUrl,
     );
   }
 
@@ -1136,6 +1169,250 @@ class _StatusBadge extends StatelessWidget {
           fontSize: 10,
           fontWeight: FontWeight.w700,
           color: fg,
+        ),
+      ),
+    );
+  }
+}
+
+class _DeveloperPreviewRibbon extends StatelessWidget {
+  const _DeveloperPreviewRibbon({
+    required this.redesignedEnabled,
+    this.onToggle,
+  });
+
+  final bool redesignedEnabled;
+  final VoidCallback? onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('dev_preview_banner'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFECFDF5),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFA7F3D0)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.science_outlined,
+            size: 18,
+            color: Color(0xFF0F3D24),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Developer Preview · v1.2.0',
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF0F3D24),
+                  ),
+                ),
+                Text(
+                  'Visible only to onderegerald@gmail.com before rollout',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFF047857),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (onToggle != null)
+            ActionChip(
+              key: const Key('btn_toggle_dev_ui_mode'),
+              label: Text(redesignedEnabled ? 'UI v2' : 'Classic'),
+              onPressed: onToggle,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ExecutiveHeroCard extends StatelessWidget {
+  const _ExecutiveHeroCard({
+    required this.metrics,
+    this.onCreateInvoice,
+    this.onOpenKraTaxCenter,
+    this.onOpenStatements,
+    this.onOpenExpenses,
+  });
+
+  final DashboardMetrics metrics;
+  final VoidCallback? onCreateInvoice;
+  final VoidCallback? onOpenKraTaxCenter;
+  final VoidCallback? onOpenStatements;
+  final VoidCallback? onOpenExpenses;
+
+  @override
+  Widget build(BuildContext context) {
+    final total = metrics.thisMonthInvoiceCount;
+    final paid = metrics.thisMonthPaidCount;
+    final ratio = total > 0 ? (paid / total).clamp(0.0, 1.0) : 0.0;
+    final marginLabel = metrics.thisMonthMarginPercent != null
+        ? '${metrics.thisMonthMarginPercent!.toStringAsFixed(1)}% margin'
+        : 'Margin N/A';
+
+    return Container(
+      key: const Key('dev_executive_hero_card'),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF0F3D24), Color(0xFF166534)],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x220F3D24),
+            blurRadius: 16,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'THIS MONTH PERFORMANCE',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.9,
+                    color: Color(0xFFA7F3D0),
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.14),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  marginLabel,
+                  style: const TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'KES ${DashboardViewModel.formatMoney(metrics.thisMonthRevenue)}',
+            style: const TextStyle(
+              fontSize: 26,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              letterSpacing: -0.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Net Profit: KES ${DashboardViewModel.formatMoney(metrics.thisMonthProfit)} · $paid/$total settled',
+            style: const TextStyle(
+              fontSize: 12.5,
+              color: Color(0xFFD1FAE5),
+            ),
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(6),
+            child: LinearProgressIndicator(
+              value: ratio,
+              minHeight: 7,
+              backgroundColor: Colors.white.withValues(alpha: 0.18),
+              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF86EFAC)),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              _HeroActionPill(
+                icon: Icons.add_box_outlined,
+                label: 'Invoice',
+                onTap: onCreateInvoice,
+              ),
+              const SizedBox(width: 8),
+              _HeroActionPill(
+                icon: Icons.qr_code_2,
+                label: 'eTIMS Tax',
+                onTap: onOpenKraTaxCenter,
+              ),
+              const SizedBox(width: 8),
+              _HeroActionPill(
+                icon: Icons.description_outlined,
+                label: 'Statements',
+                onTap: onOpenStatements,
+              ),
+              const SizedBox(width: 8),
+              _HeroActionPill(
+                icon: Icons.account_balance_wallet_outlined,
+                label: 'Expenses',
+                onTap: onOpenExpenses,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _HeroActionPill extends StatelessWidget {
+  const _HeroActionPill({
+    required this.icon,
+    required this.label,
+    this.onTap,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Material(
+        color: Colors.white.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: Colors.white, size: 18),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

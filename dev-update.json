@@ -1,0 +1,8 @@
+{
+  "version": "1.2.0",
+  "buildNumber": 2014,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.0-preview/TownTreasureGroceries.apk",
+  "sha256": "876de51c16b12b6796d4fd898b7f233d463635586ba1a3f21dbe984e2022f628",
+  "releaseNotes": "Developer Preview v1.2.0+14 (onderegerald@gmail.com only): Redesigned Executive UI preview, Cloudflare D1/R2 backend (`ttg-api`) with Supabase Auth only, KRA eTIMS Daily + Monthly Hotel workflow & auto-VAT tagging, unified Thermal 80mm/58mm + ESC/POS QR printing, and 14-day Web App Sunset notice.",
+  "mandatory": false
+}

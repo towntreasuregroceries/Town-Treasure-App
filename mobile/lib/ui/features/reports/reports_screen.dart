@@ -8,6 +8,7 @@ import '../../../data/repositories/vault_repository.dart';
 import '../../core/app_lock_guard.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/user_friendly_error.dart';
+import '../../core/widgets/app_print_helper.dart';
 import '../../core/widgets/print_options_sheet.dart';
 import 'reports_view_model.dart';
 import 'statements_screen.dart';
@@ -145,7 +146,7 @@ class _ReportsScreenState extends State<ReportsScreen>
 
   Future<void> _exportPdf() async {
     final report = _activeReport ?? _generateCurrentReport();
-    await showPrintOptionsSheet(
+    await AppPrintHelper.openPreview(
       context,
       document: PrintableDocument(
         title: 'Report: ${report.dateRangeLabel}',

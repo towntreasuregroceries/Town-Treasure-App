@@ -10,8 +10,10 @@ import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/crypto_service.dart';
 import '../../../data/services/local_storage_service.dart';
 import '../../../data/services/remote_update_service.dart';
+import '../../../data/services/cloudflare_backend_service.dart';
 import '../../../data/services/supabase_service.dart';
 import '../../../domain/models/models.dart';
+import '../../core/developer_preview.dart';
 import 'overdue_notification_service.dart';
 
 const String ttgBackgroundUpdateTask = 'ttg_periodic_update_check';
@@ -35,7 +37,9 @@ void ttgBackgroundCallbackDispatcher() {
         } catch (_) {
           // Offline / background start without Supabase stays safe for local checks.
         }
-        final supabase = SupabaseService();
+        final supabase = CloudflareBackendService(
+          authGateway: SupabaseService(),
+        );
         final vault = VaultRepository(
           cryptoService: CryptoService(),
           localStorage: storage,
@@ -256,7 +260,13 @@ class BackgroundAlertRunner {
     }
 
     // 3. Silent OTA App Update Check (12-hour interval so checks stay light)
-    if (prefs.appUpdatesEnabled && manifestUrl.trim().isNotEmpty) {
+    final bgEmail =
+        (await supabase.getCurrentUser())?.email ?? await storage.getUserEmail();
+    final effectiveManifestUrl = DeveloperPreviewConfig.resolveManifestUrl(
+      bgEmail,
+      manifestUrl,
+    );
+    if (prefs.appUpdatesEnabled && effectiveManifestUrl.trim().isNotEmpty) {
       try {
         final rawLastCheck = await storage.getRaw(_keyLastUpdateCheckAt);
         final lastCheck = DateTime.tryParse(rawLastCheck ?? '');
@@ -265,7 +275,7 @@ class BackgroundAlertRunner {
             now.difference(lastCheck) < const Duration(hours: 12);
         if (!checkedRecently) {
           final check = await updateService
-              .checkForUpdate(manifestUrl)
+              .checkForUpdate(effectiveManifestUrl)
               .timeout(const Duration(seconds: 10));
           await storage.setRaw(
             _keyLastUpdateCheckAt,

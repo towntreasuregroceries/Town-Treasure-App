@@ -8,12 +8,15 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:image/image.dart' as img;
 import 'package:town_treasure_groceries/data/repositories/vault_repository.dart';
+import 'package:town_treasure_groceries/data/services/cloudflare_backend_service.dart';
 import 'package:town_treasure_groceries/data/services/crypto_service.dart';
 import 'package:town_treasure_groceries/data/services/kra_oscu_service.dart';
 import 'package:town_treasure_groceries/data/services/local_storage_service.dart';
 import 'package:town_treasure_groceries/data/services/personal_vault_service.dart';
+import 'package:town_treasure_groceries/data/services/print_service.dart';
 import 'package:town_treasure_groceries/data/services/supabase_service.dart';
 import 'package:town_treasure_groceries/domain/models/models.dart';
+import 'package:town_treasure_groceries/ui/core/developer_preview.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
 import 'package:town_treasure_groceries/ui/features/invoices/invoice_pdf_builder.dart';
 import 'package:town_treasure_groceries/ui/features/kra/kra_tax_center_screen.dart';
@@ -494,7 +497,10 @@ void main() {
       await tester.pumpAndSettle();
 
       // 3. Tag invoice to 16% VAT & issue eTIMS QR via OSCU
-      await tester.ensureVisible(find.byKey(const Key('kra_inv_inv_1')));
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('kra_inv_inv_1')),
+        250,
+      );
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('kra_inv_inv_1')));
       await tester.pumpAndSettle();
@@ -522,13 +528,16 @@ void main() {
       await tester.pumpAndSettle();
 
       // 4. Switch to Monthly By Hotel cadence & issue consolidated Monthly Statement eTIMS QR
-      await tester.ensureVisible(find.byKey(const Key('segmented_etims_cadence')));
+      await tester.scrollUntilVisible(
+        find.byKey(const Key('segmented_etims_cadence')),
+        250,
+      );
       await tester.tap(find.textContaining('Monthly Hotel'));
       await tester.pumpAndSettle();
 
       final monthKey = DateTime.now().toIso8601String().substring(0, 7);
       final monthlyTileKey = Key('kra_monthly_${monthKey}_r1');
-      await tester.ensureVisible(find.byKey(monthlyTileKey));
+      await tester.scrollUntilVisible(find.byKey(monthlyTileKey), 250);
       await tester.tap(find.byKey(monthlyTileKey));
       await tester.pumpAndSettle();
 
@@ -560,6 +569,214 @@ void main() {
       );
       expect(stmtPdfBytes.length, greaterThan(1500));
       expect(utf8.decode(stmtPdfBytes.take(5).toList()), '%PDF-');
+    });
+
+    test('EtimsCadence serialization defaults cleanly to none', () {
+      const def = Restaurant(id: 'r0', name: 'Test Kitchen');
+      expect(def.etimsCadence, EtimsCadence.none);
+      final encoded = def.copyWith(etimsCadence: EtimsCadence.monthly).toJson();
+      final decoded = Restaurant.fromJson(encoded);
+      expect(decoded.etimsCadence, EtimsCadence.monthly);
+      expect(EtimsCadence.fromCode('daily'), EtimsCadence.daily);
+      expect(EtimsCadence.fromCode('unknown'), EtimsCadence.none);
+    });
+
+    test('KraTaxCalculator.suggestTaxRate learns 16% exceptions while keeping produce exempt', () {
+      const prof = KraCompanyProfile(
+        sellerKraPin: 'P051234567X',
+        vatRegistered: true,
+        defaultTaxRate: KraTaxRate.exempt,
+      );
+      expect(
+        KraTaxCalculator.suggestTaxRate('Fresh Tomatoes', profile: prof),
+        KraTaxRate.exempt,
+      );
+      expect(
+        KraTaxCalculator.suggestTaxRate('Olive Oil 5L', profile: prof),
+        KraTaxRate.standard16,
+      );
+      expect(
+        KraTaxCalculator.suggestTaxRate(
+          'Truffle Paste 500g',
+          profile: prof,
+          learnedKeywords: const ['truffle paste'],
+        ),
+        KraTaxRate.standard16,
+      );
+      final item = const InvoiceLineItem(
+        desc: 'Truffle Paste',
+        qty: 1,
+        buyPrice: 900,
+        sellPrice: 1160,
+        total: 1160,
+      );
+      final bd = KraTaxCalculator.computeLineBreakdown(
+        item,
+        vatMode: KraVatMode.inclusive,
+        defaultRate: KraTaxRate.standard16,
+      );
+      expect(bd.rate, KraTaxRate.standard16);
+      expect(bd.vatAmount, 160.0);
+    });
+
+    test('Invoice fiscalized getters & thermal 80mm/58mm PDF + ESC/POS GS(k) QR output', () async {
+      final inv = Invoice(
+        id: 'inv_qr_1',
+        number: 'TTG-888',
+        restaurantId: 'r1',
+        restaurantName: 'Artisan Bistro',
+        date: '2026-11-21',
+        items: const [
+          InvoiceLineItem(
+            desc: 'Avocados',
+            qty: 10,
+            buyPrice: 50,
+            sellPrice: 80,
+            total: 800,
+          ),
+          InvoiceLineItem(
+            desc: 'Cooking Oil 5L',
+            qty: 1,
+            buyPrice: 900,
+            sellPrice: 1160,
+            total: 1160,
+            taxRate: 'vat16',
+          ),
+        ],
+        totalSell: 1960,
+        cuInvoiceNumber: 'KRAMW001/42',
+        etimsQrData: 'https://etims.kra.go.ke/common/link/etims/receipt/indexEtimsInvoiceData?Data=P051234567X00SIG1',
+        etimsSdcDateTime: '20261121123000',
+        etimsInvcNo: 42,
+      );
+      expect(inv.isFiscalized, isTrue);
+      expect(inv.hasCreditNote, isFalse);
+      final invWithCn = inv.copyWith(etimsCreditNoteCuNo: 'KRAMW001/43');
+      expect(invWithCn.hasCreditNote, isTrue);
+
+      final settings = const VaultSettings().withKraProfile(
+        const KraCompanyProfile(sellerKraPin: 'P051234567X', vatRegistered: true),
+      );
+      final pdf80 = await InvoicePdfBuilder.buildMultiInvoicePdfBytes(
+        invoices: [inv],
+        restaurants: const [
+          Restaurant(id: 'r1', name: 'Artisan Bistro', kraPin: 'P051111111Z'),
+        ],
+        settings: settings,
+        pageFormat: PrintPaperFormat.roll80.pdfPageFormat,
+      );
+      expect(utf8.decode(pdf80.take(5).toList()), '%PDF-');
+
+      final escPos = EscPosReceiptBuilder.buildInvoicesReceipt(
+        invoices: [inv],
+        restaurants: const [
+          Restaurant(id: 'r1', name: 'Artisan Bistro', kraPin: 'P051111111Z'),
+        ],
+        settings: settings,
+        lineWidth: 32,
+      );
+      // Verify ESC/POS GS ( k Model 2 QR selector sequence [0x1D, 0x28, 0x6B] is embedded
+      bool foundQrHeader = false;
+      for (var i = 0; i <= escPos.length - 3; i++) {
+        if (escPos[i] == 0x1D && escPos[i + 1] == 0x28 && escPos[i + 2] == 0x6B) {
+          foundQrHeader = true;
+          break;
+        }
+      }
+      expect(foundQrHeader, isTrue);
+      expect(utf8.decode(escPos, allowMalformed: true), contains('KRAMW001/42'));
+    });
+
+    test('CloudflareBackendService routes Vault CAS, Staged CRUD, and Clerk actions properly', () async {
+      final authFake = FakeSupabaseGateway()
+        ..user = const AuthUserInfo(id: 'owner-1', email: 'vero@ttg.test')
+        ..accessToken = 'jwt-owner-token';
+      final recordedRequests = <http.Request>[];
+
+      final backend = CloudflareBackendService(
+        authGateway: authFake,
+        baseUrl: 'https://ttg-api.test',
+        httpClient: MockClient((req) async {
+          recordedRequests.add(req);
+          if (req.url.path == '/vault/cas' && req.method == 'POST') {
+            return http.Response(jsonEncode({'saved': true, 'revision': 5}), 200);
+          }
+          if (req.url.path == '/staged/docket_1' && req.method == 'PUT') {
+            return http.Response(jsonEncode({'ok': true, 'id': 'docket_1'}), 200);
+          }
+          if (req.url.path == '/staged' && req.method == 'GET') {
+            return http.Response(
+              jsonEncode({
+                'rows': [
+                  {'id': 'docket_1', 'status': 'pending'},
+                ],
+              }),
+              200,
+            );
+          }
+          if (req.url.path == '/clerk' && req.method == 'POST') {
+            final body = jsonDecode(req.body) as Map<String, dynamic>;
+            if (body['action'] == 'create_invite') {
+              expect(req.headers['Authorization'], 'Bearer jwt-owner-token');
+              return http.Response(jsonEncode({'token': 'tok_123'}), 200);
+            }
+            // list action must work without Authorization header
+            expect(req.headers.containsKey('Authorization'), isFalse);
+            return http.Response(jsonEncode({'submissions': []}), 200);
+          }
+          return http.Response('{}', 404);
+        }),
+      );
+
+      final cas = await backend.saveEncryptedVaultCas(
+        userId: 'owner-1',
+        expectedRevision: 4,
+        encryptedData: 'cipher_v5',
+      );
+      expect(cas.saved, isTrue);
+      expect(cas.revision, 5);
+
+      await backend.upsertStagedInvoice({'id': 'docket_1', 'restaurant_name': 'Hilltop'});
+      final staged = await backend.fetchStagedInvoices('owner-1');
+      expect(staged.length, 1);
+      expect(staged.first['id'], 'docket_1');
+
+      final invRes = await backend.invokeClerkApi({'action': 'create_invite'});
+      expect(invRes['token'], 'tok_123');
+
+      final listRes = await backend.invokeClerkApi({
+        'action': 'list',
+        'invite_token': 'tok_123',
+      });
+      expect(listRes['submissions'], isEmpty);
+      expect(recordedRequests.length, 5);
+    });
+
+    test('DeveloperPreviewConfig gates dev update channel & Redesigned UI strictly to onderegerald@gmail.com', () {
+      expect(DeveloperPreviewConfig.isDeveloperEmail('onderegerald@gmail.com'), isTrue);
+      expect(DeveloperPreviewConfig.isDeveloperEmail(' ONDEREGERALD@GMAIL.COM '), isTrue);
+      expect(DeveloperPreviewConfig.isDeveloperEmail('vero@towntreasure.co.ke'), isFalse);
+
+      expect(
+        DeveloperPreviewConfig.resolveManifestUrl(
+          'onderegerald@gmail.com',
+          DeveloperPreviewConfig.prodOwnerManifestUrl,
+        ),
+        DeveloperPreviewConfig.devManifestUrl,
+      );
+      expect(
+        DeveloperPreviewConfig.resolveManifestUrl(
+          'vero@towntreasure.co.ke',
+          DeveloperPreviewConfig.prodOwnerManifestUrl,
+        ),
+        DeveloperPreviewConfig.prodOwnerManifestUrl,
+      );
+
+      final ctrl = DeveloperPreviewController();
+      expect(ctrl.isRedesignedUiActiveFor('onderegerald@gmail.com'), isTrue);
+      expect(ctrl.isRedesignedUiActiveFor('vero@towntreasure.co.ke'), isFalse);
+      ctrl.toggleRedesignedUi();
+      expect(ctrl.isRedesignedUiActiveFor('onderegerald@gmail.com'), isFalse);
     });
   });
 }

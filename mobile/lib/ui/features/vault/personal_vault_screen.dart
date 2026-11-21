@@ -13,7 +13,8 @@ import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/user_friendly_error.dart';
-import '../../core/widgets/branded_pdf_viewer_screen.dart';
+import '../../core/widgets/app_print_helper.dart';
+import '../../core/widgets/print_options_sheet.dart';
 import '../../core/widgets/scoped_text_controllers.dart';
 
 /// Abstraction over device biometric / PIN confirmation for Personal Documents entry.
@@ -521,14 +522,13 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
 
       if (doc.isPdf) {
         final safeName = '${doc.title.replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_')}.pdf';
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => BrandedPdfViewerScreen(
-              title: doc.title,
-              filename: safeName,
-              supportsThermalRoll: false,
-              buildPdf: (_) async => plainBytes,
-            ),
+        await AppPrintHelper.openPreview(
+          context,
+          document: PrintableDocument(
+            title: doc.title,
+            filename: safeName,
+            supportsThermalRoll: false,
+            buildPdf: (_) async => plainBytes,
           ),
         );
       } else {

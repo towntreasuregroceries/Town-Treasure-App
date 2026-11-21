@@ -31,6 +31,11 @@ class Invoice {
     this.etimsRcptSign,
     this.etimsIntrData,
     this.etimsSubmittedAt,
+    this.etimsSdcDateTime,
+    this.etimsInvcNo,
+    this.etimsCreditNoteCuNo,
+    this.etimsCreditNoteQrData,
+    this.etimsCreditNoteAt,
   });
 
   final String id;
@@ -60,9 +65,18 @@ class Invoice {
   final String? etimsRcptSign;
   final String? etimsIntrData;
   final String? etimsSubmittedAt;
+  final String? etimsSdcDateTime;
+  final int? etimsInvcNo;
+  final String? etimsCreditNoteCuNo;
+  final String? etimsCreditNoteQrData;
+  final String? etimsCreditNoteAt;
 
   bool get isDraft => status == 'draft';
   bool get isPaid => status == 'paid';
+  bool get isFiscalized =>
+      (cuInvoiceNumber ?? '').trim().isNotEmpty ||
+      (etimsQrData ?? '').trim().isNotEmpty;
+  bool get hasCreditNote => (etimsCreditNoteCuNo ?? '').trim().isNotEmpty;
 
   factory Invoice.fromJson(Map<String, dynamic> json) {
     final rawItems = json['items'];
@@ -109,6 +123,11 @@ class Invoice {
       etimsRcptSign: json['etimsRcptSign']?.toString(),
       etimsIntrData: json['etimsIntrData']?.toString(),
       etimsSubmittedAt: json['etimsSubmittedAt']?.toString(),
+      etimsSdcDateTime: json['etimsSdcDateTime']?.toString(),
+      etimsInvcNo: (json['etimsInvcNo'] as num?)?.toInt(),
+      etimsCreditNoteCuNo: json['etimsCreditNoteCuNo']?.toString(),
+      etimsCreditNoteQrData: json['etimsCreditNoteQrData']?.toString(),
+      etimsCreditNoteAt: json['etimsCreditNoteAt']?.toString(),
     );
   }
 
@@ -146,6 +165,15 @@ class Invoice {
         'etimsIntrData': etimsIntrData,
       if (etimsSubmittedAt != null && etimsSubmittedAt!.isNotEmpty)
         'etimsSubmittedAt': etimsSubmittedAt,
+      if (etimsSdcDateTime != null && etimsSdcDateTime!.isNotEmpty)
+        'etimsSdcDateTime': etimsSdcDateTime,
+      if (etimsInvcNo != null) 'etimsInvcNo': etimsInvcNo,
+      if (etimsCreditNoteCuNo != null && etimsCreditNoteCuNo!.isNotEmpty)
+        'etimsCreditNoteCuNo': etimsCreditNoteCuNo,
+      if (etimsCreditNoteQrData != null && etimsCreditNoteQrData!.isNotEmpty)
+        'etimsCreditNoteQrData': etimsCreditNoteQrData,
+      if (etimsCreditNoteAt != null && etimsCreditNoteAt!.isNotEmpty)
+        'etimsCreditNoteAt': etimsCreditNoteAt,
     };
   }
 
@@ -180,6 +208,11 @@ class Invoice {
     String? etimsRcptSign,
     String? etimsIntrData,
     String? etimsSubmittedAt,
+    String? etimsSdcDateTime,
+    int? etimsInvcNo,
+    String? etimsCreditNoteCuNo,
+    String? etimsCreditNoteQrData,
+    String? etimsCreditNoteAt,
     bool clearEtims = false,
   }) {
     return Invoice(
@@ -215,6 +248,14 @@ class Invoice {
           clearEtims ? null : (etimsIntrData ?? this.etimsIntrData),
       etimsSubmittedAt:
           clearEtims ? null : (etimsSubmittedAt ?? this.etimsSubmittedAt),
+      etimsSdcDateTime:
+          clearEtims ? null : (etimsSdcDateTime ?? this.etimsSdcDateTime),
+      etimsInvcNo: clearEtims ? null : (etimsInvcNo ?? this.etimsInvcNo),
+      etimsCreditNoteCuNo:
+          etimsCreditNoteCuNo ?? this.etimsCreditNoteCuNo,
+      etimsCreditNoteQrData:
+          etimsCreditNoteQrData ?? this.etimsCreditNoteQrData,
+      etimsCreditNoteAt: etimsCreditNoteAt ?? this.etimsCreditNoteAt,
     );
   }
 }

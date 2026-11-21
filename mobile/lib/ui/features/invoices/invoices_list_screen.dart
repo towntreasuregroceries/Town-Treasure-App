@@ -5,6 +5,7 @@ import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/print_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/app_print_helper.dart';
 import '../../core/widgets/print_options_sheet.dart';
 import 'invoice_detail_screen.dart';
 import 'invoice_editor_screen.dart';
@@ -77,7 +78,7 @@ class _InvoicesListScreenState extends State<InvoicesListScreen> {
   void _openBatchPrintSheet(List<Invoice> selectedInvoices) {
     if (selectedInvoices.isEmpty) return;
     final vault = context.read<VaultRepository>();
-    showPrintOptionsSheet(
+    AppPrintHelper.openPrintCenter(
       context,
       document: PrintableDocument(
         title: selectedInvoices.length == 1
@@ -99,6 +100,7 @@ class _InvoicesListScreenState extends State<InvoicesListScreen> {
         buildEscPos: (cols) => EscPosReceiptBuilder.buildInvoicesReceipt(
           invoices: selectedInvoices,
           restaurants: vault.restaurants,
+          settings: vault.settings,
           lineWidth: cols,
         ),
       ),

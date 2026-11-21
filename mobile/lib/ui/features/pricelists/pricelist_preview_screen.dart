@@ -11,6 +11,7 @@ import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/user_friendly_error.dart';
+import '../../core/widgets/app_print_helper.dart';
 import '../../core/widgets/print_options_sheet.dart';
 import '../invoices/invoice_formatters.dart';
 import 'pricelist_pdf_builder.dart';
@@ -54,7 +55,7 @@ class _PriceListPreviewScreenState extends State<PriceListPreviewScreen> {
   }
 
   Future<void> _downloadOrPrintPdf(PriceList pl) async {
-    await showPrintOptionsSheet(
+    await AppPrintHelper.openPreview(
       context,
       document: PrintableDocument(
         title: pl.name,

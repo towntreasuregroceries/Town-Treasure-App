@@ -39,6 +39,7 @@ import '../features/restaurants/restaurants_screen.dart';
 import '../features/restaurants/restaurants_view_model.dart';
 import '../features/scanner/docket_scanner_sheet.dart';
 import '../features/vault/personal_vault_screen.dart';
+import 'developer_preview.dart';
 import 'theme/app_theme.dart';
 
 /// Authenticated workspace shell with Material 3 `NavigationBar`,
@@ -452,7 +453,7 @@ class _AppShellState extends State<AppShell> {
       ),
       builder: (_) => UpdateCheckerSheet(
         updateService: updateService,
-        manifestUrl: widget.updateManifestUrl,
+        manifestUrl: _dashboardVm.effectiveUpdateManifestUrl,
       ),
     );
   }
@@ -688,6 +689,7 @@ class _AppShellState extends State<AppShell> {
                   onOpenExpensesHub: (tabIndex) =>
                       _openExpensesHub(initialTabIndex: tabIndex),
                   onOpenStatements: _openStatements,
+                  onOpenKraTaxCenter: _openKraTaxCenter,
                   onOpenInvoice: (inv) => _openInvoiceDetailById(inv.id),
                   onCreateInvoice: () => _openInvoiceEditor(),
                   onSignedOut: widget.onSignedOut,
@@ -818,6 +820,18 @@ class _MoreHubScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final vault = context.watch<VaultRepository>();
+    DeveloperPreviewController? devPreview;
+    try {
+      devPreview = context.watch<DeveloperPreviewController>();
+    } catch (_) {
+      devPreview = null;
+    }
+    final isDeveloper = DeveloperPreviewConfig.isDeveloperEmail(
+      dashboardViewModel.userEmail,
+    );
+    final redesignedUi =
+        devPreview?.isRedesignedUiActiveFor(dashboardViewModel.userEmail) ??
+            isDeveloper;
     final binCount = vault.deletedInvoices.length +
         vault.deletedStaff.length +
         vault.deletedPriceLists.length;
@@ -826,7 +840,7 @@ class _MoreHubScreen extends StatelessWidget {
       listenable: dashboardViewModel,
       builder: (context, _) {
         return Scaffold(
-          backgroundColor: AppTheme.surfaceSage,
+          backgroundColor: Theme.of(context).scaffoldBackgroundColor,
           appBar: AppBar(
             title: const Text('More & Tools'),
             actions: [
@@ -895,6 +909,57 @@ class _MoreHubScreen extends StatelessWidget {
                   ),
                 ),
               ),
+              if (isDeveloper) ...[
+                const SizedBox(height: 16),
+                const _SectionLabel(title: 'Developer Preview'),
+                const SizedBox(height: 8),
+                Card(
+                  key: const Key('dev_preview_controls_card'),
+                  child: Column(
+                    children: [
+                      SwitchListTile.adaptive(
+                        key: const Key('switch_dev_redesigned_ui'),
+                        secondary: const Icon(
+                          Icons.palette_outlined,
+                          color: AppTheme.forestGreen,
+                        ),
+                        title: const Text(
+                          'Redesigned UI (v2 Preview)',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        subtitle: const Text(
+                          'Only visible to onderegerald@gmail.com · Toggle off to compare Classic UI',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        value: redesignedUi,
+                        onChanged: devPreview == null
+                            ? null
+                            : (val) => devPreview!.setRedesignedUiEnabled(val),
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        dense: true,
+                        leading: const Icon(
+                          Icons.cloud_done_outlined,
+                          color: AppTheme.info,
+                        ),
+                        title: const Text(
+                          'Backend: Cloudflare D1 + R2',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                        subtitle: const Text(
+                          'Supabase used for Auth only · Dev update channel active',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                        trailing: TextButton(
+                          onPressed: onCheckUpdates,
+                          child: const Text('Check Dev OTA'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 16),
               const _SectionLabel(title: 'Operations & Catalog'),
               const SizedBox(height: 8),

@@ -364,6 +364,27 @@ class _RestaurantCard extends StatelessWidget {
                                 ),
                               ),
                             ),
+                          if (restaurant.etimsCadence != EtimsCadence.none)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.infoSurface,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                restaurant.etimsCadence == EtimsCadence.daily
+                                    ? 'Daily eTIMS'
+                                    : 'Monthly eTIMS',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: AppTheme.info,
+                                ),
+                              ),
+                            ),
                           Text(
                             '$invoiceCount invoice${invoiceCount == 1 ? '' : 's'}',
                             style: const TextStyle(
@@ -625,6 +646,7 @@ class _RestaurantEditorSheetState extends State<_RestaurantEditorSheet> {
   late final TextEditingController _contactCtrl;
   late final TextEditingController _phoneCtrl;
   late final TextEditingController _addressCtrl;
+  late EtimsCadence _etimsCadence;
   String? _inlineError;
   bool _saving = false;
 
@@ -637,6 +659,7 @@ class _RestaurantEditorSheetState extends State<_RestaurantEditorSheet> {
       text: r != null ? r.aliases.join('\n') : '',
     );
     _kraPinCtrl = TextEditingController(text: r?.kraPin ?? '');
+    _etimsCadence = r?.etimsCadence ?? EtimsCadence.none;
     _contactCtrl = TextEditingController(text: r?.contact ?? '');
     _phoneCtrl = TextEditingController(text: r?.phone ?? '');
     _addressCtrl = TextEditingController(text: r?.address ?? '');
@@ -691,6 +714,7 @@ class _RestaurantEditorSheetState extends State<_RestaurantEditorSheet> {
       name: _nameCtrl.text,
       aliasesRaw: _aliasesCtrl.text,
       kraPinRaw: _kraPinCtrl.text,
+      etimsCadence: _etimsCadence,
       contact: _contactCtrl.text,
       phone: _phoneCtrl.text,
       address: _addressCtrl.text,
@@ -846,6 +870,24 @@ class _RestaurantEditorSheetState extends State<_RestaurantEditorSheet> {
                     return 'Invalid KRA PIN (e.g. P051234567X)';
                   }
                   return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'eTIMS Tax Invoice Schedule',
+                style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 6),
+              SegmentedButton<EtimsCadence>(
+                key: const Key('segmented_restaurant_etims'),
+                segments: const [
+                  ButtonSegment(value: EtimsCadence.none, label: Text('None')),
+                  ButtonSegment(value: EtimsCadence.daily, label: Text('Daily')),
+                  ButtonSegment(value: EtimsCadence.monthly, label: Text('Monthly')),
+                ],
+                selected: {_etimsCadence},
+                onSelectionChanged: (sel) {
+                  setState(() => _etimsCadence = sel.first);
                 },
               ),
               const SizedBox(height: 12),

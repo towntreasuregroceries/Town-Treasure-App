@@ -10,9 +10,11 @@ import 'data/services/local_storage_service.dart';
 import 'data/services/ocr_consensus_service.dart';
 import 'data/services/personal_vault_service.dart';
 import 'data/services/remote_update_service.dart';
+import 'data/services/cloudflare_backend_service.dart';
 import 'data/services/supabase_service.dart';
 import 'ui/core/app_lock_guard.dart';
 import 'ui/core/app_shell.dart';
+import 'ui/core/developer_preview.dart';
 import 'ui/core/theme/app_theme.dart';
 import 'ui/features/auth/auth_screen.dart';
 import 'ui/features/auth/auth_view_model.dart';
@@ -27,7 +29,9 @@ Future<void> main() async {
   final localStorageService = LocalStorageService();
   await localStorageService.init();
 
-  final supabaseService = SupabaseService();
+  final supabaseService = CloudflareBackendService(
+    authGateway: SupabaseService(),
+  );
   final vaultRepository = VaultRepository(
     cryptoService: cryptoService,
     localStorage: localStorageService,
@@ -134,18 +138,25 @@ class TownTreasureApp extends StatelessWidget {
         ChangeNotifierProvider<StagingRepository>.value(
           value: stagingRepository,
         ),
+        ChangeNotifierProvider<DeveloperPreviewController>(
+          create: (_) => DeveloperPreviewController(),
+        ),
       ],
-      child: MaterialApp(
-        title: 'Town Treasure Groceries',
-        debugShowCheckedModeBanner: false,
-        theme: AppTheme.light(),
-        home: AuthGate(
-          authViewModel: authViewModel,
-          autoInitializeAuth: autoInitializeAuth,
-          autoInitializeDashboard: autoInitializeDashboard,
-          initialTabIndex: initialTabIndex,
-          updateManifestUrl: updateManifestUrl,
-          signatureImagePicker: signatureImagePicker,
+      child: Consumer2<AuthRepository, DeveloperPreviewController>(
+        builder: (_, auth, devPreview, _) => MaterialApp(
+          title: 'Town Treasure Groceries',
+          debugShowCheckedModeBanner: false,
+          theme: devPreview.isRedesignedUiActiveFor(auth.currentUser?.email)
+              ? AppTheme.redesignedLight()
+              : AppTheme.light(),
+          home: AuthGate(
+            authViewModel: authViewModel,
+            autoInitializeAuth: autoInitializeAuth,
+            autoInitializeDashboard: autoInitializeDashboard,
+            initialTabIndex: initialTabIndex,
+            updateManifestUrl: updateManifestUrl,
+            signatureImagePicker: signatureImagePicker,
+          ),
         ),
       ),
     );

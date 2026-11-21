@@ -542,6 +542,7 @@ class EscPosReceiptBuilder {
   static Uint8List buildInvoicesReceipt({
     required List<Invoice> invoices,
     required List<Restaurant> restaurants,
+    VaultSettings settings = const VaultSettings(),
     int lineWidth = 48,
   }) {
     final buf = BytesBuilder(copy: false);
@@ -550,7 +551,15 @@ class EscPosReceiptBuilder {
 
     for (var i = 0; i < invoices.length; i++) {
       final inv = invoices[i];
-      final restName = Restaurant.invoiceDisplayName(inv, restaurants);
+      final resolved = Restaurant.resolveInvoiceRestaurant(inv, restaurants);
+      final rest = resolved.restaurant;
+      final restName = rest?.name ?? inv.restaurantName;
+      final buyerPin = Restaurant.normalizeKraPin(rest?.kraPin);
+      final sellerPin = settings.kraProfile.normalizedSellerPin;
+      final taxSummary = KraTaxCalculator.computeInvoiceTaxSummary(
+        inv,
+        profile: settings.kraProfile,
+      );
 
       // Center, bold, double size title
       buf.add([0x1B, 0x61, 0x01, 0x1B, 0x45, 0x01, 0x1D, 0x21, 0x11]);
@@ -558,6 +567,9 @@ class EscPosReceiptBuilder {
       buf.add([0x1D, 0x21, 0x00, 0x1B, 0x45, 0x00]);
       _writeLine(buf, 'Town Treasure Limited - Fresh Produce');
       _writeLine(buf, 'Tel: 0708567696');
+      if (sellerPin.isNotEmpty) {
+        _writeLine(buf, 'KRA PIN: $sellerPin');
+      }
       _writeLine(buf, '-' * lineWidth);
 
       // Left align metadata
@@ -567,6 +579,12 @@ class EscPosReceiptBuilder {
         _twoCol('INV: ${inv.number}', inv.status.toUpperCase(), lineWidth),
       );
       _writeLine(buf, 'Client: ${_truncate(restName, lineWidth - 8)}');
+      if (buyerPin.isNotEmpty) {
+        _writeLine(buf, 'Client PIN: $buyerPin');
+      }
+      if (inv.cuInvoiceNumber?.trim().isNotEmpty == true) {
+        _writeLine(buf, 'CU Inv: ${inv.cuInvoiceNumber!.trim()}');
+      }
       _writeLine(
         buf,
         'Date: ${InvoiceFormatters.formatDisplayDate(inv.date)}',
@@ -582,16 +600,47 @@ class EscPosReceiptBuilder {
       }
 
       _writeLine(buf, '=' * lineWidth);
+      if (taxSummary.outputVatTotal > 0) {
+        _writeLine(
+          buf,
+          _twoCol(
+            'Exempt (No VAT)',
+            InvoiceFormatters.formatMoney(taxSummary.exemptTotal),
+            lineWidth,
+          ),
+        );
+        _writeLine(
+          buf,
+          _twoCol(
+            '16% VAT',
+            InvoiceFormatters.formatMoney(taxSummary.outputVatTotal),
+            lineWidth,
+          ),
+        );
+      }
       buf.add([0x1B, 0x45, 0x01]);
       _writeLine(
         buf,
         _twoCol(
           'TOTAL (KES)',
-          InvoiceFormatters.formatMoney(inv.totalSell),
+          InvoiceFormatters.formatMoney(
+            taxSummary.outputVatTotal > 0
+                ? taxSummary.grandTotalWithVat
+                : inv.totalSell,
+          ),
           lineWidth,
         ),
       );
       buf.add([0x1B, 0x45, 0x00]);
+      if (inv.etimsQrData?.trim().isNotEmpty == true) {
+        _writeLine(buf, '-' * lineWidth);
+        buf.add([0x1B, 0x61, 0x01]);
+        _writeLine(buf, 'KRA eTIMS Verification QR');
+        _writeEscPosQrCode(buf, inv.etimsQrData!.trim());
+        if (inv.etimsSdcDateTime?.trim().isNotEmpty == true) {
+          _writeLine(buf, 'SDC: ${inv.etimsSdcDateTime!.trim()}');
+        }
+      }
       _writeLine(buf, '-' * lineWidth);
       buf.add([0x1B, 0x61, 0x01]);
       _writeLine(buf, 'Thank you for your business!');
@@ -601,6 +650,25 @@ class EscPosReceiptBuilder {
     }
 
     return buf.toBytes();
+  }
+
+  /// Writes standard Model-2 ESC/POS QR code commands (`GS ( k`).
+  static void _writeEscPosQrCode(BytesBuilder buf, String data) {
+    final payload = utf8.encode(data);
+    final storeLen = payload.length + 3;
+    final pL = storeLen & 0xFF;
+    final pH = (storeLen >> 8) & 0xFF;
+    // Select QR model 2
+    buf.add([0x1D, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00]);
+    // Set module size (4 dots)
+    buf.add([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, 0x04]);
+    // Error correction level M (49)
+    buf.add([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x31]);
+    // Store data in symbol storage area
+    buf.add([0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30]);
+    buf.add(payload);
+    // Print QR symbol
+    buf.add([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30]);
   }
 
   static Uint8List buildSummaryReceipt({

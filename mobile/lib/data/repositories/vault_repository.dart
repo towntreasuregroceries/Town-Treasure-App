@@ -406,6 +406,25 @@ class VaultRepository extends ChangeNotifier {
     await setSettings(_settings.withMonthlyEtims(records), sync: sync);
   }
 
+  Future<void> learnTaxableKeywords(
+    Iterable<String> descriptions, {
+    bool sync = true,
+  }) async {
+    final merged = <String>{..._settings.kraTaxableKeywords};
+    var changed = false;
+    for (final desc in descriptions) {
+      final kw = KraTaxCalculator.normalizeTaxableKeyword(desc);
+      if (kw.length >= 3 &&
+          !KraTaxCalculator.defaultTaxableGroceryKeywords.any((d) => kw == d) &&
+          merged.add(kw)) {
+        changed = true;
+      }
+    }
+    if (changed) {
+      await setSettings(_settings.withKraTaxableKeywords(merged.toList()), sync: sync);
+    }
+  }
+
   Future<void> savePersonalDocsWorkerUrl(
     String workerUrl, {
     bool sync = true,
@@ -723,6 +742,14 @@ class VaultRepository extends ChangeNotifier {
     if (monthlyById.isNotEmpty) {
       merged[VaultSettings.keyMonthlyEtims] =
           monthlyById.values.map((r) => r.toJson()).toList();
+    }
+
+    final mergedKeywords = <String>{
+      ...remote.kraTaxableKeywords,
+      ...local.kraTaxableKeywords,
+    };
+    if (mergedKeywords.isNotEmpty) {
+      merged[VaultSettings.keyTaxableKeywords] = mergedKeywords.take(200).toList();
     }
 
     return VaultSettings.fromJson(merged);

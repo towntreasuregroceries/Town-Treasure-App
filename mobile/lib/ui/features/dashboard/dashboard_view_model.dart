@@ -12,6 +12,7 @@ import '../../../data/services/local_storage_service.dart';
 import '../../../data/services/remote_update_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
+import '../../core/developer_preview.dart';
 import '../../core/user_friendly_error.dart';
 import 'background_update_worker.dart';
 import 'excel_exporter.dart';
@@ -119,6 +120,10 @@ class DashboardViewModel extends ChangeNotifier {
   bool get biometricEnabled => _biometricEnabled;
   bool get canUseBiometrics => _canUseBiometrics;
   String? get userEmail => _userEmail;
+  bool get isDeveloperAccount =>
+      DeveloperPreviewConfig.isDeveloperEmail(_userEmail);
+  String get effectiveUpdateManifestUrl =>
+      DeveloperPreviewConfig.resolveManifestUrl(_userEmail, _updateManifestUrl);
   String? get statusMessage => _statusMessage;
   String? get errorMessage => _errorMessage;
   int get pendingClerkCount => _staging.pendingCount;
@@ -453,7 +458,8 @@ class DashboardViewModel extends ChangeNotifier {
   Future<void> runSilentUpdateCheck({bool force = false}) async {
     final updater = _updateService;
     if (updater == null || !_notificationPrefs.appUpdatesEnabled) return;
-    if (_updateManifestUrl.trim().isEmpty) return;
+    final targetManifestUrl = effectiveUpdateManifestUrl;
+    if (targetManifestUrl.trim().isEmpty) return;
 
     final now = _clock();
     if (!force && _storage != null) {
@@ -469,7 +475,7 @@ class DashboardViewModel extends ChangeNotifier {
 
     try {
       final result = await updater
-          .checkForUpdate(_updateManifestUrl)
+          .checkForUpdate(targetManifestUrl)
           .timeout(const Duration(seconds: 6));
       await _storage?.setRaw(
         keyLastUpdateCheckAt,

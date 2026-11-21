@@ -113,8 +113,11 @@ class InvoicePdfBuilder {
       final cuSerial = settings.kraProfile.cuSerialNumber.trim();
       final isTaxInvoice =
           settings.kraProfile.vatRegistered &&
-          (taxSummary.hasTaxableVatLines ||
-              (invoice.cuInvoiceNumber?.trim().isNotEmpty ?? false));
+          (taxSummary.hasTaxableVatLines || invoice.isFiscalized);
+      final showEtimsHeading = isTaxInvoice || invoice.isFiscalized;
+      final docHeadingTitle = isTaxInvoice
+          ? 'TAX INVOICE'
+          : (invoice.isFiscalized ? 'eTIMS INVOICE' : 'INVOICE');
 
       final pageTheme = pw.PageTheme(
         pageFormat: pageFormat,
@@ -135,7 +138,11 @@ class InvoicePdfBuilder {
             clientName: clientName,
           ),
           build: (context) => [
-            _buildTitleAndMeta(invoice, isTaxInvoice: isTaxInvoice),
+            _buildTitleAndMeta(
+              invoice,
+              isTaxInvoice: showEtimsHeading,
+              headingLabel: docHeadingTitle,
+            ),
             pw.SizedBox(height: 20),
             _buildFromAndBilledTo(
               clientName: clientName,
@@ -146,7 +153,13 @@ class InvoicePdfBuilder {
               cuSerial: cuSerial,
             ),
             pw.SizedBox(height: 20),
-            _buildItemsTable(invoice.items),
+            _buildItemsTable(
+              invoice.items,
+              showTaxCode: showEtimsHeading,
+              defaultTaxRate: settings.kraProfile.vatRegistered
+                  ? settings.kraProfile.defaultTaxRate
+                  : KraTaxRate.exempt,
+            ),
             pw.SizedBox(height: 20),
             _buildTotalsBlock(
               invoice.totalSell,
@@ -337,6 +350,40 @@ class InvoicePdfBuilder {
                 ],
               ),
               pw.SizedBox(height: 8),
+              if (invoice.etimsQrData?.trim().isNotEmpty == true) ...[
+                pw.Divider(thickness: 0.7),
+                pw.Center(
+                  child: pw.Column(
+                    children: [
+                      pw.Text(
+                        'KRA eTIMS Verification',
+                        style: pw.TextStyle(
+                          fontSize: baseFont - 0.5,
+                          fontWeight: pw.FontWeight.bold,
+                        ),
+                      ),
+                      pw.SizedBox(height: 4),
+                      pw.BarcodeWidget(
+                        barcode: pw.Barcode.qrCode(),
+                        data: invoice.etimsQrData!.trim(),
+                        width: is58mm ? 74 : 88,
+                        height: is58mm ? 74 : 88,
+                      ),
+                      pw.SizedBox(height: 3),
+                      if (invoice.etimsSdcDateTime?.trim().isNotEmpty == true)
+                        pw.Text(
+                          'SDC: ${invoice.etimsSdcDateTime!.trim()}',
+                          style: pw.TextStyle(fontSize: baseFont - 1.2),
+                        ),
+                      pw.Text(
+                        'Scan to verify on KRA eTIMS',
+                        style: pw.TextStyle(fontSize: baseFont - 1),
+                      ),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(height: 6),
+              ],
               pw.Center(
                 child: pw.Text(
                   'Thank you for choosing Town Treasure!',
@@ -519,6 +566,7 @@ class InvoicePdfBuilder {
   static pw.Widget _buildTitleAndMeta(
     Invoice invoice, {
     bool isTaxInvoice = false,
+    String headingLabel = 'TAX INVOICE',
   }) {
     final cuNo = invoice.cuInvoiceNumber?.trim() ?? '';
     return pw.Row(
@@ -526,7 +574,7 @@ class InvoicePdfBuilder {
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       children: [
         pw.Text(
-          isTaxInvoice ? 'TAX INVOICE' : 'INVOICE',
+          isTaxInvoice ? headingLabel : 'INVOICE',
           style: pw.TextStyle(
             fontSize: isTaxInvoice ? 21 : 24,
             fontWeight: pw.FontWeight.bold,
@@ -724,7 +772,11 @@ class InvoicePdfBuilder {
     );
   }
 
-  static pw.Widget _buildItemsTable(List<InvoiceLineItem> items) {
+  static pw.Widget _buildItemsTable(
+    List<InvoiceLineItem> items, {
+    bool showTaxCode = false,
+    KraTaxRate defaultTaxRate = KraTaxRate.exempt,
+  }) {
     final rows = <pw.TableRow>[
       pw.TableRow(
         decoration: const pw.BoxDecoration(color: _slateDark),
@@ -733,6 +785,7 @@ class InvoicePdfBuilder {
           _headerCell('ITEM DESCRIPTION'),
           _headerCell('UNIT PRICE', align: pw.TextAlign.right),
           _headerCell('QUANTITY', align: pw.TextAlign.center),
+          if (showTaxCode) _headerCell('TAX', align: pw.TextAlign.center),
           _headerCell('TOTAL', align: pw.TextAlign.right),
         ],
       ),
@@ -742,6 +795,8 @@ class InvoicePdfBuilder {
       final it = items[i];
       final rowColor = i.isOdd ? _altRowBg : PdfColors.white;
       final lineTotal = it.total > 0 ? it.total : (it.qty * it.sellPrice);
+      final rate = KraTaxRate.fromCode(it.taxRate, fallback: defaultTaxRate);
+      final taxLetter = KraTaxCalculator.oscuTaxCode(rate);
       rows.add(
         pw.TableRow(
           decoration: pw.BoxDecoration(color: rowColor),
@@ -759,6 +814,7 @@ class InvoicePdfBuilder {
               '${_fmtQty(it.qty)} ${it.unit.isNotEmpty ? it.unit : 'kgs'}',
               align: pw.TextAlign.center,
             ),
+            if (showTaxCode) _bodyCell(taxLetter, align: pw.TextAlign.center),
             _bodyCell(
               'KSh ${InvoiceFormatters.formatMoney(lineTotal)}',
               align: pw.TextAlign.right,
@@ -776,13 +832,22 @@ class InvoicePdfBuilder {
         ),
         bottom: const pw.BorderSide(color: _slateDark, width: 1.0),
       ),
-      columnWidths: {
-        0: const pw.FixedColumnWidth(44),
-        1: const pw.FlexColumnWidth(2.8),
-        2: const pw.FlexColumnWidth(1.5),
-        3: const pw.FlexColumnWidth(1.4),
-        4: const pw.FlexColumnWidth(1.6),
-      },
+      columnWidths: showTaxCode
+          ? {
+              0: const pw.FixedColumnWidth(38),
+              1: const pw.FlexColumnWidth(2.6),
+              2: const pw.FlexColumnWidth(1.4),
+              3: const pw.FlexColumnWidth(1.3),
+              4: const pw.FixedColumnWidth(34),
+              5: const pw.FlexColumnWidth(1.5),
+            }
+          : {
+              0: const pw.FixedColumnWidth(44),
+              1: const pw.FlexColumnWidth(2.8),
+              2: const pw.FlexColumnWidth(1.5),
+              3: const pw.FlexColumnWidth(1.4),
+              4: const pw.FlexColumnWidth(1.6),
+            },
       children: rows,
     );
   }
@@ -973,12 +1038,20 @@ class InvoicePdfBuilder {
             ),
             pw.SizedBox(width: 10),
             pw.SizedBox(
-              width: 120,
+              width: 150,
               child: pw.Text(
                 hasEtimsQr
-                    ? 'Scan QR to verify invoice\non KRA eTIMS portal.\n${invoice.cuInvoiceNumber?.isNotEmpty == true ? 'CU: ${invoice.cuInvoiceNumber}' : ''}'
+                    ? [
+                        'Scan QR to verify invoice\non KRA eTIMS portal.',
+                        if (invoice.cuInvoiceNumber?.isNotEmpty == true)
+                          'CU: ${invoice.cuInvoiceNumber}',
+                        if (invoice.etimsSdcDateTime?.isNotEmpty == true)
+                          'SDC: ${invoice.etimsSdcDateTime}',
+                        if (invoice.etimsIntrData?.isNotEmpty == true)
+                          'ID: ${invoice.etimsIntrData}',
+                      ].join('\n')
                     : 'Scan to visit our website\nand explore our fresh\ngrocery catalog online.',
-                style: const pw.TextStyle(fontSize: 8.2, color: _textMuted),
+                style: const pw.TextStyle(fontSize: 8.0, color: _textMuted),
               ),
             ),
           ],

@@ -8,6 +8,7 @@ import 'data/services/duplicate_detector_service.dart';
 import 'data/services/local_storage_service.dart';
 import 'data/services/ocr_consensus_service.dart';
 import 'data/services/remote_update_service.dart';
+import 'data/services/cloudflare_backend_service.dart';
 import 'data/services/supabase_service.dart';
 import 'ui/core/theme/app_theme.dart';
 import 'ui/features/clerk/clerk_portal_screen.dart';
@@ -24,7 +25,9 @@ Future<void> main() async {
   final localStorageService = LocalStorageService();
   await localStorageService.init();
 
-  final supabaseService = SupabaseService();
+  final supabaseService = CloudflareBackendService(
+    authGateway: SupabaseService(),
+  );
   final vaultRepository = VaultRepository(
     cryptoService: cryptoService,
     localStorage: localStorageService,

@@ -35,12 +35,32 @@ class RestaurantResolution {
   final List<RestaurantCandidate> candidates;
 }
 
+/// How a client prefers KRA eTIMS Tax Invoices to be issued.
+enum EtimsCadence {
+  none('none', 'Not Required'),
+  daily('daily', 'Daily (Per Invoice)'),
+  monthly('monthly', 'Monthly (Consolidated)');
+
+  const EtimsCadence(this.code, this.label);
+  final String code;
+  final String label;
+
+  static EtimsCadence fromCode(String? raw) {
+    final norm = (raw ?? '').trim().toLowerCase();
+    for (final value in EtimsCadence.values) {
+      if (value.code == norm) return value;
+    }
+    return EtimsCadence.none;
+  }
+}
+
 /// Restaurant client entity matching the `restaurants` collection in `data.js` & `nav.js`.
 class Restaurant {
   const Restaurant({
     required this.id,
     required this.name,
     this.kraPin = '',
+    this.etimsCadence = EtimsCadence.none,
     this.aliases = const [],
     this.contact = '',
     this.phone = '',
@@ -52,6 +72,7 @@ class Restaurant {
   final String id;
   final String name;
   final String kraPin;
+  final EtimsCadence etimsCadence;
   final List<String> aliases;
   final String contact;
   final String phone;
@@ -331,6 +352,7 @@ class Restaurant {
       id: (json['id'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
       kraPin: normalizeKraPin(json['kraPin']?.toString()),
+      etimsCadence: EtimsCadence.fromCode(json['etimsCadence']?.toString()),
       aliases: aliases,
       contact: (json['contact'] ?? '').toString(),
       phone: (json['phone'] ?? '').toString(),
@@ -345,6 +367,7 @@ class Restaurant {
       'id': id,
       'name': name,
       'kraPin': kraPin,
+      if (etimsCadence != EtimsCadence.none) 'etimsCadence': etimsCadence.code,
       'aliases': aliases,
       'contact': contact,
       'phone': phone,
@@ -358,6 +381,7 @@ class Restaurant {
     String? id,
     String? name,
     String? kraPin,
+    EtimsCadence? etimsCadence,
     List<String>? aliases,
     String? contact,
     String? phone,
@@ -369,6 +393,7 @@ class Restaurant {
       id: id ?? this.id,
       name: name ?? this.name,
       kraPin: kraPin ?? this.kraPin,
+      etimsCadence: etimsCadence ?? this.etimsCadence,
       aliases: aliases ?? this.aliases,
       contact: contact ?? this.contact,
       phone: phone ?? this.phone,

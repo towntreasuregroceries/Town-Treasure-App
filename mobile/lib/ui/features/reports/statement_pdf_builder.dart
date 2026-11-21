@@ -631,6 +631,11 @@ class StatementPdfBuilder {
                         color: _forestGreen,
                       ),
                     ),
+                  if (monthlyEtims.sdcDateTime.trim().isNotEmpty)
+                    pw.Text(
+                      'SDC: ${monthlyEtims.sdcDateTime.trim()}',
+                      style: const pw.TextStyle(fontSize: 8, color: _textMuted),
+                    ),
                   if (monthlyEtims.outputVatAmount > 0)
                     pw.Text(
                       '16% VAT: KES ${ReportsViewModel.formatMoney(monthlyEtims.outputVatAmount)}',
