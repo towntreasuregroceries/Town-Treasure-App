@@ -238,6 +238,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: AppTheme.surfaceCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -253,6 +254,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
               Future<void> attachFile() async {
                 try {
                   final picked = await _pickRawDocument();
+                  if (!ctx.mounted) return;
                   if (picked != null) {
                     setSheetState(() {
                       cameraPages.clear();
@@ -267,6 +269,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                     });
                   }
                 } catch (e) {
+                  if (!ctx.mounted) return;
                   setSheetState(() => formError = UserFriendlyError.format(e));
                 }
               }
@@ -276,7 +279,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                   final pages = fromCamera
                       ? await _pickCameraPage()
                       : await _pickGalleryPages();
-                  if (pages.isEmpty) return;
+                  if (!ctx.mounted || pages.isEmpty) return;
                   setSheetState(() {
                     isPacking = true;
                     formError = null;
@@ -288,6 +291,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                         ? 'Scanned Document'
                         : titleCtrl.text.trim(),
                   );
+                  if (!ctx.mounted) return;
                   setSheetState(() {
                     isPacking = false;
                     stagedFile = StagedVaultFile(
@@ -297,6 +301,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                     );
                   });
                 } catch (e) {
+                  if (!ctx.mounted) return;
                   setSheetState(() {
                     isPacking = false;
                     formError = UserFriendlyError.format(e);
@@ -346,6 +351,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                         : 'Document locked & saved on this phone.',
                   );
                 } catch (e) {
+                  if (!ctx.mounted) return;
                   setSheetState(() {
                     isPacking = false;
                     formError = UserFriendlyError.format(e);
@@ -353,15 +359,17 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                 }
               }
 
-              return Padding(
-                padding: EdgeInsets.fromLTRB(
-                  18,
-                  16,
-                  18,
-                  MediaQuery.of(ctx).viewInsets.bottom + 20,
-                ),
-                child: SingleChildScrollView(
-                  child: Column(
+              return SafeArea(
+                top: false,
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    18,
+                    16,
+                    18,
+                    MediaQuery.of(ctx).viewInsets.bottom + 24,
+                  ),
+                  child: SingleChildScrollView(
+                    child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
@@ -480,11 +488,31 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                       ),
                       if (formError != null) ...[
                         const SizedBox(height: 10),
-                        Text(
-                          formError!,
-                          style: const TextStyle(
-                            color: AppTheme.danger,
-                            fontSize: 12.5,
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.dangerSurface,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(
+                                Icons.error_outline,
+                                color: AppTheme.danger,
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  formError!,
+                                  style: const TextStyle(
+                                    color: AppTheme.danger,
+                                    fontSize: 12.5,
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ],
@@ -499,6 +527,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                       ),
                     ],
                   ),
+                ),
                 ),
               );
             },

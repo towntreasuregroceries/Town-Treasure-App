@@ -98,6 +98,7 @@ class LocalStorageService {
   final Future<Database> Function()? _databaseOpener;
   Database? _db;
   Future<Database>? _openingDb;
+  Map<String, dynamic>? _cachedE2eKey;
 
   Future<Database> _getDb() async {
     final current = _db;
@@ -170,20 +171,40 @@ class LocalStorageService {
   // --- Secure Key Store ---
 
   Future<Map<String, dynamic>?> getE2eKey() async {
-    final raw = await _secureStore.read(keyE2eKey);
+    final cached = _cachedE2eKey;
+    if (cached != null) {
+      return Map<String, dynamic>.from(cached);
+    }
+
+    String? raw;
+    try {
+      raw = await _secureStore.read(keyE2eKey);
+    } catch (_) {
+      await Future<void>.delayed(const Duration(milliseconds: 120));
+      raw = await _secureStore.read(keyE2eKey);
+    }
     if (raw == null || raw.isEmpty) return null;
     try {
       final decoded = jsonDecode(raw);
-      return decoded is Map ? Map<String, dynamic>.from(decoded) : null;
+      if (decoded is! Map) return null;
+      final jwk = Map<String, dynamic>.from(decoded);
+      _cachedE2eKey = Map<String, dynamic>.from(jwk);
+      return jwk;
     } catch (_) {
       return null;
     }
   }
 
-  Future<void> setE2eKey(Map<String, dynamic> jwk) =>
-      _secureStore.write(keyE2eKey, jsonEncode(jwk));
+  Future<void> setE2eKey(Map<String, dynamic> jwk) async {
+    final copy = Map<String, dynamic>.from(jwk);
+    _cachedE2eKey = copy;
+    await _secureStore.write(keyE2eKey, jsonEncode(copy));
+  }
 
-  Future<void> clearE2eKey() => _secureStore.delete(keyE2eKey);
+  Future<void> clearE2eKey() async {
+    _cachedE2eKey = null;
+    await _secureStore.delete(keyE2eKey);
+  }
 
   Future<String?> getSaltVersion() => _secureStore.read(keySaltVersion);
   Future<void> setSaltVersion(String version) =>
@@ -214,6 +235,7 @@ class LocalStorageService {
       _secureStore.write(keyLastPage, page);
 
   Future<void> clearAuthMetadata() async {
+    _cachedE2eKey = null;
     await _secureStore.delete(keyUserId);
     await _secureStore.delete(keyUserEmail);
     await _secureStore.delete(keyE2eKey);

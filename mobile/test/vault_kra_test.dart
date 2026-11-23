@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -18,6 +18,7 @@ import 'package:town_treasure_groceries/data/services/supabase_service.dart';
 import 'package:town_treasure_groceries/domain/models/models.dart';
 import 'package:town_treasure_groceries/ui/core/developer_preview.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
+import 'package:town_treasure_groceries/ui/core/user_friendly_error.dart';
 import 'package:town_treasure_groceries/ui/features/invoices/invoice_pdf_builder.dart';
 import 'package:town_treasure_groceries/ui/features/kra/kra_tax_center_screen.dart';
 import 'package:town_treasure_groceries/ui/features/reports/reports_view_model.dart';
@@ -61,6 +62,31 @@ class _FakeAuthGateway implements VaultAuthGateway {
     calls++;
     return allow;
   }
+}
+
+class _FlakySecureKeyStore implements SecureKeyStore {
+  final Map<String, String> _data = {};
+  int readCount = 0;
+  bool failNextRead = false;
+
+  @override
+  Future<void> delete(String key) async => _data.remove(key);
+
+  @override
+  Future<String?> read(String key) async {
+    readCount++;
+    if (failNextRead) {
+      failNextRead = false;
+      throw PlatformException(
+        code: 'KEYSTORE_TRANSIENT',
+        message: 'Keystore temporarily busy',
+      );
+    }
+    return _data[key];
+  }
+
+  @override
+  Future<void> write(String key, String value) async => _data[key] = value;
 }
 
 void main() {
@@ -778,6 +804,89 @@ void main() {
       ctrl.toggleRedesignedUi();
       expect(ctrl.isRedesignedUiActiveFor('onderegerald@gmail.com'), isFalse);
       expect(ctrl.isRedesignedUiActiveFor('vero@towntreasure.co.ke'), isFalse);
+    });
+
+    test('UserFriendlyError surfaces actionable PlatformException messages without opaque swallowing', () {
+      expect(
+        UserFriendlyError.format(
+          PlatformException(
+            code: 'DOC_READ_ERROR',
+            message: 'Selected document exceeds the 20 MB size limit.',
+          ),
+        ),
+        'Selected document exceeds the 20 MB size limit.',
+      );
+      expect(
+        UserFriendlyError.format(
+          PlatformException(code: 'BUSY', message: 'File picker already active'),
+        ),
+        contains('already open'),
+      );
+      expect(
+        UserFriendlyError.format(PlatformException(code: 'already_active')),
+        contains('already open'),
+      );
+      expect(
+        UserFriendlyError.format(PlatformException(code: 'invalid_image')),
+        contains('JPG or PNG'),
+      );
+      expect(
+        UserFriendlyError.format(
+          PlatformException(code: 'camera_access_denied'),
+        ),
+        contains('Permission is needed'),
+      );
+      expect(
+        UserFriendlyError.format(
+          PlatformException(
+            code: 'KEYSTORE_ERR',
+            message: 'java.security.KeyStoreException',
+          ),
+        ),
+        'Could not complete that action (KEYSTORE_ERR). Please try again.',
+      );
+    });
+
+    test('LocalStorageService caches E2EE key in memory and retries once on transient PlatformException', () async {
+      final store = _FlakySecureKeyStore();
+      await store.write(
+        LocalStorageService.keyE2eKey,
+        jsonEncode({'k': 'abc123', 'kty': 'oct'}),
+      );
+      store.failNextRead = true;
+
+      final storage = LocalStorageService(secureStore: store);
+      final first = await storage.getE2eKey();
+      expect(first, {'k': 'abc123', 'kty': 'oct'});
+      expect(store.readCount, 2);
+
+      // Cached in memory — does not hit SecureKeyStore again.
+      final cached = await storage.getE2eKey();
+      expect(cached, {'k': 'abc123', 'kty': 'oct'});
+      expect(store.readCount, 2);
+
+      // Mutating the returned map must not mutate the cache.
+      cached!['k'] = 'tampered';
+      expect((await storage.getE2eKey())!['k'], 'abc123');
+
+      await storage.clearE2eKey();
+      expect(await storage.getE2eKey(), isNull);
+      expect(store.readCount, 3);
+    });
+
+    test('PersonalVaultService.packImagesToPdf rejects corrupt or unsupported image bytes clearly', () async {
+      await expectLater(
+        () => PersonalVaultService.packImagesToPdf(
+          [Uint8List.fromList([1, 2, 3, 4, 5])],
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            contains('Could not read that photo format'),
+          ),
+        ),
+      );
     });
   });
 }

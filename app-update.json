@@ -1,8 +1,8 @@
 {
-  "version": "1.2.3",
-  "buildNumber": 2017,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.3/TownTreasureGroceries.apk",
-  "sha256": "4e29545d480bf8955ea70ff03c90b14ca2afdd69ba3150dd2c00fc781932e53d",
-  "releaseNotes": "v1.2.3: New Executive Dashboard for all owners with unified This Month Performance hero card, M-Pesa-style eye toggle to hide/show all balances, Quick Tools, Financial Snapshot Ledger (Receivables, Operating Costs %, KRA eTIMS Compliance), 6-Month Cashflow trend chart, reliable closed-app background notifications, unified Print & Dispatch Center, and fast Cloudflare cloud sync.",
+  "version": "1.2.4",
+  "buildNumber": 2018,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.4/TownTreasureGroceries.apk",
+  "sha256": "ed1875949b3f6d8656a5f4722621b416d0f17e2dd87b0c6112178469dcfee4d6",
+  "releaseNotes": "v1.2.4: Fixed open dialogs and bottom sheets remaining visible over the lock/unlock screen on lock or sign-out; hardened Personal Documents Vault E2EE key storage, R8 rules, Android file picker, image PDF packing, error reporting, and bottom sheet nav-bar spacing.",
   "mandatory": false
 }

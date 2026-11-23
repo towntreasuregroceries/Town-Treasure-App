@@ -1,8 +1,8 @@
 {
-  "version": "1.2.3",
-  "buildNumber": 2017,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.3/TownTreasureClerk.apk",
-  "sha256": "a65a6acccff291f0a8749a7f2a52f584133fbb4e2020b0632646bec75fa29c9c",
-  "releaseNotes": "v1.2.3: Migrated field clerk docket sync and photo uploads to Cloudflare D1 & R2 to match the Owner App v1.2.3 release.",
+  "version": "1.2.4",
+  "buildNumber": 2018,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.4/TownTreasureClerk.apk",
+  "sha256": "e5e98dcd37c2d92b63eedc479340c749e8bdf45033ed075944669099ee31635f",
+  "releaseNotes": "v1.2.4: Hardened secure storage, Android R8 keep rules, overlay cleanup on lock/sign-out, and plain-language device error handling to match Owner App v1.2.4.",
   "mandatory": false
 }

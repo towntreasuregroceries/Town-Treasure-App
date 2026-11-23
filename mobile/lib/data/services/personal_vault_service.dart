@@ -54,7 +54,16 @@ class PersonalVaultService {
   final VaultDirProvider _dirProvider;
 
   static Future<Directory> _defaultVaultDir() async {
-    final base = await getApplicationSupportDirectory();
+    Directory base;
+    try {
+      base = await getApplicationSupportDirectory();
+    } catch (_) {
+      try {
+        base = await getApplicationDocumentsDirectory();
+      } catch (_) {
+        base = await getTemporaryDirectory();
+      }
+    }
     final dir = Directory(p.join(base.path, 'ttg_personal_vault'));
     if (!await dir.exists()) {
       await dir.create(recursive: true);
@@ -82,14 +91,21 @@ class PersonalVaultService {
     }
     final doc = pw.Document(title: title, author: 'Town Treasure Vault');
     for (final rawBytes in imagePages) {
-      final decoded = img.decodeImage(rawBytes);
-      Uint8List normalized = rawBytes;
-      if (decoded != null) {
-        final resized = decoded.width > 1800
-            ? img.copyResize(decoded, width: 1800)
-            : decoded;
-        normalized = Uint8List.fromList(img.encodeJpg(resized, quality: 88));
+      img.Image? decoded;
+      try {
+        decoded = img.decodeImage(rawBytes);
+      } catch (_) {
+        decoded = null;
       }
+      if (decoded == null) {
+        throw StateError(
+          'Could not read that photo format. Please choose a JPG or PNG image or take a new photo.',
+        );
+      }
+      final resized = decoded.width > 1800
+          ? img.copyResize(decoded, width: 1800)
+          : decoded;
+      final normalized = Uint8List.fromList(img.encodeJpg(resized, quality: 88));
       final memImg = pw.MemoryImage(normalized);
       doc.addPage(
         pw.Page(
@@ -240,10 +256,11 @@ class PersonalVaultService {
 
     final cleanUrl = normalizeWorkerUrl(workerUrl);
     if (cleanUrl.isEmpty) return;
-    final token = await _supabase.getAccessToken();
-    if (token == null || token.isEmpty) return;
 
     try {
+      final token = await _supabase.getAccessToken();
+      if (token == null || token.isEmpty) return;
+
       await _http
           .delete(
             Uri.parse('$cleanUrl/docs/${Uri.encodeComponent(docId)}'),
@@ -262,10 +279,10 @@ class PersonalVaultService {
     required String sha256,
     required String mimeType,
   }) async {
-    final token = await _supabase.getAccessToken();
-    if (token == null || token.isEmpty) return false;
-
     try {
+      final token = await _supabase.getAccessToken();
+      if (token == null || token.isEmpty) return false;
+
       final res = await _http
           .put(
             Uri.parse('$workerUrl/docs/${Uri.encodeComponent(docId)}'),

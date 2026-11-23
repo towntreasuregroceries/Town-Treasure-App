@@ -1,3 +1,5 @@
+import 'package:flutter/services.dart';
+
 /// Converts technical Dart/Flutter/HTTP/Supabase exceptions into calm,
 /// plain-language messages suitable for end users.
 class UserFriendlyError {
@@ -7,6 +9,39 @@ class UserFriendlyError {
     Object error, {
     String fallback = 'Something went wrong. Please try again.',
   }) {
+    if (error is PlatformException) {
+      final code = error.code.trim();
+      final codeLower = code.toLowerCase();
+      final rawMsg = (error.message ?? '').trim();
+      final msgLower = rawMsg.toLowerCase();
+
+      if (codeLower.contains('camera') ||
+          codeLower.contains('permission') ||
+          codeLower.contains('denied') ||
+          msgLower.contains('camera') ||
+          msgLower.contains('permission')) {
+        return 'Permission is needed to access this feature. Please allow access in your phone settings and try again.';
+      }
+      if (codeLower == 'busy' || codeLower == 'already_active') {
+        return 'The file picker is already open or finishing a previous request. Please try again.';
+      }
+      if (codeLower == 'invalid_image') {
+        return 'That photo could not be read. Please choose a JPG or PNG image or take a new photo.';
+      }
+      if ((codeLower == 'doc_read_error' ||
+              codeLower == 'pdf_render_error' ||
+              codeLower == 'picker_error') &&
+          rawMsg.isNotEmpty &&
+          !rawMsg.contains('\n') &&
+          !msgLower.contains('exception')) {
+        return rawMsg;
+      }
+      if (code.isNotEmpty) {
+        return 'Could not complete that action ($code). Please try again.';
+      }
+      return fallback;
+    }
+
     var msg = error.toString().trim();
     if (msg.isEmpty) return fallback;
 

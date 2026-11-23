@@ -589,4 +589,103 @@ void main() {
       contains('well-lit photo'),
     );
   });
+
+  testWidgets(
+    'AuthGate dismisses open bottom sheets and alert dialogs on background lock and sign-out',
+    (WidgetTester tester) async {
+      final harness = _IntegrationHarness(
+        initialUser: const AuthUserInfo(
+          id: 'user-overlay-lock',
+          email: 'owner@towntreasure.test',
+        ),
+        biometricEnabled: true,
+      );
+      await harness.seedApp();
+      await harness.storage.setUserId('user-overlay-lock');
+      await harness.storage.setE2eKey(
+        CryptoService.bytesToJwk(List<int>.filled(32, 7)),
+      );
+
+      await tester.pumpWidget(harness.buildApp());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('btn_quick_unlock')));
+      await tester.pumpAndSettle();
+      expect(find.byType(DashboardScreen), findsOneWidget);
+
+      // Open the New / Scan modal bottom sheet over Dashboard, then background-lock.
+      await tester.tap(find.byKey(const Key('nav_new_scan')));
+      await tester.pumpAndSettle();
+      expect(find.text('Scan Delivery Docket (OCR)'), findsOneWidget);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('btn_quick_unlock')), findsOneWidget);
+      expect(find.text('Scan Delivery Docket (OCR)'), findsNothing);
+
+      // Re-unlock, open an AlertDialog, then background-lock again.
+      await tester.tap(find.byKey(const Key('btn_quick_unlock')));
+      await tester.pumpAndSettle();
+      expect(find.byType(DashboardScreen), findsOneWidget);
+
+      final dashCtx = tester.element(find.byType(DashboardScreen));
+      showDialog<void>(
+        context: dashCtx,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Mark Invoices Paid'),
+          content: const Text(
+            'Mark 3 selected invoices totaling KES 344,639.00 as paid today?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Mark Invoices Paid'), findsOneWidget);
+
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('btn_quick_unlock')), findsOneWidget);
+      expect(find.text('Mark Invoices Paid'), findsNothing);
+
+      // Re-unlock, open an AlertDialog again, then sign out while dialog is open.
+      await tester.tap(find.byKey(const Key('btn_quick_unlock')));
+      await tester.pumpAndSettle();
+      expect(find.byType(DashboardScreen), findsOneWidget);
+
+      final dashCtx2 = tester.element(find.byType(DashboardScreen));
+      showDialog<void>(
+        context: dashCtx2,
+        builder: (ctx) => const AlertDialog(
+          title: Text('Confirm Sign Out Test'),
+          content: Text('Should vanish immediately on sign-out.'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Confirm Sign Out Test'), findsOneWidget);
+
+      final signedOut = await harness.auth.signOut();
+      expect(signedOut, isTrue);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('btn_sign_in')), findsOneWidget);
+      expect(find.text('Confirm Sign Out Test'), findsNothing);
+    },
+  );
 }

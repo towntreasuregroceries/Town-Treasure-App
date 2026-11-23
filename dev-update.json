@@ -1,8 +1,8 @@
 {
-  "version": "1.2.3",
-  "buildNumber": 2017,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.3/TownTreasureGroceries.apk",
-  "sha256": "4e29545d480bf8955ea70ff03c90b14ca2afdd69ba3150dd2c00fc781932e53d",
-  "releaseNotes": "v1.2.3 (Official Release Parity): Executive Dashboard UI v2 rolled out to all owners with M-Pesa-style privacy eye toggle, closed-app background notifications, unified PDF printing, and Cloudflare D1+R2 sync.",
+  "version": "1.2.4",
+  "buildNumber": 2018,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.4/TownTreasureGroceries.apk",
+  "sha256": "ed1875949b3f6d8656a5f4722621b416d0f17e2dd87b0c6112178469dcfee4d6",
+  "releaseNotes": "v1.2.4 (Official Release Parity): Fixed open dialogs/sheets leaking onto the lock screen and hardened Personal Documents Vault storage, Android picker, R8 rules, error messages, and sheet nav-bar spacing.",
   "mandatory": false
 }

@@ -230,6 +230,25 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     }
   }
 
+  void _dismissOpenOverlaysAndSubRoutes() {
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.clearSnackBars();
+    final nav = Navigator.maybeOf(context, rootNavigator: true);
+    if (nav != null && nav.canPop()) {
+      try {
+        nav.popUntil((route) => route.isFirst);
+      } catch (_) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          final postNav = Navigator.maybeOf(context, rootNavigator: true);
+          if (postNav != null && postNav.canPop()) {
+            postNav.popUntil((route) => route.isFirst);
+          }
+        });
+      }
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
@@ -239,6 +258,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
         _lockedInBackground &&
         _unlockedUser == null) {
       _lockedInBackground = false;
+      _dismissOpenOverlaysAndSubRoutes();
       if (mounted) {
         setState(() {
           _authEpoch++;
@@ -252,6 +272,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
 
     if (_biometricLockEnabled) {
       _lockedInBackground = true;
+      _dismissOpenOverlaysAndSubRoutes();
       if (mounted) {
         setState(() {
           _unlockedUser = null;
@@ -267,6 +288,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     _biometricLockEnabled = enabled;
     if (enabled && mounted && _unlockedUser != null && !AppLockGuard.isSuppressed) {
       _lockedInBackground = true;
+      _dismissOpenOverlaysAndSubRoutes();
       setState(() {
         _unlockedUser = null;
         _authEpoch++;
@@ -278,6 +300,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     if (!mounted) return;
     _refreshBiometricStatus();
     if (_unlockedUser != null && _authRepo?.currentUser == null) {
+      _dismissOpenOverlaysAndSubRoutes();
       setState(() {
         _unlockedUser = null;
         _authEpoch++;
@@ -295,6 +318,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
 
   void _handleSignedOut() {
     if (!mounted) return;
+    _dismissOpenOverlaysAndSubRoutes();
     setState(() {
       _biometricLockEnabled = false;
       _unlockedUser = null;

@@ -13,6 +13,12 @@
 -keep class dev.fluttercommunity.workmanager.** { *; }
 -keep class com.dexterous.flutterlocalnotifications.** { *; }
 
+# Keep FlutterSecureStorage, Jetpack EncryptedSharedPreferences, and Tink crypto classes intact under R8
+-keep class com.it_nomads.fluttersecurestorage.** { *; }
+-keep class androidx.security.crypto.** { *; }
+-keep class com.google.crypto.tink.** { *; }
+-dontwarn com.google.crypto.tink.**
+
 # Suppress R8 missing-class warnings for unused optional non-Latin ML Kit script modules
 -dontwarn com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions
 -dontwarn com.google.mlkit.vision.text.chinese.ChineseTextRecognizerOptions$Builder
