@@ -28,6 +28,9 @@ class UserFriendlyError {
       if (codeLower == 'invalid_image') {
         return 'That photo could not be read. Please choose a JPG or PNG image or take a new photo.';
       }
+      if (codeLower == 'exception encountered') {
+        return 'Your phone secure key store was reset after an update. Re-enter your account password to restore your encryption key and try again.';
+      }
       if ((codeLower == 'doc_read_error' ||
               codeLower == 'pdf_render_error' ||
               codeLower == 'picker_error') &&

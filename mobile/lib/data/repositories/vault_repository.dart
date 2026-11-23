@@ -837,12 +837,12 @@ class VaultRepository extends ChangeNotifier {
   }
 
   Future<bool> _performSync() async {
-    final uid = await _getActiveUserId();
-    if (uid == null || uid.isEmpty) return false;
-    final jwkKey = await _storage.getE2eKey();
-    if (jwkKey == null) return false;
-
     try {
+      final uid = await _getActiveUserId();
+      if (uid == null || uid.isEmpty) return false;
+      final jwkKey = await _storage.getE2eKey();
+      if (jwkKey == null) return false;
+
       _lastSyncError = null;
       for (var attempt = 1; attempt <= 3; attempt++) {
         final remoteRow = await _readRemoteVault(uid);
@@ -939,10 +939,6 @@ class VaultRepository extends ChangeNotifier {
 
   Future<bool> loadFromSupabase() async {
     _remoteRevision = null;
-    final uid = await _getActiveUserId();
-    if (uid == null || uid.isEmpty) return false;
-    final jwkKey = await _storage.getE2eKey();
-    if (jwkKey == null) return false;
 
     final localDeletedRestaurantIds = _deletedRestaurantIds.toSet();
     final localRestaurants = List<Restaurant>.from(_restaurants);
@@ -963,6 +959,11 @@ class VaultRepository extends ChangeNotifier {
     final localBorrowings = List<Borrowing>.from(_borrowings);
 
     try {
+      final uid = await _getActiveUserId();
+      if (uid == null || uid.isEmpty) return false;
+      final jwkKey = await _storage.getE2eKey();
+      if (jwkKey == null) return false;
+
       var revisionSupport = true;
       RemoteVaultRow? row;
       try {

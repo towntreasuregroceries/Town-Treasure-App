@@ -143,6 +143,27 @@ class AuthRepository extends ChangeNotifier {
     return true;
   }
 
+  /// Verifies the signed-in user's master password against Supabase Auth and
+  /// re-derives/persists their E2EE vault key without signing them out.
+  Future<void> reunlockVaultKey(String password) async {
+    if (password.isEmpty) {
+      throw ArgumentError('Enter your account password.');
+    }
+    final user = await getCurrentUser();
+    final email = (user?.email ?? await getUserEmail())?.trim().toLowerCase();
+    if (user == null || email == null || email.isEmpty) {
+      throw StateError(
+        'No active account session was found. Please sign in again.',
+      );
+    }
+    await _supabase.signInWithPassword(email, password);
+    _currentUser = user;
+    await _storage.setUserId(user.id);
+    await _storage.setUserEmail(email);
+    await _vault.migrateE2EKey(password, user.id);
+    notifyListeners();
+  }
+
   /// Changes the master password, re-derives the per-user E2EE key, re-encrypts
   /// and syncs the vault, and signs out other sessions.
   Future<void> updatePassword({

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
@@ -12,23 +13,93 @@ abstract class SecureKeyStore {
 }
 
 class FlutterSecureKeyStore implements SecureKeyStore {
-  FlutterSecureKeyStore([FlutterSecureStorage? storage])
-      : _storage = storage ??
+  FlutterSecureKeyStore([
+    FlutterSecureStorage? storage,
+    this._useNativeChannel = true,
+  ]) : _storage = storage ??
             const FlutterSecureStorage(
               aOptions: AndroidOptions(encryptedSharedPreferences: true),
             );
 
+  static const MethodChannel _nativeChannel =
+      MethodChannel('com.towntreasuregroceries/secure_kv');
+
   final FlutterSecureStorage _storage;
+  final bool _useNativeChannel;
+
+  Future<String?> _readNative(String key) async {
+    if (!_useNativeChannel) return null;
+    try {
+      return await _nativeChannel.invokeMethod<String>('read', {'key': key});
+    } on MissingPluginException {
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> _writeNative(String key, String value) async {
+    if (!_useNativeChannel) return false;
+    try {
+      await _nativeChannel.invokeMethod<void>(
+        'write',
+        {'key': key, 'value': value},
+      );
+      return true;
+    } on MissingPluginException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _deleteNative(String key) async {
+    if (!_useNativeChannel) return;
+    try {
+      await _nativeChannel.invokeMethod<void>('delete', {'key': key});
+    } catch (_) {}
+  }
 
   @override
-  Future<String?> read(String key) => _storage.read(key: key);
+  Future<String?> read(String key) async {
+    final nativeVal = await _readNative(key);
+    if (nativeVal != null && nativeVal.isNotEmpty) {
+      return nativeVal;
+    }
+    try {
+      final legacyVal = await _storage.read(key: key);
+      if (legacyVal != null && legacyVal.isNotEmpty) {
+        // Silently migrate healthy legacy entries into Android Keystore v2.
+        await _writeNative(key, legacyVal);
+      }
+      return legacyVal;
+    } catch (_) {
+      // Heal permanently corrupted EncryptedSharedPreferences/Keystore entries
+      // instead of failing every read with PlatformException("Exception encountered").
+      try {
+        await _storage.delete(key: key);
+      } catch (_) {}
+      return null;
+    }
+  }
 
   @override
-  Future<void> write(String key, String value) =>
-      _storage.write(key: key, value: value);
+  Future<void> write(String key, String value) async {
+    final savedNative = await _writeNative(key, value);
+    try {
+      await _storage.write(key: key, value: value);
+    } catch (_) {
+      if (!savedNative) rethrow;
+    }
+  }
 
   @override
-  Future<void> delete(String key) => _storage.delete(key: key);
+  Future<void> delete(String key) async {
+    await _deleteNative(key);
+    try {
+      await _storage.delete(key: key);
+    } catch (_) {}
+  }
 }
 
 /// Offline persistence layer using `flutter_secure_storage` for credentials/keys

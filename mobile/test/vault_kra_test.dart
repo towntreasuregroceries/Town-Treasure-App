@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:image/image.dart' as img;
+import 'package:town_treasure_groceries/data/repositories/auth_repository.dart';
 import 'package:town_treasure_groceries/data/repositories/vault_repository.dart';
 import 'package:town_treasure_groceries/data/services/cloudflare_backend_service.dart';
 import 'package:town_treasure_groceries/data/services/crypto_service.dart';
@@ -845,6 +846,15 @@ void main() {
         ),
         'Could not complete that action (KEYSTORE_ERR). Please try again.',
       );
+      expect(
+        UserFriendlyError.format(
+          PlatformException(
+            code: 'Exception encountered',
+            message: 'read',
+          ),
+        ),
+        contains('restore your encryption key'),
+      );
     });
 
     test('LocalStorageService caches E2EE key in memory and retries once on transient PlatformException', () async {
@@ -888,5 +898,157 @@ void main() {
         ),
       );
     });
+
+    test('VaultRepository syncNow and loadFromSupabase catch SecureKeyStore PlatformException cleanly', () async {
+      final brokenStore = _AlwaysFailingSecureKeyStore();
+      final storage = _InMemoryLocalStorageServiceWithStore(brokenStore);
+      final supabase = FakeSupabaseGateway()
+        ..user = const AuthUserInfo(id: 'owner-1', email: 'gerald@ttg.test');
+      final vault = VaultRepository(
+        cryptoService: CryptoService(),
+        localStorage: storage,
+        supabase: supabase,
+      );
+      addTearDown(vault.dispose);
+
+      expect(await vault.loadFromSupabase(), isFalse);
+      expect(vault.lastSyncError, contains('restore your encryption key'));
+      expect(await vault.syncNow(), isFalse);
+      expect(vault.lastSyncError, contains('restore your encryption key'));
+    });
+
+    testWidgets(
+      'PersonalVaultScreen recovers missing E2EE key inline with password and immediately saves staged PDF',
+      (tester) async {
+        final tempDir =
+            Directory.systemTemp.createTempSync('ttg_vault_recover_test_');
+        addTearDown(() {
+          if (tempDir.existsSync()) {
+            tempDir.deleteSync(recursive: true);
+          }
+        });
+
+        final storage = _InMemoryLocalStorageService();
+        final crypto = CryptoService();
+        final supabase = FakeSupabaseGateway()
+          ..user = const AuthUserInfo(id: 'owner-1', email: 'gerald@ttg.test');
+
+        final vault = VaultRepository(
+          cryptoService: crypto,
+          localStorage: storage,
+          supabase: supabase,
+          syncDebounceDuration: const Duration(milliseconds: 10),
+        );
+        addTearDown(vault.dispose);
+
+        final authRepo = AuthRepository(
+          supabase: supabase,
+          localStorage: storage,
+          cryptoService: crypto,
+          vaultRepository: vault,
+        );
+        addTearDown(authRepo.dispose);
+
+        final service = PersonalVaultService(
+          cryptoService: crypto,
+          localStorage: storage,
+          supabase: supabase,
+          httpClient: MockClient((req) async {
+            if (req.method == 'PUT') {
+              return http.Response(jsonEncode({'ok': true}), 200);
+            }
+            return http.Response('Not found', 404);
+          }),
+          vaultDirProvider: () async => tempDir,
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.light(),
+            home: PersonalVaultScreen(
+              vault: vault,
+              vaultService: service,
+              authRepository: authRepo,
+              requireBiometricLock: false,
+              documentPicker: () async => StagedVaultFile(
+                bytes: Uint8List.fromList(utf8.encode('%PDF-1.4\nVATSchedule')),
+                mimeType: 'application/pdf',
+                fileName: 'vat_schedule.pdf',
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Missing E2EE key shows the inline restore banner.
+        expect(find.byKey(const Key('btn_restore_vault_key')), findsOneWidget);
+
+        // User stages a PDF and taps Lock & Save Document without signing out.
+        await tester.tap(find.byKey(const Key('fab_add_vault_doc')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('btn_vault_pick_file')));
+        await tester.pumpAndSettle();
+        await tester.ensureVisible(find.byKey(const Key('btn_vault_save_doc')));
+        await tester.tap(find.byKey(const Key('btn_vault_save_doc')));
+        await tester.pumpAndSettle();
+
+        // Automatically prompts for account password to restore encryption key.
+        expect(find.text('Unlock Encryption Key'), findsOneWidget);
+        await tester.enterText(
+          find.byKey(const Key('field_restore_vault_password')),
+          'MyMasterPass#2026',
+        );
+        await tester.tap(find.byKey(const Key('btn_confirm_restore_vault_key')));
+
+        for (var i = 0; i < 60 && vault.personalDocuments.isEmpty; i++) {
+          await tester.pump(const Duration(milliseconds: 20));
+          await tester.runAsync(
+            () => Future<void>.delayed(const Duration(milliseconds: 25)),
+          );
+        }
+        await tester.pumpAndSettle();
+
+        expect(vault.personalDocuments.length, 1);
+        expect(vault.personalDocuments.first.title, 'vat_schedule');
+        expect(vault.personalDocuments.first.r2Synced, isTrue);
+        expect(await storage.getE2eKey(), isNotNull);
+        expect(find.byKey(const Key('btn_restore_vault_key')), findsNothing);
+      },
+    );
   });
+}
+
+class _AlwaysFailingSecureKeyStore implements SecureKeyStore {
+  @override
+  Future<void> delete(String key) async {}
+
+  @override
+  Future<String?> read(String key) async {
+    throw PlatformException(code: 'Exception encountered', message: 'read');
+  }
+
+  @override
+  Future<void> write(String key, String value) async {}
+}
+
+class _InMemoryLocalStorageServiceWithStore extends LocalStorageService {
+  _InMemoryLocalStorageServiceWithStore(SecureKeyStore store)
+      : super(secureStore: store);
+
+  final Map<String, String> _kv = {};
+
+  @override
+  Future<void> init() async {}
+
+  @override
+  Future<String?> getRaw(String key) async => _kv[key];
+
+  @override
+  Future<void> setRaw(String key, String value) async => _kv[key] = value;
+
+  @override
+  Future<void> deleteKey(String key) async => _kv.remove(key);
+
+  @override
+  Future<void> close() async {}
 }

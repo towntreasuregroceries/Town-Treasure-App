@@ -411,6 +411,7 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => PersonalVaultScreen(
           vault: vault,
           vaultService: vaultService!,
+          authRepository: context.read<AuthRepository>(),
         ),
       ),
     );

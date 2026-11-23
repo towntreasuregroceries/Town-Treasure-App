@@ -5,8 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:local_auth/local_auth.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../../data/repositories/auth_repository.dart';
 import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/personal_vault_service.dart';
 import '../../../domain/models/models.dart';
@@ -60,6 +62,7 @@ class PersonalVaultScreen extends StatefulWidget {
     super.key,
     required this.vault,
     required this.vaultService,
+    this.authRepository,
     this.authGateway,
     this.documentPicker,
     this.cameraPagePicker,
@@ -69,6 +72,7 @@ class PersonalVaultScreen extends StatefulWidget {
 
   final VaultRepository vault;
   final PersonalVaultService vaultService;
+  final AuthRepository? authRepository;
   final VaultAuthGateway? authGateway;
   final DocumentFilePicker? documentPicker;
   final VaultImagePagesPicker? cameraPagePicker;
@@ -89,6 +93,7 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
   bool _unlocked = false;
   bool _isAuthenticating = false;
   bool _isBusy = false;
+  bool _needsKeyRecovery = false;
   PersonalDocCategory? _selectedCategory;
   String? _authError;
 
@@ -100,9 +105,162 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
     widget.vault.addListener(_onVaultChanged);
     if (!widget.requireBiometricLock) {
       _unlocked = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) => _refreshKeyStatus());
     } else {
       WidgetsBinding.instance.addPostFrameCallback((_) => _promptUnlock());
     }
+  }
+
+  AuthRepository? _resolveAuthRepository() {
+    if (widget.authRepository != null) return widget.authRepository;
+    try {
+      return context.read<AuthRepository>();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _refreshKeyStatus() async {
+    try {
+      final hasKey = await widget.vaultService.hasEncryptionKey();
+      if (!mounted) return;
+      if (_needsKeyRecovery != !hasKey) {
+        setState(() => _needsKeyRecovery = !hasKey);
+      }
+    } catch (_) {}
+  }
+
+  Future<bool> _promptRestoreVaultKey() async {
+    final authRepo = _resolveAuthRepository();
+    if (authRepo == null || !mounted) return false;
+
+    var isUnlocking = false;
+    var obscure = true;
+    String? dialogError;
+
+    final restored = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogCtx) => ScopedTextControllers(
+        initialTexts: const [''],
+        builder: (dialogCtx, ctrls) {
+          final passwordCtrl = ctrls[0];
+          return StatefulBuilder(
+            builder: (dialogCtx, setDialogState) {
+              Future<void> unlock() async {
+                final pwd = passwordCtrl.text;
+                if (pwd.isEmpty) {
+                  setDialogState(
+                    () => dialogError = 'Enter your account password.',
+                  );
+                  return;
+                }
+                setDialogState(() {
+                  isUnlocking = true;
+                  dialogError = null;
+                });
+                try {
+                  await authRepo.reunlockVaultKey(pwd);
+                  if (dialogCtx.mounted) {
+                    Navigator.of(dialogCtx).pop(true);
+                  }
+                } catch (e) {
+                  if (!dialogCtx.mounted) return;
+                  setDialogState(() {
+                    isUnlocking = false;
+                    dialogError = UserFriendlyError.format(
+                      e,
+                      fallback:
+                          'Could not verify that password. Please check your password and try again.',
+                    );
+                  });
+                }
+              }
+
+              return AlertDialog(
+                title: const Text('Unlock Encryption Key'),
+                content: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const Text(
+                        'Your phone secure key store needs a quick confirmation after updating. Enter your Town Treasure account password once to restore your encryption key without signing out.',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: AppTheme.slateMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      TextField(
+                        key: const Key('field_restore_vault_password'),
+                        controller: passwordCtrl,
+                        obscureText: obscure,
+                        autofocus: true,
+                        onSubmitted: (_) => isUnlocking ? null : unlock(),
+                        decoration: InputDecoration(
+                          labelText: 'Account Password',
+                          suffixIcon: IconButton(
+                            onPressed: () =>
+                                setDialogState(() => obscure = !obscure),
+                            icon: Icon(
+                              obscure
+                                  ? Icons.visibility_outlined
+                                  : Icons.visibility_off_outlined,
+                            ),
+                          ),
+                        ),
+                      ),
+                      if (dialogError != null) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          dialogError!,
+                          style: const TextStyle(
+                            color: AppTheme.danger,
+                            fontSize: 12.5,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: isUnlocking
+                        ? null
+                        : () => Navigator.of(dialogCtx).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton.icon(
+                    key: const Key('btn_confirm_restore_vault_key'),
+                    onPressed: isUnlocking ? null : unlock,
+                    icon: isUnlocking
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(Icons.lock_open_outlined, size: 18),
+                    label: Text(
+                      isUnlocking ? 'Unlocking...' : 'Unlock & Continue',
+                    ),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    );
+
+    if (restored == true && mounted) {
+      setState(() => _needsKeyRecovery = false);
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -133,6 +291,9 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
         _authError = 'Documents remain locked. Tap Unlock to verify identity.';
       }
     });
+    if (ok) {
+      await _refreshKeyStatus();
+    }
   }
 
   void _showSnack(String msg, {Color color = AppTheme.forestGreen}) {
@@ -327,6 +488,19 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                   formError = null;
                 });
                 try {
+                  if (!await widget.vaultService.hasEncryptionKey()) {
+                    if (!ctx.mounted) return;
+                    final restored = await _promptRestoreVaultKey();
+                    if (!ctx.mounted) return;
+                    if (!restored) {
+                      setSheetState(() {
+                        isPacking = false;
+                        formError =
+                            'Enter your Town Treasure account password to restore your encryption key before saving.';
+                      });
+                      return;
+                    }
+                  }
                   final rawMeta = PersonalDocument(
                     id: 'doc_${AppHelpers.genId()}',
                     title: title,
@@ -540,6 +714,13 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
   Future<void> _openDocument(PersonalDocument doc) async {
     setState(() => _isBusy = true);
     try {
+      if (!await widget.vaultService.hasEncryptionKey()) {
+        if (!mounted) return;
+        setState(() => _isBusy = false);
+        final restored = await _promptRestoreVaultKey();
+        if (!restored || !mounted) return;
+        setState(() => _isBusy = true);
+      }
       final plainBytes = await widget.vaultService.loadAndDecryptDocument(
         doc,
         workerUrl: PersonalVaultService.normalizeWorkerUrl(
@@ -723,6 +904,57 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
                           ],
                         ),
                       ),
+                      if (_needsKeyRecovery) ...[
+                        const SizedBox(height: 10),
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: AppTheme.warningSurface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppTheme.warning.withValues(alpha: 0.35),
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(
+                                Icons.key_outlined,
+                                color: AppTheme.warning,
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Text(
+                                  'Encryption key needs a quick password confirmation after updating.',
+                                  style: TextStyle(
+                                    fontSize: 12.5,
+                                    color: AppTheme.slateInk,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              FilledButton(
+                                key: const Key('btn_restore_vault_key'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppTheme.warning,
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 8,
+                                  ),
+                                ),
+                                onPressed: () async {
+                                  final ok = await _promptRestoreVaultKey();
+                                  if (ok) {
+                                    _showSnack(
+                                      'Encryption key restored & cloud sync ready.',
+                                    );
+                                  }
+                                },
+                                child: const Text('Restore'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       TextField(
                         controller: _searchCtrl,

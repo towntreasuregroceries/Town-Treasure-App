@@ -1,8 +1,8 @@
 {
-  "version": "1.2.4",
-  "buildNumber": 2018,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.4/TownTreasureGroceries.apk",
-  "sha256": "ed1875949b3f6d8656a5f4722621b416d0f17e2dd87b0c6112178469dcfee4d6",
-  "releaseNotes": "v1.2.4 (Official Release Parity): Fixed open dialogs/sheets leaking onto the lock screen and hardened Personal Documents Vault storage, Android picker, R8 rules, error messages, and sheet nav-bar spacing.",
+  "version": "1.2.5",
+  "buildNumber": 2019,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.5/TownTreasureGroceries.apk",
+  "sha256": "68711d9a43dd23a531b843183b152b265adcae0b85fc066151042d9cda2a5286",
+  "releaseNotes": "v1.2.5 (Official Release Parity): Self-healing native Android Keystore AES-256-GCM storage + 1-tap inline vault encryption key recovery to eliminate 'Exception encountered' errors.",
   "mandatory": false
 }

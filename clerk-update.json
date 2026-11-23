@@ -1,8 +1,8 @@
 {
-  "version": "1.2.4",
-  "buildNumber": 2018,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.4/TownTreasureClerk.apk",
-  "sha256": "e5e98dcd37c2d92b63eedc479340c749e8bdf45033ed075944669099ee31635f",
-  "releaseNotes": "v1.2.4: Hardened secure storage, Android R8 keep rules, overlay cleanup on lock/sign-out, and plain-language device error handling to match Owner App v1.2.4.",
+  "version": "1.2.5",
+  "buildNumber": 2019,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.5/TownTreasureClerk.apk",
+  "sha256": "dc53549d1af1d8f97b48c089ed95c1ec72822b7bab613f9d2efdfb3a62342a59",
+  "releaseNotes": "v1.2.5: Upgraded to self-healing native Android Keystore AES-256-GCM storage and disabled auto-backup keystore corruption to match Owner App v1.2.5.",
   "mandatory": false
 }

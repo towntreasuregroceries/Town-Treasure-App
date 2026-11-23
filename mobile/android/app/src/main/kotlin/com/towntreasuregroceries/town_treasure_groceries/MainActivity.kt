@@ -23,6 +23,7 @@ import kotlin.math.min
 class MainActivity : FlutterFragmentActivity() {
     companion object {
         private const val PDF_CHANNEL = "com.towntreasuregroceries/pdf_picker"
+        private const val SECURE_KV_CHANNEL = "com.towntreasuregroceries/secure_kv"
         private const val REQ_PICK_PDF = 4109
         private const val REQ_PICK_RAW_DOC = 4110
         private const val MAX_PDF_PAGES = 12
@@ -33,7 +34,9 @@ class MainActivity : FlutterFragmentActivity() {
     private var pendingPdfResult: MethodChannel.Result? = null
     private var pendingRawDocResult: MethodChannel.Result? = null
     private val pdfExecutor = Executors.newSingleThreadExecutor()
+    private val secureKvExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
+    private var secureKvStore: SecureKvStore? = null
 
     private fun clearStalePendingResults() {
         pendingPdfResult?.let { stale ->
@@ -48,6 +51,60 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        val kvStore = secureKvStore ?: SecureKvStore(applicationContext).also {
+            secureKvStore = it
+        }
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            SECURE_KV_CHANNEL
+        ).setMethodCallHandler { call, result ->
+            val key = call.argument<String>("key")
+            when (call.method) {
+                "read" -> {
+                    if (key.isNullOrEmpty()) {
+                        result.success(null)
+                        return@setMethodCallHandler
+                    }
+                    secureKvExecutor.execute {
+                        try {
+                            val value = kvStore.read(key)
+                            mainHandler.post { result.success(value) }
+                        } catch (_: Throwable) {
+                            mainHandler.post { result.success(null) }
+                        }
+                    }
+                }
+                "write" -> {
+                    val value = call.argument<String>("value")
+                    if (key.isNullOrEmpty() || value == null) {
+                        result.error("INVALID_ARGS", "Missing key or value", null)
+                        return@setMethodCallHandler
+                    }
+                    secureKvExecutor.execute {
+                        try {
+                            kvStore.write(key, value)
+                            mainHandler.post { result.success(null) }
+                        } catch (e: Throwable) {
+                            mainHandler.post {
+                                result.error("SECURE_KV_WRITE", e.message ?: "Write failed", null)
+                            }
+                        }
+                    }
+                }
+                "delete" -> {
+                    if (key.isNullOrEmpty()) {
+                        result.success(null)
+                        return@setMethodCallHandler
+                    }
+                    secureKvExecutor.execute {
+                        runCatching { kvStore.delete(key) }
+                        mainHandler.post { result.success(null) }
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
 
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
@@ -255,6 +312,7 @@ class MainActivity : FlutterFragmentActivity() {
     override fun onDestroy() {
         clearStalePendingResults()
         pdfExecutor.shutdownNow()
+        secureKvExecutor.shutdownNow()
         super.onDestroy()
     }
 }

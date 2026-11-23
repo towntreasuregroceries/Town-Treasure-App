@@ -134,6 +134,10 @@ class PersonalVaultService {
     return file.exists();
   }
 
+  Future<bool> hasEncryptionKey() async {
+    return (await _storage.getE2eKey()) != null;
+  }
+
   /// Encrypts [plainBytes] locally with the user's E2EE AES-256-GCM vault key,
   /// writes the ciphertext to `.enc` cache, and uploads ciphertext to Cloudflare R2
   /// when [workerUrl] and an authenticated Supabase JWT are available.
