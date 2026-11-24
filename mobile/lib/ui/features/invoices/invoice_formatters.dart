@@ -158,55 +158,6 @@ class InvoiceFormatters {
 class InvoiceDuplicateGuard {
   InvoiceDuplicateGuard._();
 
-  static const Map<String, String> _produceAliases = {
-    'roma tomatoes': 'tomatoes',
-    'cooking tomatoes': 'tomatoes',
-    'salad tomatoes': 'tomatoes',
-    'local tomatoes': 'tomatoes',
-    'fresh tomatoes': 'tomatoes',
-    'potatoes (shangi)': 'potatoes',
-    'shangi potatoes': 'potatoes',
-    'irish potatoes': 'potatoes',
-    'waru': 'potatoes',
-    'warus': 'potatoes',
-    'sweet capsicum': 'capsicum',
-    'sweet capsicum (hoho)': 'capsicum',
-    'hoho': 'capsicum',
-    'green capsicum': 'capsicum',
-    'red capsicum': 'capsicum',
-    'yellow capsicum': 'capsicum',
-    'bell pepper': 'capsicum',
-    'green bell pepper': 'capsicum',
-    'dhania': 'coriander',
-    'dhania (coriander)': 'coriander',
-    'cilantro': 'coriander',
-    'sukuma wiki': 'sukuma wiki',
-    'sukuma': 'sukuma wiki',
-    'collard greens': 'sukuma wiki',
-    'red onions (medium)': 'red onions',
-    'red onions': 'red onions',
-    'bombay onions': 'red onions',
-    'bulb onions': 'red onions',
-    'white onions': 'white onions',
-    'baby spinach': 'spinach',
-    'fresh spinach': 'spinach',
-    'english cucumbers': 'cucumbers',
-    'cucumbers': 'cucumbers',
-    'button mushrooms': 'mushrooms',
-    'fresh mushrooms': 'mushrooms',
-    'garlic (imported)': 'garlic',
-    'imported garlic': 'garlic',
-    'local garlic': 'garlic',
-    'fresh mint': 'mint',
-    'mint leaves': 'mint',
-    'courgettes': 'zucchini',
-    'courgette': 'zucchini',
-    'zucchini': 'zucchini',
-    'managu': 'managu',
-    'terere': 'terere',
-    'kunde': 'kunde',
-  };
-
   static String normalizeHotel(String name) {
     return name
         .toLowerCase()
@@ -221,20 +172,8 @@ class InvoiceDuplicateGuard {
         .trim();
   }
 
-  static String canonicalProduce(String desc) {
-    final clean = desc
-        .toLowerCase()
-        .replaceAll(RegExp(r'\(.*?\)'), '')
-        .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    for (final entry in _produceAliases.entries) {
-      if (clean == entry.key || clean.contains(entry.key)) {
-        return entry.value;
-      }
-    }
-    return clean;
-  }
+  static String canonicalProduce(String desc) =>
+      AppHelpers.canonicalProduce(desc);
 
   static DuplicateScore calculateHeuristicScore({
     required String candidateRestaurantName,
@@ -270,7 +209,10 @@ class InvoiceDuplicateGuard {
     final d1 = AppHelpers.parseAppDate(candidateDate);
     final d2 = AppHelpers.parseAppDate(existing.date);
     if (d1 != null && d2 != null) {
-      final diffDays = (d1.difference(d2).inHours / 24.0).abs();
+      final diffDays = DateTime.utc(d1.year, d1.month, d1.day)
+          .difference(DateTime.utc(d2.year, d2.month, d2.day))
+          .inDays
+          .abs();
       if (diffDays == 0) {
         dateScore = 1.0;
       } else if (diffDays <= 1) {
@@ -312,26 +254,35 @@ class InvoiceDuplicateGuard {
     );
   }
 
+  static Map<String, ({double qty, double price})> _aggregateItems(
+    List<InvoiceLineItem> items,
+  ) {
+    final grouped = <String, ({double qty, double price})>{};
+    for (final item in items) {
+      final canonical = canonicalProduce(item.desc);
+      if (canonical.isEmpty) continue;
+      final q = item.qty > 0 ? item.qty : 1.0;
+      final p = item.sellPrice > 0 ? item.sellPrice : item.buyPrice;
+      final existing = grouped[canonical];
+      if (existing == null) {
+        grouped[canonical] = (qty: q, price: p);
+      } else {
+        final nextQty = existing.qty + q;
+        final nextPrice = nextQty > 0
+            ? ((existing.qty * existing.price) + (q * p)) / nextQty
+            : max(existing.price, p);
+        grouped[canonical] = (qty: nextQty, price: nextPrice);
+      }
+    }
+    return grouped;
+  }
+
   static _ItemComparison _compareItems(
     List<InvoiceLineItem> itemsA,
     List<InvoiceLineItem> itemsB,
   ) {
-    final normA = itemsA
-        .map((i) => (
-              canonical: canonicalProduce(i.desc),
-              qty: i.qty > 0 ? i.qty : 1.0,
-              price: i.sellPrice > 0 ? i.sellPrice : i.buyPrice,
-            ))
-        .where((i) => i.canonical.isNotEmpty)
-        .toList();
-    final normB = itemsB
-        .map((i) => (
-              canonical: canonicalProduce(i.desc),
-              qty: i.qty > 0 ? i.qty : 1.0,
-              price: i.sellPrice > 0 ? i.sellPrice : i.buyPrice,
-            ))
-        .where((i) => i.canonical.isNotEmpty)
-        .toList();
+    final normA = _aggregateItems(itemsA);
+    final normB = _aggregateItems(itemsB);
 
     if (normA.isEmpty || normB.isEmpty) {
       return const _ItemComparison(score: 0, matchingCount: 0);
@@ -339,11 +290,12 @@ class InvoiceDuplicateGuard {
 
     var matchingCount = 0;
     var matchScoreSum = 0.0;
-    for (final a in normA) {
-      final idxB = normB.indexWhere((b) => b.canonical == a.canonical);
-      if (idxB < 0) continue;
-      final b = normB[idxB];
-      final qtyRatio = min(a.qty, b.qty) / max(1.0, max(a.qty, b.qty));
+    for (final entry in normA.entries) {
+      final b = normB[entry.key];
+      if (b == null) continue;
+      final a = entry.value;
+      final maxQty = max(a.qty, b.qty);
+      final qtyRatio = maxQty > 0 ? min(a.qty, b.qty) / maxQty : 1.0;
       final priceMatch = (a.price > 0 && b.price > 0)
           ? min(a.price, b.price) / max(a.price, b.price)
           : 1.0;
@@ -352,10 +304,7 @@ class InvoiceDuplicateGuard {
       matchScoreSum += itemScore;
     }
 
-    final unionCount = {
-      ...normA.map((a) => a.canonical),
-      ...normB.map((b) => b.canonical),
-    }.length;
+    final unionCount = {...normA.keys, ...normB.keys}.length;
     final jaccardScore = unionCount > 0 ? (matchScoreSum / unionCount) : 0.0;
     return _ItemComparison(
       score: min(1.0, jaccardScore),
@@ -366,9 +315,9 @@ class InvoiceDuplicateGuard {
   static bool isHighConfidenceDuplicate(DuplicateScore s) {
     return s.hotelScore >= 0.85 &&
         s.dateScore == 1.0 &&
-        s.amountScore >= 0.85 &&
-        s.itemScore >= 0.60 &&
-        s.matchingItemsCount > 0;
+        s.matchingItemsCount > 0 &&
+        ((s.amountScore >= 0.85 && s.itemScore >= 0.55) ||
+            (s.amountScore == 1.0 && s.itemScore >= 0.45));
   }
 }
 

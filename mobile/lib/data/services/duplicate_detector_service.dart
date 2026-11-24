@@ -249,25 +249,47 @@ class DuplicateDetectorService {
   }
 
   /// Normalizes produce description to canonical form (`canonicalProduce` in `duplicate-detector.js`).
-  static String canonicalProduce(String? desc) {
-    if (desc == null || desc.isEmpty) return '';
-    final clean = desc
-        .toLowerCase()
-        .replaceAll(RegExp(r'\(.*?\)'), '')
-        .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-
-    for (final entry in produceAliases.entries) {
-      if (clean == entry.key || clean.contains(entry.key)) {
-        return entry.value;
-      }
-    }
-    return clean;
-  }
+  static String canonicalProduce(String? desc) =>
+      AppHelpers.canonicalProduce(desc);
 
   /// Alias for `canonicalProduce`.
   static String normalizeItemName(String? desc) => canonicalProduce(desc);
+
+  static Map<String, ({String raw, double qty, String unit, double price})>
+      _aggregateItems(List<InvoiceLineItem> items) {
+    final grouped =
+        <String, ({String raw, double qty, String unit, double price})>{};
+    for (final i in items) {
+      final canonical = canonicalProduce(i.desc);
+      if (canonical.isEmpty) continue;
+      final qty = i.qty <= 0 ? 1.0 : i.qty;
+      final unit = i.unit.toLowerCase().trim().isEmpty
+          ? 'kgs'
+          : i.unit.toLowerCase().trim();
+      final price = i.sellPrice > 0 ? i.sellPrice : i.buyPrice;
+      final prev = grouped[canonical];
+      if (prev == null) {
+        grouped[canonical] = (
+          raw: i.desc,
+          qty: qty,
+          unit: unit,
+          price: price,
+        );
+      } else {
+        final nextQty = prev.qty + qty;
+        final nextPrice = nextQty > 0
+            ? ((prev.qty * prev.price) + (qty * price)) / nextQty
+            : max(prev.price, price);
+        grouped[canonical] = (
+          raw: prev.raw,
+          qty: nextQty,
+          unit: prev.unit,
+          price: nextPrice,
+        );
+      }
+    }
+    return grouped;
+  }
 
   /// Calculates Jaccard and unit similarity between two lists of produce items.
   static ItemListComparison compareItemLists(
@@ -278,37 +300,8 @@ class DuplicateDetectorService {
       return const ItemListComparison(score: 0, matchingCount: 0);
     }
 
-    final normA = itemsA
-        .map((i) {
-          final canonical = canonicalProduce(i.desc);
-          return (
-            raw: i.desc,
-            canonical: canonical,
-            qty: i.qty <= 0 ? 1.0 : i.qty,
-            unit: i.unit.toLowerCase().trim().isEmpty
-                ? 'kgs'
-                : i.unit.toLowerCase().trim(),
-            price: i.sellPrice > 0 ? i.sellPrice : i.buyPrice,
-          );
-        })
-        .where((x) => x.canonical.isNotEmpty)
-        .toList();
-
-    final normB = itemsB
-        .map((i) {
-          final canonical = canonicalProduce(i.desc);
-          return (
-            raw: i.desc,
-            canonical: canonical,
-            qty: i.qty <= 0 ? 1.0 : i.qty,
-            unit: i.unit.toLowerCase().trim().isEmpty
-                ? 'kgs'
-                : i.unit.toLowerCase().trim(),
-            price: i.sellPrice > 0 ? i.sellPrice : i.buyPrice,
-          );
-        })
-        .where((x) => x.canonical.isNotEmpty)
-        .toList();
+    final normA = _aggregateItems(itemsA);
+    final normB = _aggregateItems(itemsB);
 
     if (normA.isEmpty || normB.isEmpty) {
       return const ItemListComparison(score: 0, matchingCount: 0);
@@ -317,11 +310,11 @@ class DuplicateDetectorService {
     final matches = <ItemMatchDetail>[];
     var matchScoreSum = 0.0;
 
-    for (final itemA in normA) {
-      final matchIdx =
-          normB.indexWhere((itemB) => itemB.canonical == itemA.canonical);
-      if (matchIdx >= 0) {
-        final matchB = normB[matchIdx];
+    for (final entry in normA.entries) {
+      final canonical = entry.key;
+      final itemA = entry.value;
+      final matchB = normB[canonical];
+      if (matchB != null) {
         final maxQty = max(itemA.qty, matchB.qty);
         final qtyRatio =
             min(itemA.qty, matchB.qty) / (maxQty > 0 ? maxQty : 1.0);
@@ -334,7 +327,7 @@ class DuplicateDetectorService {
           ItemMatchDetail(
             itemA: itemA.raw,
             itemB: matchB.raw,
-            canonical: itemA.canonical,
+            canonical: canonical,
             qtyA: '${_fmtQty(itemA.qty)} ${itemA.unit}',
             qtyB: '${_fmtQty(matchB.qty)} ${matchB.unit}',
             score: itemScore,
@@ -344,10 +337,7 @@ class DuplicateDetectorService {
       }
     }
 
-    final unionCount = <String>{
-      ...normA.map((a) => a.canonical),
-      ...normB.map((b) => b.canonical),
-    }.length;
+    final unionCount = <String>{...normA.keys, ...normB.keys}.length;
     final jaccardScore = unionCount > 0 ? (matchScoreSum / unionCount) : 0.0;
 
     return ItemListComparison(
@@ -454,9 +444,9 @@ class DuplicateDetectorService {
   static bool isHighConfidenceDuplicate(HeuristicScore scoreObj) {
     return scoreObj.hotelScore >= 0.85 &&
         scoreObj.dateScore == 1.0 &&
-        scoreObj.amountScore >= 0.85 &&
-        scoreObj.itemScore >= 0.60 &&
-        scoreObj.itemCmp.matchingCount > 0;
+        scoreObj.itemCmp.matchingCount > 0 &&
+        ((scoreObj.amountScore >= 0.85 && scoreObj.itemScore >= 0.55) ||
+            (scoreObj.amountScore == 1.0 && scoreObj.itemScore >= 0.45));
   }
 
   /// Runs Smart Audit against a candidate docket/invoice and a pool of existing records.
@@ -663,17 +653,19 @@ Return ONLY JSON matching:
       },
     };
 
-    const models = ['gemini-3.5-flash-lite', 'gemini-2.5-flash'];
+    const models = ['gemini-2.5-flash'];
     for (final model in models) {
       try {
         final uri = Uri.parse(
           'https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey',
         );
-        final resp = await _http.post(
-          uri,
-          headers: const {'Content-Type': 'application/json'},
-          body: jsonEncode(payload),
-        );
+        final resp = await _http
+            .post(
+              uri,
+              headers: const {'Content-Type': 'application/json'},
+              body: jsonEncode(payload),
+            )
+            .timeout(const Duration(seconds: 8));
         if (resp.statusCode < 200 || resp.statusCode >= 300) continue;
 
         final data = jsonDecode(resp.body);

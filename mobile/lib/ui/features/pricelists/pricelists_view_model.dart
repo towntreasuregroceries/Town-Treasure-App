@@ -229,22 +229,8 @@ class PriceListsViewModel extends ChangeNotifier {
   }
 
   /// Normalizes produce description to canonical form matching `TTGAudit.canonicalProduce`.
-  static String canonicalProduce(String desc) {
-    if (desc.trim().isEmpty) return '';
-    final clean = desc
-        .toLowerCase()
-        .replaceAll(RegExp(r'\(.*?\)'), '')
-        .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-
-    for (final entry in produceAliases.entries) {
-      if (clean == entry.key || clean.contains(entry.key)) {
-        return entry.value;
-      }
-    }
-    return clean;
-  }
+  static String canonicalProduce(String desc) =>
+      AppHelpers.canonicalProduce(desc);
 
   static String normalizeItemName(String desc) => canonicalProduce(desc);
 

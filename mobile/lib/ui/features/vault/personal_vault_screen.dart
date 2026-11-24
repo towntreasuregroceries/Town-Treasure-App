@@ -18,6 +18,7 @@ import '../../core/user_friendly_error.dart';
 import '../../core/widgets/app_print_helper.dart';
 import '../../core/widgets/print_options_sheet.dart';
 import '../../core/widgets/scoped_text_controllers.dart';
+import '../../core/widgets/vault_key_recovery_dialog.dart';
 
 /// Abstraction over device biometric / PIN confirmation for Personal Documents entry.
 abstract class VaultAuthGateway {
@@ -134,129 +135,11 @@ class _PersonalVaultScreenState extends State<PersonalVaultScreen> {
     final authRepo = _resolveAuthRepository();
     if (authRepo == null || !mounted) return false;
 
-    var isUnlocking = false;
-    var obscure = true;
-    String? dialogError;
-
-    final restored = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogCtx) => ScopedTextControllers(
-        initialTexts: const [''],
-        builder: (dialogCtx, ctrls) {
-          final passwordCtrl = ctrls[0];
-          return StatefulBuilder(
-            builder: (dialogCtx, setDialogState) {
-              Future<void> unlock() async {
-                final pwd = passwordCtrl.text;
-                if (pwd.isEmpty) {
-                  setDialogState(
-                    () => dialogError = 'Enter your account password.',
-                  );
-                  return;
-                }
-                setDialogState(() {
-                  isUnlocking = true;
-                  dialogError = null;
-                });
-                try {
-                  await authRepo.reunlockVaultKey(pwd);
-                  if (dialogCtx.mounted) {
-                    Navigator.of(dialogCtx).pop(true);
-                  }
-                } catch (e) {
-                  if (!dialogCtx.mounted) return;
-                  setDialogState(() {
-                    isUnlocking = false;
-                    dialogError = UserFriendlyError.format(
-                      e,
-                      fallback:
-                          'Could not verify that password. Please check your password and try again.',
-                    );
-                  });
-                }
-              }
-
-              return AlertDialog(
-                title: const Text('Unlock Encryption Key'),
-                content: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      const Text(
-                        'Your phone secure key store needs a quick confirmation after updating. Enter your Town Treasure account password once to restore your encryption key without signing out.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          color: AppTheme.slateMuted,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        key: const Key('field_restore_vault_password'),
-                        controller: passwordCtrl,
-                        obscureText: obscure,
-                        autofocus: true,
-                        onSubmitted: (_) => isUnlocking ? null : unlock(),
-                        decoration: InputDecoration(
-                          labelText: 'Account Password',
-                          suffixIcon: IconButton(
-                            onPressed: () =>
-                                setDialogState(() => obscure = !obscure),
-                            icon: Icon(
-                              obscure
-                                  ? Icons.visibility_outlined
-                                  : Icons.visibility_off_outlined,
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (dialogError != null) ...[
-                        const SizedBox(height: 10),
-                        Text(
-                          dialogError!,
-                          style: const TextStyle(
-                            color: AppTheme.danger,
-                            fontSize: 12.5,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-                actions: [
-                  TextButton(
-                    onPressed: isUnlocking
-                        ? null
-                        : () => Navigator.of(dialogCtx).pop(false),
-                    child: const Text('Cancel'),
-                  ),
-                  FilledButton.icon(
-                    key: const Key('btn_confirm_restore_vault_key'),
-                    onPressed: isUnlocking ? null : unlock,
-                    icon: isUnlocking
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.lock_open_outlined, size: 18),
-                    label: Text(
-                      isUnlocking ? 'Unlocking...' : 'Unlock & Continue',
-                    ),
-                  ),
-                ],
-              );
-            },
-          );
-        },
-      ),
+    final restored = await VaultKeyRecoveryDialog.show(
+      context,
+      authRepository: authRepo,
     );
-
-    if (restored == true && mounted) {
+    if (restored && mounted) {
       setState(() => _needsKeyRecovery = false);
       return true;
     }

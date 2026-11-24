@@ -13,6 +13,7 @@ import '../../../data/services/remote_update_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/developer_preview.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/vault_key_recovery_dialog.dart';
 import 'change_password_dialog.dart';
 import 'dashboard_view_model.dart';
 import 'notification_center_sheet.dart';
@@ -45,6 +46,7 @@ class DashboardScreen extends StatefulWidget {
     this.onOpenStatements,
     this.onOpenKraTaxCenter,
     this.onOpenReports,
+    this.onOpenDocumentStudio,
     this.onOpenInvoice,
     this.onCreateInvoice,
     this.onSignedOut,
@@ -61,6 +63,7 @@ class DashboardScreen extends StatefulWidget {
   final VoidCallback? onOpenStatements;
   final VoidCallback? onOpenKraTaxCenter;
   final VoidCallback? onOpenReports;
+  final VoidCallback? onOpenDocumentStudio;
   final void Function(Invoice invoice)? onOpenInvoice;
   final VoidCallback? onCreateInvoice;
   final VoidCallback? onSignedOut;
@@ -232,6 +235,18 @@ class _DashboardScreenState extends State<DashboardScreen>
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
+                  if (_vm.needsVaultKeyUnlock)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: VaultKeyWarningBanner(
+                        onUnlockPressed: () async {
+                          final ok = await VaultKeyRecoveryDialog.show(context);
+                          if (ok && mounted) {
+                            await _vm.refresh();
+                          }
+                        },
+                      ),
+                    ),
                   if (redesignedActive)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 14),
@@ -296,6 +311,7 @@ class _DashboardScreenState extends State<DashboardScreen>
                     _CompactUtilitiesBar(
                       isExporting: _vm.isExporting,
                       alertCount: _vm.activeAlerts.length,
+                      onOpenDocumentStudio: widget.onOpenDocumentStudio,
                       onOpenSignature: _openSignatureScanner,
                       onExportExcel: _vm.exportFullExcel,
                       onOpenAlerts: _openNotificationCenter,
@@ -678,6 +694,7 @@ class _DashboardScreenState extends State<DashboardScreen>
     await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: AppTheme.surfaceCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -2325,6 +2342,7 @@ class _CompactUtilitiesBar extends StatelessWidget {
   const _CompactUtilitiesBar({
     required this.isExporting,
     required this.alertCount,
+    this.onOpenDocumentStudio,
     required this.onOpenSignature,
     required this.onExportExcel,
     required this.onOpenAlerts,
@@ -2333,6 +2351,7 @@ class _CompactUtilitiesBar extends StatelessWidget {
 
   final bool isExporting;
   final int alertCount;
+  final VoidCallback? onOpenDocumentStudio;
   final VoidCallback onOpenSignature;
   final VoidCallback onExportExcel;
   final VoidCallback onOpenAlerts;
@@ -2346,6 +2365,13 @@ class _CompactUtilitiesBar extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
         child: Row(
           children: [
+            if (onOpenDocumentStudio != null)
+              _UtilityIconBtn(
+                key: const Key('btn_utility_doc_studio'),
+                icon: Icons.article_outlined,
+                label: 'Docs',
+                onTap: onOpenDocumentStudio,
+              ),
             _UtilityIconBtn(
               icon: Icons.draw_outlined,
               label: 'Signature',
@@ -2378,6 +2404,7 @@ class _CompactUtilitiesBar extends StatelessWidget {
 
 class _UtilityIconBtn extends StatelessWidget {
   const _UtilityIconBtn({
+    super.key,
     required this.icon,
     required this.label,
     required this.onTap,

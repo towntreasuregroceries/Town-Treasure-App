@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show listEquals;
@@ -334,7 +335,14 @@ class KraTaxCenterScreen extends StatefulWidget {
                   18,
                   16,
                   18,
-                  MediaQuery.of(ctx).viewInsets.bottom + 24,
+                  math.max(
+                        MediaQuery.viewInsetsOf(ctx).bottom,
+                        math.max(
+                          MediaQuery.viewPaddingOf(ctx).bottom,
+                          MediaQuery.paddingOf(ctx).bottom,
+                        ),
+                      ) +
+                      24,
                 ),
                 child: SingleChildScrollView(
                   child: Column(

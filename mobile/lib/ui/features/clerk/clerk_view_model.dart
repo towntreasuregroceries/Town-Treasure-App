@@ -962,7 +962,11 @@ class ClerkViewModel extends ChangeNotifier {
 
     final key = clerkDuplicateRestaurantKey(rest);
     final pool = _clerkHistory
-        .where((r) => clerkDuplicateRestaurantKey(r.restaurantName) == key)
+        .where(
+          (r) =>
+              !r.isRejected &&
+              clerkDuplicateRestaurantKey(r.restaurantName) == key,
+        )
         .map(AuditRecord.fromDocket)
         .toList();
 
@@ -1086,7 +1090,11 @@ class ClerkViewModel extends ChangeNotifier {
         await loadClerkHistory();
         final restKey = clerkDuplicateRestaurantKey(cleanRest);
         final pool = _clerkHistory
-            .where((r) => clerkDuplicateRestaurantKey(r.restaurantName) == restKey)
+            .where(
+              (r) =>
+                  !r.isRejected &&
+                  clerkDuplicateRestaurantKey(r.restaurantName) == restKey,
+            )
             .map(AuditRecord.fromDocket)
             .toList();
         final audit = await _audit.auditSubmission(

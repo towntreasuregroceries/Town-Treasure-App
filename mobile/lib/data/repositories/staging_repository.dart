@@ -423,6 +423,46 @@ class StagingRepository extends ChangeNotifier {
     }
     await _vault.setInvoices(invList, sync: false);
 
+    // Sync linked operational expenses (matching InvoicesViewModel.saveInvoice)
+    final replacedExpenses =
+        _vault.expenses.where((e) => e.invId == newInvoice.id).toList();
+    for (final exp in replacedExpenses) {
+      await _vault.markRecordDeleted('expenses', exp.id, sync: false);
+    }
+    final nextExpenses =
+        _vault.expenses.where((e) => e.invId != newInvoice.id).toList();
+    if (effectiveDelivery > 0) {
+      nextExpenses.add(
+        Expense(
+          id: AppHelpers.genId(),
+          invId: newInvoice.id,
+          type: 'expense',
+          date: invDate,
+          desc: 'Delivery: ${newInvoice.number} (${newInvoice.restaurantName})',
+          category: 'transport',
+          amount: effectiveDelivery,
+        ),
+      );
+    }
+    if (effectiveOther > 0) {
+      nextExpenses.add(
+        Expense(
+          id: AppHelpers.genId(),
+          invId: newInvoice.id,
+          type: 'expense',
+          date: invDate,
+          desc: 'Ops Cost: ${newInvoice.number} (${newInvoice.restaurantName})',
+          category: 'other',
+          amount: effectiveOther,
+        ),
+      );
+    }
+    if (replacedExpenses.isNotEmpty ||
+        effectiveDelivery > 0 ||
+        effectiveOther > 0) {
+      await _vault.setExpenses(nextExpenses, sync: false);
+    }
+
     if (!await _vault.syncNow()) {
       throw StateError(
         'The invoice is only saved locally because the encrypted vault did not confirm sync. Retry sync before approving again.',

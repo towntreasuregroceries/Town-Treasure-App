@@ -9,6 +9,7 @@ import '../../../data/repositories/vault_repository.dart';
 import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/vault_key_recovery_dialog.dart';
 import '../restaurants/restaurants_view_model.dart';
 import 'invoice_formatters.dart';
 import 'invoices_view_model.dart';
@@ -77,6 +78,26 @@ class _InvoiceEditorScreenState extends State<InvoiceEditorScreen> {
       }
       _restVm = RestaurantsViewModel(vault: vault);
 
+      if (widget.initialInvoice != null) {
+        _vm.loadInvoiceForEdit(widget.initialInvoice!);
+      } else {
+        _vm.resetEditor(
+          prefillRestaurantId: widget.prefillRestaurantId,
+          prefillDate: widget.prefillDate,
+          prefillItems: widget.prefillItems,
+        );
+      }
+      _syncControllersFromVm();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant InvoiceEditorScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialInvoice != oldWidget.initialInvoice ||
+        widget.prefillRestaurantId != oldWidget.prefillRestaurantId ||
+        widget.prefillDate != oldWidget.prefillDate ||
+        widget.prefillItems != oldWidget.prefillItems) {
       if (widget.initialInvoice != null) {
         _vm.loadInvoiceForEdit(widget.initialInvoice!);
       } else {
@@ -282,6 +303,7 @@ class _InvoiceEditorScreenState extends State<InvoiceEditorScreen> {
   }
 
   Future<void> _saveDraft() async {
+    FocusManager.instance.primaryFocus?.unfocus();
     final res = await _vm.saveDraft(silent: false);
     _showSnack(
       res.message,
@@ -291,6 +313,19 @@ class _InvoiceEditorScreenState extends State<InvoiceEditorScreen> {
   }
 
   Future<void> _saveInvoice({bool bypassDuplicateCheck = false}) async {
+    if (_vm.isSaving) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+
+    if (!bypassDuplicateCheck) {
+      try {
+        final vault = context.read<VaultRepository>();
+        if (await vault.needsE2eKeyUnlock() && mounted) {
+          await VaultKeyRecoveryDialog.show(context);
+          if (!mounted) return;
+        }
+      } catch (_) {}
+    }
+
     final res = await _vm.saveInvoice(
       bypassDuplicateCheck: bypassDuplicateCheck,
     );
@@ -399,30 +434,84 @@ class _InvoiceEditorScreenState extends State<InvoiceEditorScreen> {
             ? _vm.restaurantId
             : '';
 
+        final liveDup = _vm.liveDuplicateMatch;
+
         return Scaffold(
           backgroundColor: AppTheme.surfaceSage,
           appBar: AppBar(
             title: Text(isEditing ? 'Edit Invoice' : 'New Invoice'),
             actions: [
-              TextButton.icon(
-                style: TextButton.styleFrom(foregroundColor: Colors.white),
-                onPressed: _vm.isSaving ? null : _saveDraft,
-                icon: const Icon(Icons.save_as_outlined, size: 18),
-                label: const Text('Save Draft'),
+              TextFieldTapRegion(
+                child: TextButton.icon(
+                  style: TextButton.styleFrom(foregroundColor: Colors.white),
+                  onPressed: _vm.isSaving ? null : _saveDraft,
+                  icon: const Icon(Icons.save_as_outlined, size: 18),
+                  label: const Text('Save Draft'),
+                ),
               ),
             ],
           ),
-          bottomNavigationBar: _StickyTotalsBar(
-            totalSell: _vm.totalSell,
-            totalCost: _vm.totalBuy + _vm.opsCost,
-            profit: _vm.profit,
-            marginPercent: _vm.marginPercent,
-            isSaving: _vm.isSaving,
-            onSave: () => _saveInvoice(),
+          bottomNavigationBar: TextFieldTapRegion(
+            child: _StickyTotalsBar(
+              totalSell: _vm.totalSell,
+              totalCost: _vm.totalBuy + _vm.opsCost,
+              profit: _vm.profit,
+              marginPercent: _vm.marginPercent,
+              isSaving: _vm.isSaving,
+              onSave: () => _saveInvoice(),
+            ),
           ),
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 24),
             children: [
+              if (liveDup != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Container(
+                    key: const Key('live_duplicate_invoice_banner'),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.warningSurface,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppTheme.warning.withValues(alpha: 0.5),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.warning_amber_rounded,
+                          color: AppTheme.warning,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Same-day duplicate detected: #${liveDup.invoice.number}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 13,
+                                  color: AppTheme.slateInk,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '${_vm.displayRestaurantName(liveDup.invoice)} · ${liveDup.invoice.date} · KES ${InvoiceFormatters.formatMoney(liveDup.invoice.totalSell)} (${liveDup.score.matchingItemsCount} matching item${liveDup.score.matchingItemsCount == 1 ? '' : 's'})',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppTheme.slateMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               Card(
                 child: Padding(
                   padding: const EdgeInsets.all(14),

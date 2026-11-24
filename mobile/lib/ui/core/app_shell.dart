@@ -21,6 +21,7 @@ import '../features/dashboard/dashboard_view_model.dart';
 import '../features/dashboard/overdue_notification_service.dart';
 import '../features/dashboard/signature_scanner_sheet.dart';
 import '../features/dashboard/update_checker_sheet.dart';
+import '../features/documents/document_studio_screen.dart';
 import '../features/expenses/expenses_hub_screen.dart';
 import '../features/expenses/expenses_view_model.dart';
 import '../features/invoices/invoice_detail_screen.dart';
@@ -426,11 +427,34 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
+  Future<void> _openDocumentStudio() async {
+    final vault = context.read<VaultRepository>();
+    PersonalVaultService? vaultService;
+    try {
+      vaultService = context.read<PersonalVaultService>();
+    } catch (_) {
+      vaultService = PersonalVaultService(
+        cryptoService: context.read<CryptoService>(),
+        localStorage: context.read<LocalStorageService>(),
+        supabase: context.read<SupabaseGateway>(),
+      );
+    }
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => DocumentStudioScreen(
+          vault: vault,
+          personalVaultService: vaultService,
+        ),
+      ),
+    );
+  }
+
   Future<void> _openSignatureScanner() async {
     final vault = context.read<VaultRepository>();
     await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: AppTheme.surfaceCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -448,6 +472,7 @@ class _AppShellState extends State<AppShell> {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: AppTheme.surfaceCard,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -640,6 +665,22 @@ class _AppShellState extends State<AppShell> {
                   _startScanToPriceList();
                 },
               ),
+              ListTile(
+                key: const Key('action_new_branded_doc'),
+                leading: const CircleAvatar(
+                  backgroundColor: AppTheme.sageTint,
+                  foregroundColor: AppTheme.forestGreen,
+                  child: Icon(Icons.article_outlined),
+                ),
+                title: const Text('Branded Document Studio'),
+                subtitle: const Text(
+                  'Create Word-style letters, quotes & notices on official PDF',
+                ),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  _openDocumentStudio();
+                },
+              ),
             ],
           ),
         ),
@@ -692,6 +733,7 @@ class _AppShellState extends State<AppShell> {
                   onOpenStatements: _openStatements,
                   onOpenKraTaxCenter: _openKraTaxCenter,
                   onOpenReports: _openReports,
+                  onOpenDocumentStudio: _openDocumentStudio,
                   onOpenInvoice: (inv) => _openInvoiceDetailById(inv.id),
                   onCreateInvoice: () => _openInvoiceEditor(),
                   onSignedOut: widget.onSignedOut,
@@ -726,6 +768,7 @@ class _AppShellState extends State<AppShell> {
                   onOpenExpenses: _openExpensesHub,
                   onOpenReports: _openReports,
                   onOpenStatements: () => _openStatements(),
+                  onOpenDocumentStudio: _openDocumentStudio,
                   onOpenPersonalVault: _openPersonalVault,
                   onOpenKraTaxCenter: _openKraTaxCenter,
                   onOpenRecycleBin: _openRecycleBin,
@@ -796,6 +839,7 @@ class _MoreHubScreen extends StatelessWidget {
     required this.onOpenExpenses,
     required this.onOpenReports,
     required this.onOpenStatements,
+    required this.onOpenDocumentStudio,
     required this.onOpenPersonalVault,
     required this.onOpenKraTaxCenter,
     required this.onOpenRecycleBin,
@@ -811,6 +855,7 @@ class _MoreHubScreen extends StatelessWidget {
   final VoidCallback onOpenExpenses;
   final VoidCallback onOpenReports;
   final VoidCallback onOpenStatements;
+  final VoidCallback onOpenDocumentStudio;
   final VoidCallback onOpenPersonalVault;
   final VoidCallback onOpenKraTaxCenter;
   final VoidCallback onOpenRecycleBin;
@@ -1036,6 +1081,15 @@ class _MoreHubScreen extends StatelessWidget {
                       title: 'KRA & eTIMS Tax',
                       subtitle: 'Company KRA PIN, eTIMS QR invoices & monthly iTax report',
                       onTap: onOpenKraTaxCenter,
+                    ),
+                    const Divider(height: 1),
+                    _MoreTile(
+                      key: const Key('more_document_studio'),
+                      icon: Icons.article_outlined,
+                      title: 'Branded Document Studio',
+                      subtitle:
+                          'MS Word-style letters, quotes & notices on official PDF',
+                      onTap: onOpenDocumentStudio,
                     ),
                     const Divider(height: 1),
                     _MoreTile(

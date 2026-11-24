@@ -160,8 +160,10 @@ class DashboardViewModel extends ChangeNotifier {
   String? _lastBgRunStatus;
   String? _statusMessage;
   String? _errorMessage;
+  bool _needsVaultKeyUnlock = false;
 
   bool get isLoading => _isLoading;
+  bool get needsVaultKeyUnlock => _needsVaultKeyUnlock;
   bool get isSyncing => _isSyncing || _vault.isSyncing;
   bool get isExporting => _isExporting;
   bool get overdueNotificationsEnabled => _overdueNotificationsEnabled;
@@ -543,6 +545,7 @@ class DashboardViewModel extends ChangeNotifier {
     _canUseBiometrics = await _auth.canUseBiometrics();
     _biometricEnabled = await _auth.isBiometricEnabled();
     _hideBalances = (await _storage?.getRaw(keyHideDashboardBalances)) == 'true';
+    _needsVaultKeyUnlock = await _vault.needsE2eKeyUnlock();
 
     await _loadNotificationPrefs();
 
@@ -805,6 +808,7 @@ class DashboardViewModel extends ChangeNotifier {
     if (!synced) {
       await _vault.loadFromSupabase();
     }
+    _needsVaultKeyUnlock = await _vault.needsE2eKeyUnlock();
     await _staging.getPendingSubmissions();
 
     await _maybeNotifyPendingBills();
@@ -986,7 +990,16 @@ class DashboardViewModel extends ChangeNotifier {
   }
 
   void _onDependencyChanged() {
+    unawaited(_refreshVaultKeyState());
     notifyListeners();
+  }
+
+  Future<void> _refreshVaultKeyState() async {
+    final next = await _vault.needsE2eKeyUnlock();
+    if (_needsVaultKeyUnlock != next) {
+      _needsVaultKeyUnlock = next;
+      notifyListeners();
+    }
   }
 
   @override

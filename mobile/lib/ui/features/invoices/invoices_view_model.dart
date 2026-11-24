@@ -203,6 +203,69 @@ class InvoicesViewModel extends ChangeNotifier {
     return _vault.generateSecureInvoiceNumber();
   }
 
+  /// Live local duplicate check while editing a new/draft invoice so the user
+  /// sees an immediate warning before even pressing Save.
+  ({Invoice invoice, DuplicateScore score})? get liveDuplicateMatch {
+    if (_restaurantId.trim().isEmpty) return null;
+    final existingRecord = _editingInvoiceId != null
+        ? findInvoiceById(_editingInvoiceId!)
+        : null;
+    if (_editingInvoiceId != null && !(existingRecord?.isDraft ?? false)) {
+      return null;
+    }
+    final restIdx =
+        _vault.restaurants.indexWhere((r) => r.id == _restaurantId);
+    if (restIdx < 0) return null;
+    final rest = _vault.restaurants[restIdx];
+    final validItems = _items
+        .map(_recomputeItem)
+        .where((i) => i.desc.trim().isNotEmpty && i.qty > 0)
+        .toList();
+    if (validItems.isEmpty) return null;
+
+    final calcSell = validItems.fold(0.0, (s, i) => s + i.total);
+    final invDateVal =
+        _date.trim().isNotEmpty ? _date.trim() : InvoiceFormatters.todayIso();
+
+    Invoice? bestInv;
+    DuplicateScore? bestScore;
+    for (final ex in _vault.invoices) {
+      if (ex.isDraft || ex.id == _editingInvoiceId) continue;
+      if (ex.id.isNotEmpty &&
+          VaultRepository.isRecordDeleted(
+            _vault.recordActions,
+            'invoices',
+            ex.id,
+          )) {
+        continue;
+      }
+      if (!Restaurant.invoiceBelongsToRestaurant(
+        ex,
+        rest,
+        _vault.restaurants,
+      )) {
+        continue;
+      }
+      final score = InvoiceDuplicateGuard.calculateHeuristicScore(
+        candidateRestaurantName: rest.name,
+        candidateDate: invDateVal,
+        candidateTotalSell: calcSell,
+        candidateItems: validItems,
+        existing: ex,
+      );
+      if (bestScore == null || score.score > bestScore.score) {
+        bestScore = score;
+        bestInv = ex;
+      }
+    }
+    if (bestInv != null &&
+        bestScore != null &&
+        InvoiceDuplicateGuard.isHighConfidenceDuplicate(bestScore)) {
+      return (invoice: bestInv, score: bestScore);
+    }
+    return null;
+  }
+
   // --- Filter Mutators ---
 
   void setSearchQuery(String query) {
@@ -659,30 +722,66 @@ class InvoicesViewModel extends ChangeNotifier {
         ? findInvoiceById(_editingInvoiceId!)
         : null;
 
+    _autoSaveTimer?.cancel();
     _isSaving = true;
     notifyListeners();
     try {
-      // Smart Audit Ledger Collision Guard
+      // Smart Audit Ledger Collision Guard (Local + Remote Merged Pool)
       if ((_editingInvoiceId == null || (existingRecord?.isDraft ?? false)) &&
           !bypassDuplicateCheck) {
         final snapshot = await _vault
             .getRemoteInvoiceSnapshot()
             .timeout(
-              const Duration(seconds: 6),
+              const Duration(seconds: 5),
               onTimeout: () => const RemoteInvoiceSnapshot(ok: false),
             );
-        if (!snapshot.ok) {
-          return const SaveInvoiceResult(
-            outcome: SaveInvoiceOutcome.duplicateCheckUnavailable,
-            message:
-                'The current server invoice list could not be verified, so the duplicate check is unavailable. Saving now may create a repeat invoice if this delivery was already entered on another device.',
-          );
+
+        final mergedById = <String, Invoice>{};
+        for (final inv in _vault.invoices) {
+          if (inv.isDraft || inv.id == _editingInvoiceId) continue;
+          if (inv.id.isNotEmpty &&
+              VaultRepository.isRecordDeleted(
+                _vault.recordActions,
+                'invoices',
+                inv.id,
+              )) {
+            continue;
+          }
+          final key = inv.id.isNotEmpty
+              ? 'id:${inv.id}'
+              : 'num:${inv.number.trim().toUpperCase()}';
+          mergedById[key] = inv;
+        }
+        if (snapshot.ok) {
+          for (final remoteInv in snapshot.invoices) {
+            if (remoteInv.isDraft || remoteInv.id == _editingInvoiceId) continue;
+            if (remoteInv.id.isNotEmpty &&
+                VaultRepository.isRecordDeleted(
+                  _vault.recordActions,
+                  'invoices',
+                  remoteInv.id,
+                )) {
+              continue;
+            }
+            final key = remoteInv.id.isNotEmpty
+                ? 'id:${remoteInv.id}'
+                : 'num:${remoteInv.number.trim().toUpperCase()}';
+            final cur = mergedById[key];
+            if (cur == null ||
+                AppHelpers.parseTimestampMs(
+                      remoteInv.updatedAt ?? remoteInv.createdAt,
+                    ) >=
+                    AppHelpers.parseTimestampMs(
+                      cur.updatedAt ?? cur.createdAt,
+                    )) {
+              mergedById[key] = remoteInv;
+            }
+          }
         }
 
         Invoice? matched;
         DuplicateScore? bestScore;
-        for (final ex in snapshot.invoices) {
-          if (ex.id == _editingInvoiceId) continue;
+        for (final ex in mergedById.values) {
           if (!Restaurant.invoiceBelongsToRestaurant(
             ex,
             rest,
@@ -716,7 +815,6 @@ class InvoicesViewModel extends ChangeNotifier {
         }
       }
 
-      _autoSaveTimer?.cancel();
       final now = DateTime.now().toUtc().toIso8601String();
       final invId = _editingInvoiceId ?? AppHelpers.genId();
       final String invNumber;

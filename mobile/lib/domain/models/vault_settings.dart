@@ -1,3 +1,4 @@
+import 'branded_document.dart';
 import 'kra_tax.dart';
 import 'personal_document.dart';
 import 'restaurant.dart';
@@ -15,6 +16,7 @@ class VaultSettings {
   static const String keyTaxableKeywords = 'kraTaxableKeywords';
   static const String keyPersonalDocs = 'personalDocs';
   static const String keyPersonalDocsWorkerUrl = 'personalDocsWorkerUrl';
+  static const String keyBrandedDocs = 'brandedDocs';
 
   final String? signature;
   final String? updatedAt;
@@ -106,6 +108,28 @@ class VaultSettings {
     return list;
   }
 
+  /// Returns all stored branded documents (including soft-deleted tombstones for sync).
+  List<BrandedDocument> get allBrandedDocumentsRaw {
+    final raw = extra[keyBrandedDocs];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((e) => BrandedDocument.fromJson(Map<String, dynamic>.from(e)))
+        .where((d) => d.id.isNotEmpty)
+        .toList();
+  }
+
+  /// Returns active (non-deleted) branded documents sorted newest first.
+  List<BrandedDocument> get brandedDocuments {
+    final list = allBrandedDocumentsRaw.where((d) => !d.isDeleted).toList();
+    list.sort(
+      (a, b) => (b.updatedAt ?? b.createdAt ?? '').compareTo(
+        a.updatedAt ?? a.createdAt ?? '',
+      ),
+    );
+    return list;
+  }
+
   factory VaultSettings.fromJson(Map<String, dynamic> json) {
     final extra = Map<String, dynamic>.from(json)
       ..remove('signature')
@@ -180,6 +204,13 @@ class VaultSettings {
     } else {
       nextExtra[keyPersonalDocsWorkerUrl] = trimmed;
     }
+    return copyWith(updatedAt: nowIso, extra: nextExtra);
+  }
+
+  VaultSettings withBrandedDocuments(List<BrandedDocument> docs) {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final nextExtra = Map<String, dynamic>.from(extra);
+    nextExtra[keyBrandedDocs] = docs.map((d) => d.toJson()).toList();
     return copyWith(updatedAt: nowIso, extra: nextExtra);
   }
 }

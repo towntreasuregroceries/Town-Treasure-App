@@ -112,6 +112,186 @@ class AppHelpers {
     return s.isEmpty ? null : s;
   }
 
+  /// Shared Kenyan & wholesale produce alias table (singular + plural + Swahili names).
+  static const Map<String, String> produceAliases = {
+    'roma tomatoes': 'tomatoes',
+    'roma tomato': 'tomatoes',
+    'cooking tomatoes': 'tomatoes',
+    'cooking tomato': 'tomatoes',
+    'salad tomatoes': 'tomatoes',
+    'salad tomato': 'tomatoes',
+    'local tomatoes': 'tomatoes',
+    'local tomato': 'tomatoes',
+    'fresh tomatoes': 'tomatoes',
+    'fresh tomato': 'tomatoes',
+    'cherry tomatoes': 'cherry tomatoes',
+    'cherry tomato': 'cherry tomatoes',
+    'tomatoes': 'tomatoes',
+    'tomato': 'tomatoes',
+    'potatoes (shangi)': 'potatoes',
+    'shangi potatoes': 'potatoes',
+    'shangi potato': 'potatoes',
+    'irish potatoes': 'potatoes',
+    'irish potato': 'potatoes',
+    'sweet potatoes': 'sweet potatoes',
+    'sweet potato': 'sweet potatoes',
+    'potatoes': 'potatoes',
+    'potato': 'potatoes',
+    'waru': 'potatoes',
+    'warus': 'potatoes',
+    'sweet capsicum': 'capsicum',
+    'sweet capsicum (hoho)': 'capsicum',
+    'hohos': 'capsicum',
+    'hoho': 'capsicum',
+    'green capsicums': 'capsicum',
+    'green capsicum': 'capsicum',
+    'red capsicums': 'capsicum',
+    'red capsicum': 'capsicum',
+    'yellow capsicums': 'capsicum',
+    'yellow capsicum': 'capsicum',
+    'bell peppers': 'capsicum',
+    'bell pepper': 'capsicum',
+    'green bell pepper': 'capsicum',
+    'capsicums': 'capsicum',
+    'capsicum': 'capsicum',
+    'dhania (coriander)': 'coriander',
+    'dhania': 'coriander',
+    'cilantro': 'coriander',
+    'sukuma wiki': 'sukuma wiki',
+    'sukuma': 'sukuma wiki',
+    'collard greens': 'sukuma wiki',
+    'red onions (medium)': 'red onions',
+    'red onions': 'red onions',
+    'red onion': 'red onions',
+    'bombay onions': 'red onions',
+    'bombay onion': 'red onions',
+    'bulb onions': 'red onions',
+    'bulb onion': 'red onions',
+    'white onions': 'white onions',
+    'white onion': 'white onions',
+    'spring onions': 'spring onions',
+    'spring onion': 'spring onions',
+    'onions': 'onions',
+    'onion': 'onions',
+    'baby spinach': 'spinach',
+    'fresh spinach': 'spinach',
+    'english cucumbers': 'cucumbers',
+    'english cucumber': 'cucumbers',
+    'cucumbers': 'cucumbers',
+    'cucumber': 'cucumbers',
+    'button mushrooms': 'mushrooms',
+    'button mushroom': 'mushrooms',
+    'fresh mushrooms': 'mushrooms',
+    'fresh mushroom': 'mushrooms',
+    'mushrooms': 'mushrooms',
+    'mushroom': 'mushrooms',
+    'garlic (imported)': 'garlic',
+    'imported garlic': 'garlic',
+    'local garlic': 'garlic',
+    'fresh mint': 'mint',
+    'mint leaves': 'mint',
+    'courgettes': 'zucchini',
+    'courgette': 'zucchini',
+    'zucchinis': 'zucchini',
+    'zucchini': 'zucchini',
+    'carrots': 'carrots',
+    'carrot': 'carrots',
+    'cabbages': 'cabbage',
+    'cabbage': 'cabbage',
+    'avocados': 'avocado',
+    'avocado': 'avocado',
+    'mangoes': 'mangoes',
+    'mangos': 'mangoes',
+    'mango': 'mangoes',
+    'bananas': 'bananas',
+    'banana': 'bananas',
+    'oranges': 'oranges',
+    'orange': 'oranges',
+    'lemons': 'lemons',
+    'lemon': 'lemons',
+    'limes': 'limes',
+    'lime': 'limes',
+    'watermelons': 'watermelons',
+    'watermelon': 'watermelons',
+    'pineapples': 'pineapples',
+    'pineapple': 'pineapples',
+    'eggplants': 'eggplant',
+    'eggplant': 'eggplant',
+    'brinjals': 'eggplant',
+    'brinjal': 'eggplant',
+    'aubergines': 'eggplant',
+    'aubergine': 'eggplant',
+    'chillies': 'chilies',
+    'chilies': 'chilies',
+    'chilli': 'chilies',
+    'chili': 'chilies',
+    'managu': 'managu',
+    'terere': 'terere',
+    'kunde': 'kunde',
+  };
+
+  static const Set<String> _nonPluralS = {
+    'peas',
+    'beans',
+    'greens',
+    'oats',
+    'lettuce',
+    'asparagus',
+    'citrus',
+    'hummus',
+    'lemongrass',
+    'watercress',
+  };
+
+  /// Normalizes a produce line-item description so singular/plural and Kenyan
+  /// market aliases resolve to the same canonical produce key.
+  static String canonicalProduce(String? desc) {
+    if (desc == null || desc.trim().isEmpty) return '';
+    final clean = desc
+        .toLowerCase()
+        .replaceAll(RegExp(r'\(.*?\)'), '')
+        .replaceAll(RegExp(r'[^a-z0-9\s]'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (clean.isEmpty) return '';
+
+    final exactAlias = produceAliases[clean];
+    if (exactAlias != null) return exactAlias;
+
+    for (final entry in produceAliases.entries) {
+      if (RegExp(r'\b' + RegExp.escape(entry.key) + r'\b').hasMatch(clean)) {
+        return entry.value;
+      }
+    }
+
+    final words = clean.split(' ').map(_stemWord).toList();
+    final stemmed = words.join(' ').trim();
+    return produceAliases[stemmed] ?? stemmed;
+  }
+
+  static String _stemWord(String word) {
+    if (word.length < 4 || _nonPluralS.contains(word)) return word;
+    if (word.endsWith('ies') && word.length > 4) {
+      return '${word.substring(0, word.length - 3)}y';
+    }
+    if (word.endsWith('oes') && word.length > 4) {
+      return word.substring(0, word.length - 2);
+    }
+    if (word.endsWith('ches') ||
+        word.endsWith('shes') ||
+        word.endsWith('xes') ||
+        word.endsWith('zes')) {
+      return word.substring(0, word.length - 2);
+    }
+    if (word.endsWith('s') &&
+        !word.endsWith('ss') &&
+        !word.endsWith('us') &&
+        !word.endsWith('is')) {
+      return word.substring(0, word.length - 1);
+    }
+    return word;
+  }
+
   static bool _isValidCalendarDate(int year, int month, int day) {
     if (year < 1000 || month < 1 || month > 12 || day < 1 || day > 31) {
       return false;

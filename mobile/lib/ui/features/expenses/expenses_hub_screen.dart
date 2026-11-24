@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../../data/repositories/vault_repository.dart';
 import '../../../domain/models/models.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/scoped_text_controllers.dart';
 import 'expenses_view_model.dart';
 
 /// Capital & Finance Hub matching `page-expenses` in `index.html`, `views.js`, and `payroll.js`.
@@ -141,443 +142,481 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
   Future<void> _openExpenseModal({required String defaultType}) async {
     var type = defaultType;
     var category = defaultType == 'capital' ? 'capital' : 'transport';
-    final dateCtrl = TextEditingController(
-      text: DateFormat('yyyy-MM-dd').format(DateTime.now()),
-    );
-    final descCtrl = TextEditingController();
-    final amountCtrl = TextEditingController();
+    final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            20,
-            20,
-            20,
-            math.max(
-              MediaQuery.viewInsetsOf(ctx).bottom,
-              math.max(
-                MediaQuery.viewPaddingOf(ctx).bottom,
-                MediaQuery.paddingOf(ctx).bottom,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => ScopedTextControllers(
+        initialTexts: [todayIso, '', ''],
+        builder: (ctx, ctrls) {
+          final dateCtrl = ctrls[0];
+          final descCtrl = ctrls[1];
+          final amountCtrl = ctrls[2];
+          return StatefulBuilder(
+            builder: (ctx, setModalState) => Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                20,
+                20,
+                math.max(
+                      MediaQuery.viewInsetsOf(ctx).bottom,
+                      math.max(
+                        MediaQuery.viewPaddingOf(ctx).bottom,
+                        MediaQuery.paddingOf(ctx).bottom,
+                      ),
+                    ) +
+                    24,
               ),
-            ) +
-                24,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  type == 'capital' ? 'Record Capital Input' : 'Record Expense',
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-                const SizedBox(height: 14),
-                Row(
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: type,
-                        decoration: const InputDecoration(labelText: 'Type'),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'expense',
-                            child: Text('Expense'),
+                    Text(
+                      type == 'capital'
+                          ? 'Record Capital Input'
+                          : 'Record Expense',
+                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
                           ),
-                          DropdownMenuItem(
-                            value: 'capital',
-                            child: Text('Capital Input'),
-                          ),
-                        ],
-                        onChanged: (v) {
-                          if (v == null) return;
-                          setModalState(() {
-                            type = v;
-                            if (v == 'capital') category = 'capital';
-                          });
-                        },
-                      ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: dateCtrl,
-                        readOnly: true,
-                        decoration: const InputDecoration(
-                          labelText: 'Date',
-                          suffixIcon: Icon(Icons.calendar_today, size: 18),
-                        ),
-                        onTap: () async {
-                          final picked = await showDatePicker(
-                            context: ctx,
-                            initialDate: DateTime.now(),
-                            firstDate: DateTime(2020),
-                            lastDate: DateTime(2035),
-                          );
-                          if (picked != null) {
-                            dateCtrl.text =
-                                DateFormat('yyyy-MM-dd').format(picked);
-                          }
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: descCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Description',
-                    hintText: 'e.g. Fuel, Rent, Supplier payment',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
-                  children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: category,
-                        decoration:
-                            const InputDecoration(labelText: 'Category'),
-                        items: ExpensesViewModel.expenseCategories
-                            .map(
-                              (c) => DropdownMenuItem(
-                                value: c,
-                                child: Text(
-                                  ExpensesViewModel.getCategoryLabel(c),
-                                ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: type,
+                            decoration:
+                                const InputDecoration(labelText: 'Type'),
+                            items: const [
+                              DropdownMenuItem(
+                                value: 'expense',
+                                child: Text('Expense'),
                               ),
-                            )
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) setModalState(() => category = v);
-                        },
+                              DropdownMenuItem(
+                                value: 'capital',
+                                child: Text('Capital Input'),
+                              ),
+                            ],
+                            onChanged: (v) {
+                              if (v == null) return;
+                              setModalState(() {
+                                type = v;
+                                if (v == 'capital') category = 'capital';
+                              });
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: dateCtrl,
+                            readOnly: true,
+                            decoration: const InputDecoration(
+                              labelText: 'Date',
+                              suffixIcon: Icon(Icons.calendar_today, size: 18),
+                            ),
+                            onTap: () async {
+                              final picked = await showDatePicker(
+                                context: ctx,
+                                initialDate: DateTime.now(),
+                                firstDate: DateTime(2020),
+                                lastDate: DateTime(2035),
+                              );
+                              if (picked != null) {
+                                dateCtrl.text =
+                                    DateFormat('yyyy-MM-dd').format(picked);
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: descCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        hintText: 'e.g. Fuel, Rent, Supplier payment',
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: amountCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: category,
+                            decoration:
+                                const InputDecoration(labelText: 'Category'),
+                            items: ExpensesViewModel.expenseCategories
+                                .map(
+                                  (c) => DropdownMenuItem(
+                                    value: c,
+                                    child: Text(
+                                      ExpensesViewModel.getCategoryLabel(c),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (v) {
+                              if (v != null) setModalState(() => category = v);
+                            },
+                          ),
                         ),
-                        decoration: const InputDecoration(
-                          labelText: 'Amount (KES)',
-                          hintText: '0.00',
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: amountCtrl,
+                            keyboardType:
+                                const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Amount (KES)',
+                              hintText: '0.00',
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton(
+                      onPressed: () async {
+                        final desc = descCtrl.text.trim();
+                        final amount =
+                            double.tryParse(amountCtrl.text.trim()) ?? 0;
+                        if (desc.isEmpty || amount <= 0) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(
+                              content:
+                                  Text('Please enter a description and amount'),
+                            ),
+                          );
+                          return;
+                        }
+                        await _vm.addExpenseEntry(
+                          type: type,
+                          date: dateCtrl.text,
+                          desc: desc,
+                          category: category,
+                          amount: amount,
+                        );
+                        if (ctx.mounted) Navigator.of(ctx).pop();
+                      },
+                      child: const Text('Save Entry'),
                     ),
                   ],
                 ),
-                const SizedBox(height: 18),
-                FilledButton(
-                  onPressed: () async {
-                    final desc = descCtrl.text.trim();
-                    final amount =
-                        double.tryParse(amountCtrl.text.trim()) ?? 0;
-                    if (desc.isEmpty || amount <= 0) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text('Please enter a description and amount'),
-                        ),
-                      );
-                      return;
-                    }
-                    await _vm.addExpenseEntry(
-                      type: type,
-                      date: dateCtrl.text,
-                      desc: desc,
-                      category: category,
-                      amount: amount,
-                    );
-                    if (ctx.mounted) Navigator.of(ctx).pop();
-                  },
-                  child: const Text('Save Entry'),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
 
   Future<void> _openStaffModal({Staff? existing}) async {
-    final nameCtrl = TextEditingController(text: existing?.name ?? '');
-    final roleCtrl = TextEditingController(text: existing?.role ?? '');
-    final salaryCtrl = TextEditingController(
-      text: existing != null && existing.salary > 0
-          ? existing.salary.toString()
-          : '',
-    );
-    final phoneCtrl = TextEditingController(text: existing?.phone ?? '');
-    final payDayCtrl = TextEditingController(text: existing?.payDay ?? '5');
-
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          20,
-          20,
-          math.max(
-            MediaQuery.viewInsetsOf(ctx).bottom,
-            math.max(
-              MediaQuery.viewPaddingOf(ctx).bottom,
-              MediaQuery.paddingOf(ctx).bottom,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => ScopedTextControllers(
+        initialTexts: [
+          existing?.name ?? '',
+          existing?.role ?? '',
+          existing != null && existing.salary > 0
+              ? existing.salary.toString()
+              : '',
+          existing?.phone ?? '',
+          existing?.payDay ?? '5',
+        ],
+        builder: (ctx, ctrls) {
+          final nameCtrl = ctrls[0];
+          final roleCtrl = ctrls[1];
+          final salaryCtrl = ctrls[2];
+          final phoneCtrl = ctrls[3];
+          final payDayCtrl = ctrls[4];
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20,
+              20,
+              math.max(
+                    MediaQuery.viewInsetsOf(ctx).bottom,
+                    math.max(
+                      MediaQuery.viewPaddingOf(ctx).bottom,
+                      MediaQuery.paddingOf(ctx).bottom,
+                    ),
+                  ) +
+                  24,
             ),
-          ) +
-              24,
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                existing == null ? 'Add Staff' : 'Edit Staff',
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-              ),
-              const SizedBox(height: 14),
-              Row(
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: nameCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Full Name',
-                        hintText: 'e.g. James Mwangi',
+                  Text(
+                    existing == null ? 'Add Staff' : 'Edit Staff',
+                    style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: nameCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Full Name',
+                            hintText: 'e.g. James Mwangi',
+                          ),
+                        ),
                       ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: roleCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Role / Position',
+                            hintText: 'e.g. Driver, Loader',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: salaryCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'Monthly Salary (KES)',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: phoneCtrl,
+                          keyboardType: TextInputType.phone,
+                          decoration: const InputDecoration(
+                            labelText: 'Phone',
+                            hintText: '0712345678',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: payDayCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Pay Day (1-31)',
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: roleCtrl,
-                      decoration: const InputDecoration(
-                        labelText: 'Role / Position',
-                        hintText: 'e.g. Driver, Loader',
-                      ),
-                    ),
+                  const SizedBox(height: 18),
+                  FilledButton(
+                    onPressed: () async {
+                      final name = nameCtrl.text.trim();
+                      final salary =
+                          double.tryParse(salaryCtrl.text.trim()) ?? 0;
+                      if (name.isEmpty || salary <= 0) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(
+                            content:
+                                Text('Staff name and salary are required'),
+                          ),
+                        );
+                        return;
+                      }
+                      await _vm.saveStaff(
+                        id: existing?.id,
+                        name: name,
+                        role: roleCtrl.text,
+                        salary: salary,
+                        phone: phoneCtrl.text,
+                        payDay: payDayCtrl.text.trim().isEmpty
+                            ? '5'
+                            : payDayCtrl.text.trim(),
+                      );
+                      if (ctx.mounted) Navigator.of(ctx).pop();
+                    },
+                    child: const Text('Save Staff'),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: salaryCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Monthly Salary (KES)',
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: phoneCtrl,
-                      keyboardType: TextInputType.phone,
-                      decoration: const InputDecoration(
-                        labelText: 'Phone',
-                        hintText: '0712345678',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: payDayCtrl,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Pay Day (1-31)',
-                ),
-              ),
-              const SizedBox(height: 18),
-              FilledButton(
-                onPressed: () async {
-                  final name = nameCtrl.text.trim();
-                  final salary =
-                      double.tryParse(salaryCtrl.text.trim()) ?? 0;
-                  if (name.isEmpty || salary <= 0) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(
-                      const SnackBar(
-                        content: Text('Staff name and salary are required'),
-                      ),
-                    );
-                    return;
-                  }
-                  await _vm.saveStaff(
-                    id: existing?.id,
-                    name: name,
-                    role: roleCtrl.text,
-                    salary: salary,
-                    phone: phoneCtrl.text,
-                    payDay: payDayCtrl.text.trim().isEmpty
-                        ? '5'
-                        : payDayCtrl.text.trim(),
-                  );
-                  if (ctx.mounted) Navigator.of(ctx).pop();
-                },
-                child: const Text('Save Staff'),
-              ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
 
   Future<void> _openRecurringModal({RecurringExpense? existing}) async {
-    final descCtrl = TextEditingController(text: existing?.desc ?? '');
     var category = existing?.category ?? 'rent';
     if (!ExpensesViewModel.recurringCategories.contains(category)) {
       category = 'other';
     }
-    final amountCtrl = TextEditingController(
-      text: existing != null && existing.amount > 0
-          ? existing.amount.toString()
-          : '',
-    );
-    final dueDayCtrl = TextEditingController(text: existing?.dueDay ?? '1');
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            20,
-            20,
-            20,
-            math.max(
-              MediaQuery.viewInsetsOf(ctx).bottom,
-              math.max(
-                MediaQuery.viewPaddingOf(ctx).bottom,
-                MediaQuery.paddingOf(ctx).bottom,
-              ),
-            ) +
-                24,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  existing == null
-                      ? 'Add Recurring Expense'
-                      : 'Edit Recurring Expense',
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => ScopedTextControllers(
+        initialTexts: [
+          existing?.desc ?? '',
+          existing != null && existing.amount > 0
+              ? existing.amount.toString()
+              : '',
+          existing?.dueDay ?? '1',
+        ],
+        builder: (ctx, ctrls) {
+          final descCtrl = ctrls[0];
+          final amountCtrl = ctrls[1];
+          final dueDayCtrl = ctrls[2];
+          return StatefulBuilder(
+            builder: (ctx, setModalState) => Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                20,
+                20,
+                math.max(
+                      MediaQuery.viewInsetsOf(ctx).bottom,
+                      math.max(
+                        MediaQuery.viewPaddingOf(ctx).bottom,
+                        MediaQuery.paddingOf(ctx).bottom,
                       ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: descCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Description',
-                    hintText: 'e.g. Shop Rent',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
+                    ) +
+                    24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: category,
-                        decoration:
-                            const InputDecoration(labelText: 'Category'),
-                        items: ExpensesViewModel.recurringCategories
-                            .map(
-                              (c) => DropdownMenuItem(
-                                value: c,
-                                child: Text(
-                                  ExpensesViewModel.getCategoryLabel(c),
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) setModalState(() => category = v);
-                        },
+                    Text(
+                      existing == null
+                          ? 'Add Recurring Expense'
+                          : 'Edit Recurring Expense',
+                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: descCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        hintText: 'e.g. Shop Rent',
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: amountCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: category,
+                            decoration:
+                                const InputDecoration(labelText: 'Category'),
+                            items: ExpensesViewModel.recurringCategories
+                                .map(
+                                  (c) => DropdownMenuItem(
+                                    value: c,
+                                    child: Text(
+                                      ExpensesViewModel.getCategoryLabel(c),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (v) {
+                              if (v != null) setModalState(() => category = v);
+                            },
+                          ),
                         ),
-                        decoration: const InputDecoration(
-                          labelText: 'Amount (KES)',
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: amountCtrl,
+                            keyboardType:
+                                const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Amount (KES)',
+                            ),
+                          ),
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: dueDayCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(
+                        labelText: 'Due Day (1-31)',
                       ),
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton(
+                      onPressed: () async {
+                        final desc = descCtrl.text.trim();
+                        final amount =
+                            double.tryParse(amountCtrl.text.trim()) ?? 0;
+                        if (desc.isEmpty || amount <= 0) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(
+                              content:
+                                  Text('Description and amount are required'),
+                            ),
+                          );
+                          return;
+                        }
+                        await _vm.saveRecurring(
+                          id: existing?.id,
+                          desc: desc,
+                          category: category,
+                          amount: amount,
+                          dueDay: dueDayCtrl.text.trim().isEmpty
+                              ? '1'
+                              : dueDayCtrl.text.trim(),
+                        );
+                        if (ctx.mounted) Navigator.of(ctx).pop();
+                      },
+                      child: const Text('Save Recurring Expense'),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: dueDayCtrl,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Due Day (1-31)',
-                  ),
-                ),
-                const SizedBox(height: 18),
-                FilledButton(
-                  onPressed: () async {
-                    final desc = descCtrl.text.trim();
-                    final amount =
-                        double.tryParse(amountCtrl.text.trim()) ?? 0;
-                    if (desc.isEmpty || amount <= 0) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text('Description and amount are required'),
-                        ),
-                      );
-                      return;
-                    }
-                    await _vm.saveRecurring(
-                      id: existing?.id,
-                      desc: desc,
-                      category: category,
-                      amount: amount,
-                      dueDay: dueDayCtrl.text.trim().isEmpty
-                          ? '1'
-                          : dueDayCtrl.text.trim(),
-                    );
-                    if (ctx.mounted) Navigator.of(ctx).pop();
-                  },
-                  child: const Text('Save Recurring Expense'),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
 
   Future<void> _openPersonalExpenseModal() async {
-    final descCtrl = TextEditingController();
     var category = 'airtime';
-    final amountCtrl = TextEditingController();
-    final dateCtrl = TextEditingController(
-      text: DateFormat('yyyy-MM-dd').format(DateTime.now()),
-    );
+    final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     const personalPickerCats = [
       'airtime',
@@ -594,354 +633,389 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModalState) => Padding(
-          padding: EdgeInsets.fromLTRB(
-            20,
-            20,
-            20,
-            math.max(
-              MediaQuery.viewInsetsOf(ctx).bottom,
-              math.max(
-                MediaQuery.viewPaddingOf(ctx).bottom,
-                MediaQuery.paddingOf(ctx).bottom,
-              ),
-            ) +
-                24,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Add Personal Expense',
-                  style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => ScopedTextControllers(
+        initialTexts: ['', '', todayIso],
+        builder: (ctx, ctrls) {
+          final descCtrl = ctrls[0];
+          final amountCtrl = ctrls[1];
+          final dateCtrl = ctrls[2];
+          return StatefulBuilder(
+            builder: (ctx, setModalState) => Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                20,
+                20,
+                math.max(
+                      MediaQuery.viewInsetsOf(ctx).bottom,
+                      math.max(
+                        MediaQuery.viewPaddingOf(ctx).bottom,
+                        MediaQuery.paddingOf(ctx).bottom,
                       ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: descCtrl,
-                  decoration: const InputDecoration(
-                    labelText: 'Description',
-                    hintText: 'e.g. Lunch, Airtime, Transport',
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Row(
+                    ) +
+                    24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Expanded(
-                      child: DropdownButtonFormField<String>(
-                        initialValue: category,
-                        decoration:
-                            const InputDecoration(labelText: 'Category'),
-                        items: personalPickerCats
-                            .map(
-                              (c) => DropdownMenuItem(
-                                value: c,
-                                child: Text(
-                                  ExpensesViewModel.getPersonalCategoryLabel(c),
-                                ),
-                              ),
-                            )
-                            .toList(),
-                        onChanged: (v) {
-                          if (v != null) setModalState(() => category = v);
-                        },
+                    Text(
+                      'Add Personal Expense',
+                      style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: descCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        hintText: 'e.g. Lunch, Airtime, Transport',
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: TextField(
-                        controller: amountCtrl,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
+                    const SizedBox(height: 12),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<String>(
+                            initialValue: category,
+                            decoration:
+                                const InputDecoration(labelText: 'Category'),
+                            items: personalPickerCats
+                                .map(
+                                  (c) => DropdownMenuItem(
+                                    value: c,
+                                    child: Text(
+                                      ExpensesViewModel
+                                          .getPersonalCategoryLabel(c),
+                                    ),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: (v) {
+                              if (v != null) setModalState(() => category = v);
+                            },
+                          ),
                         ),
-                        decoration: const InputDecoration(
-                          labelText: 'Amount (KES)',
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: amountCtrl,
+                            keyboardType:
+                                const TextInputType.numberWithOptions(
+                              decimal: true,
+                            ),
+                            decoration: const InputDecoration(
+                              labelText: 'Amount (KES)',
+                            ),
+                          ),
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: dateCtrl,
+                      readOnly: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Date',
+                        suffixIcon: Icon(Icons.calendar_today, size: 18),
                       ),
+                      onTap: () async {
+                        final picked = await showDatePicker(
+                          context: ctx,
+                          initialDate: DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime(2035),
+                        );
+                        if (picked != null) {
+                          dateCtrl.text =
+                              DateFormat('yyyy-MM-dd').format(picked);
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 18),
+                    FilledButton(
+                      onPressed: () async {
+                        final desc = descCtrl.text.trim();
+                        final amount =
+                            double.tryParse(amountCtrl.text.trim()) ?? 0;
+                        if (desc.isEmpty || amount <= 0) {
+                          ScaffoldMessenger.of(ctx).showSnackBar(
+                            const SnackBar(
+                              content:
+                                  Text('Description and amount are required'),
+                            ),
+                          );
+                          return;
+                        }
+                        await _vm.addPersonalExpense(
+                          desc: desc,
+                          category: category,
+                          amount: amount,
+                          date: dateCtrl.text,
+                        );
+                        if (ctx.mounted) Navigator.of(ctx).pop();
+                      },
+                      child: const Text('Save Personal Expense'),
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: dateCtrl,
-                  readOnly: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Date',
-                    suffixIcon: Icon(Icons.calendar_today, size: 18),
-                  ),
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: ctx,
-                      initialDate: DateTime.now(),
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2035),
-                    );
-                    if (picked != null) {
-                      dateCtrl.text = DateFormat('yyyy-MM-dd').format(picked);
-                    }
-                  },
-                ),
-                const SizedBox(height: 18),
-                FilledButton(
-                  onPressed: () async {
-                    final desc = descCtrl.text.trim();
-                    final amount =
-                        double.tryParse(amountCtrl.text.trim()) ?? 0;
-                    if (desc.isEmpty || amount <= 0) {
-                      ScaffoldMessenger.of(ctx).showSnackBar(
-                        const SnackBar(
-                          content: Text('Description and amount are required'),
-                        ),
-                      );
-                      return;
-                    }
-                    await _vm.addPersonalExpense(
-                      desc: desc,
-                      category: category,
-                      amount: amount,
-                      date: dateCtrl.text,
-                    );
-                    if (ctx.mounted) Navigator.of(ctx).pop();
-                  },
-                  child: const Text('Save Personal Expense'),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
 
   Future<void> _openBorrowingModal({Borrowing? existing}) async {
-    final dateCtrl = TextEditingController(
-      text: existing?.date ?? DateFormat('yyyy-MM-dd').format(DateTime.now()),
-    );
-    final amountCtrl = TextEditingController(
-      text: existing != null && existing.amount > 0
-          ? existing.amount.toString()
-          : '',
-    );
-    final descCtrl = TextEditingController(text: existing?.desc ?? '');
+    final initialDate =
+        existing?.date ?? DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final initialAmt = existing != null && existing.amount > 0
+        ? existing.amount.toString()
+        : '';
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          20,
-          20,
-          math.max(
-            MediaQuery.viewInsetsOf(ctx).bottom,
-            math.max(
-              MediaQuery.viewPaddingOf(ctx).bottom,
-              MediaQuery.paddingOf(ctx).bottom,
-            ),
-          ) +
-              24,
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                existing == null ? 'Record New Loan' : 'Edit Loan',
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => ScopedTextControllers(
+        initialTexts: [initialDate, initialAmt, existing?.desc ?? ''],
+        builder: (ctx, ctrls) {
+          final dateCtrl = ctrls[0];
+          final amountCtrl = ctrls[1];
+          final descCtrl = ctrls[2];
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20,
+              20,
+              math.max(
+                    MediaQuery.viewInsetsOf(ctx).bottom,
+                    math.max(
+                      MediaQuery.viewPaddingOf(ctx).bottom,
+                      MediaQuery.paddingOf(ctx).bottom,
                     ),
-              ),
-              const SizedBox(height: 14),
-              Row(
+                  ) +
+                  24,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: dateCtrl,
-                      readOnly: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Date',
-                        suffixIcon: Icon(Icons.calendar_today, size: 18),
+                  Text(
+                    existing == null ? 'Record New Loan' : 'Edit Loan',
+                    style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: dateCtrl,
+                          readOnly: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Date',
+                            suffixIcon: Icon(Icons.calendar_today, size: 18),
+                          ),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: ctx,
+                              initialDate: DateTime.now(),
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2035),
+                            );
+                            if (picked != null) {
+                              dateCtrl.text =
+                                  DateFormat('yyyy-MM-dd').format(picked);
+                            }
+                          },
+                        ),
                       ),
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: ctx,
-                          initialDate: DateTime.now(),
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2035),
-                        );
-                        if (picked != null) {
-                          dateCtrl.text =
-                              DateFormat('yyyy-MM-dd').format(picked);
-                        }
-                      },
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: amountCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'Amount (KES)',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: descCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Description / Reason',
+                      hintText: 'e.g. Cash advance',
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: amountCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Amount (KES)',
-                      ),
-                    ),
+                  const SizedBox(height: 18),
+                  FilledButton(
+                    onPressed: () async {
+                      final amount =
+                          double.tryParse(amountCtrl.text.trim()) ?? 0;
+                      if (amount <= 0) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text('Amount is required')),
+                        );
+                        return;
+                      }
+                      await _vm.saveBorrowing(
+                        id: existing?.id,
+                        date: dateCtrl.text,
+                        desc: descCtrl.text,
+                        amount: amount,
+                      );
+                      if (ctx.mounted) Navigator.of(ctx).pop();
+                    },
+                    child: const Text('Save Loan'),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: descCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Description / Reason',
-                  hintText: 'e.g. Cash advance',
-                ),
-              ),
-              const SizedBox(height: 18),
-              FilledButton(
-                onPressed: () async {
-                  final amount =
-                      double.tryParse(amountCtrl.text.trim()) ?? 0;
-                  if (amount <= 0) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(
-                      const SnackBar(content: Text('Amount is required')),
-                    );
-                    return;
-                  }
-                  await _vm.saveBorrowing(
-                    id: existing?.id,
-                    date: dateCtrl.text,
-                    desc: descCtrl.text,
-                    amount: amount,
-                  );
-                  if (ctx.mounted) Navigator.of(ctx).pop();
-                },
-                child: const Text('Save Loan'),
-              ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
 
   Future<void> _openRepayModal(Borrowing loan) async {
-    final dateCtrl = TextEditingController(
-      text: DateFormat('yyyy-MM-dd').format(DateTime.now()),
-    );
-    final amountCtrl = TextEditingController();
-    final descCtrl = TextEditingController();
+    final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(
-          20,
-          20,
-          20,
-          math.max(
-            MediaQuery.viewInsetsOf(ctx).bottom,
-            math.max(
-              MediaQuery.viewPaddingOf(ctx).bottom,
-              MediaQuery.paddingOf(ctx).bottom,
-            ),
-          ) +
-              24,
-        ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                'Record Repayment',
-                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => ScopedTextControllers(
+        initialTexts: [todayIso, '', ''],
+        builder: (ctx, ctrls) {
+          final dateCtrl = ctrls[0];
+          final amountCtrl = ctrls[1];
+          final descCtrl = ctrls[2];
+          return Padding(
+            padding: EdgeInsets.fromLTRB(
+              20,
+              20,
+              20,
+              math.max(
+                    MediaQuery.viewInsetsOf(ctx).bottom,
+                    math.max(
+                      MediaQuery.viewPaddingOf(ctx).bottom,
+                      MediaQuery.paddingOf(ctx).bottom,
                     ),
-              ),
-              const SizedBox(height: 4),
-              Text(
-                'Outstanding: KES ${ExpensesViewModel.formatMoney(loan.outstandingBalance)}',
-                style: const TextStyle(color: AppTheme.slateMuted),
-              ),
-              const SizedBox(height: 14),
-              Row(
+                  ) +
+                  24,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: TextField(
-                      controller: dateCtrl,
-                      readOnly: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Date',
-                        suffixIcon: Icon(Icons.calendar_today, size: 18),
+                  Text(
+                    'Record Repayment',
+                    style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Outstanding: KES ${ExpensesViewModel.formatMoney(loan.outstandingBalance)}',
+                    style: const TextStyle(color: AppTheme.slateMuted),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: dateCtrl,
+                          readOnly: true,
+                          decoration: const InputDecoration(
+                            labelText: 'Date',
+                            suffixIcon: Icon(Icons.calendar_today, size: 18),
+                          ),
+                          onTap: () async {
+                            final picked = await showDatePicker(
+                              context: ctx,
+                              initialDate: DateTime.now(),
+                              firstDate: DateTime(2020),
+                              lastDate: DateTime(2035),
+                            );
+                            if (picked != null) {
+                              dateCtrl.text =
+                                  DateFormat('yyyy-MM-dd').format(picked);
+                            }
+                          },
+                        ),
                       ),
-                      onTap: () async {
-                        final picked = await showDatePicker(
-                          context: ctx,
-                          initialDate: DateTime.now(),
-                          firstDate: DateTime(2020),
-                          lastDate: DateTime(2035),
-                        );
-                        if (picked != null) {
-                          dateCtrl.text =
-                              DateFormat('yyyy-MM-dd').format(picked);
-                        }
-                      },
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: TextField(
+                          controller: amountCtrl,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: 'Repayment (KES)',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: descCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Notes',
+                      hintText: 'e.g. Paid via M-Pesa',
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: amountCtrl,
-                      keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      decoration: const InputDecoration(
-                        labelText: 'Repayment (KES)',
-                      ),
-                    ),
+                  const SizedBox(height: 18),
+                  FilledButton(
+                    onPressed: () async {
+                      final amount =
+                          double.tryParse(amountCtrl.text.trim()) ?? 0;
+                      if (amount <= 0) {
+                        ScaffoldMessenger.of(ctx).showSnackBar(
+                          const SnackBar(content: Text('Amount is required')),
+                        );
+                        return;
+                      }
+                      await _vm.saveRepayment(
+                        loanId: loan.id,
+                        date: dateCtrl.text,
+                        amount: amount,
+                        desc: descCtrl.text,
+                      );
+                      if (ctx.mounted) Navigator.of(ctx).pop();
+                    },
+                    child: const Text('Save Repayment'),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: descCtrl,
-                decoration: const InputDecoration(
-                  labelText: 'Notes',
-                  hintText: 'e.g. Paid via M-Pesa',
-                ),
-              ),
-              const SizedBox(height: 18),
-              FilledButton(
-                onPressed: () async {
-                  final amount =
-                      double.tryParse(amountCtrl.text.trim()) ?? 0;
-                  if (amount <= 0) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(
-                      const SnackBar(content: Text('Amount is required')),
-                    );
-                    return;
-                  }
-                  await _vm.saveRepayment(
-                    loanId: loan.id,
-                    date: dateCtrl.text,
-                    amount: amount,
-                    desc: descCtrl.text,
-                  );
-                  if (ctx.mounted) Navigator.of(ctx).pop();
-                },
-                child: const Text('Save Repayment'),
-              ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -949,6 +1023,11 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
   Future<void> _openRepaymentsHistory(Borrowing loan) async {
     await showModalBottomSheet<void>(
       context: context,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (ctx) => ListenableBuilder(
         listenable: _vm,
         builder: (ctx, _) {

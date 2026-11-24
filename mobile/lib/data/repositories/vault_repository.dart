@@ -115,6 +115,7 @@ class VaultRepository extends ChangeNotifier {
   VaultSettings get settings => _settings;
   KraCompanyProfile get kraProfile => _settings.kraProfile;
   List<PersonalDocument> get personalDocuments => _settings.personalDocuments;
+  List<BrandedDocument> get brandedDocuments => _settings.brandedDocuments;
   String get personalDocsWorkerUrl => _settings.personalDocsWorkerUrl;
   int? get remoteRevision => _remoteRevision;
   String? get lastSyncError => _lastSyncError;
@@ -470,6 +471,41 @@ class VaultRepository extends ChangeNotifier {
     await setSettings(_settings.withPersonalDocuments(docs), sync: sync);
   }
 
+  Future<void> saveBrandedDocument(
+    BrandedDocument doc, {
+    bool sync = true,
+  }) async {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final updated = doc.copyWith(
+      createdAt: doc.createdAt ?? nowIso,
+      updatedAt: nowIso,
+      clearDeletedAt: true,
+    );
+    final docs = List<BrandedDocument>.from(_settings.allBrandedDocumentsRaw);
+    final idx = docs.indexWhere((d) => d.id == updated.id);
+    if (idx >= 0) {
+      docs[idx] = updated;
+    } else {
+      docs.insert(0, updated);
+    }
+    await setSettings(_settings.withBrandedDocuments(docs), sync: sync);
+  }
+
+  Future<void> deleteBrandedDocument(
+    String docId, {
+    bool sync = true,
+  }) async {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final docs = List<BrandedDocument>.from(_settings.allBrandedDocumentsRaw);
+    final idx = docs.indexWhere((d) => d.id == docId);
+    if (idx < 0) return;
+    docs[idx] = docs[idx].copyWith(
+      deletedAt: nowIso,
+      updatedAt: nowIso,
+    );
+    await setSettings(_settings.withBrandedDocuments(docs), sync: sync);
+  }
+
   Future<void> markRecordDeleted(String collection, String id,
       {bool sync = true}) async {
     if (collection.isEmpty || id.isEmpty) return;
@@ -750,6 +786,32 @@ class VaultRepository extends ChangeNotifier {
     };
     if (mergedKeywords.isNotEmpty) {
       merged[VaultSettings.keyTaxableKeywords] = mergedKeywords.take(200).toList();
+    }
+
+    // Merge branded documents by `id` using latest `updatedAt` / `deletedAt` tombstone.
+    final brandedById = <String, BrandedDocument>{};
+    for (final doc in [
+      ...remote.allBrandedDocumentsRaw,
+      ...local.allBrandedDocumentsRaw,
+    ]) {
+      final existing = brandedById[doc.id];
+      if (existing == null) {
+        brandedById[doc.id] = doc;
+      } else {
+        final dTime = AppHelpers.parseTimestampMs(
+          doc.updatedAt ?? doc.deletedAt ?? doc.createdAt,
+        );
+        final eTime = AppHelpers.parseTimestampMs(
+          existing.updatedAt ?? existing.deletedAt ?? existing.createdAt,
+        );
+        if (dTime >= eTime) {
+          brandedById[doc.id] = doc;
+        }
+      }
+    }
+    if (brandedById.isNotEmpty) {
+      merged[VaultSettings.keyBrandedDocs] =
+          brandedById.values.map((d) => d.toJson()).toList();
     }
 
     return VaultSettings.fromJson(merged);
@@ -1126,18 +1188,41 @@ class VaultRepository extends ChangeNotifier {
     }
   }
 
+  /// Returns whether the local secure keystore currently holds a readable E2EE vault key.
+  Future<bool> hasE2eKey() async {
+    try {
+      return (await _storage.getE2eKey()) != null;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Returns `true` when an authenticated user session previously derived an
+  /// E2EE key (`saltVersion` stored) on this device, but the secure keystore
+  /// entry is missing and needs password confirmation.
+  Future<bool> needsE2eKeyUnlock() async {
+    try {
+      final uid = await _getActiveUserId();
+      if (uid == null || uid.isEmpty) return false;
+      final saltVer = await _storage.getSaltVersion();
+      if (saltVer == null || saltVer.isEmpty) return false;
+      return !(await hasE2eKey());
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Reads the current server non-draft invoices without mutating local state.
   Future<RemoteInvoiceSnapshot> getRemoteInvoiceSnapshot() async {
-    final uid = await _getActiveUserId();
-    if (uid == null || uid.isEmpty) {
-      return const RemoteInvoiceSnapshot(ok: false);
-    }
-    final jwkKey = await _storage.getE2eKey();
-    if (jwkKey == null) {
-      return const RemoteInvoiceSnapshot(ok: false);
-    }
-
     try {
+      final uid = await _getActiveUserId();
+      if (uid == null || uid.isEmpty) {
+        return const RemoteInvoiceSnapshot(ok: false);
+      }
+      final jwkKey = await _storage.getE2eKey();
+      if (jwkKey == null) {
+        return const RemoteInvoiceSnapshot(ok: false);
+      }
       RemoteVaultRow? row;
       try {
         row = await _readRemoteVault(uid);

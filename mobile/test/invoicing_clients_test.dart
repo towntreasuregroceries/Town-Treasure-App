@@ -1128,4 +1128,150 @@ void main() {
       expect(vault.priceLists.length, 1);
     });
   });
+
+  group('v1.2.6 Duplicate Guard & Single-Tap Save Regression Tests', () {
+    test(
+        'catches singular/plural produce variants, split rows, non-midnight dates, and offline local duplicates while saving clean offline invoices in 1 click',
+        () async {
+      // Offline / no-remote-credentials vault (snapshot.ok == false)
+      final env = await _createTestVault(withSyncCredentials: false);
+      final vault = env.vault;
+      await vault.setRestaurants([
+        const Restaurant(id: 'r1', name: 'Villa Rosa Kempinski'),
+      ]);
+
+      final vm = InvoicesViewModel(vault: vault);
+      addTearDown(vm.dispose);
+
+      // Save 1st invoice offline -> must save in ONE call without duplicateCheckUnavailable!
+      vm.setEditorRestaurantId('r1', triggerAutoSave: false);
+      vm.setEditorDate('2026-11-24T16:30:00Z', triggerAutoSave: false);
+      vm.updateLineItem(
+        0,
+        desc: 'Tomatoes',
+        qty: 10,
+        unit: 'kgs',
+        sellPrice: 120,
+        triggerAutoSave: false,
+      );
+      vm.addLineItem();
+      vm.updateLineItem(
+        1,
+        desc: 'Red Onions',
+        qty: 5,
+        unit: 'kgs',
+        sellPrice: 100,
+        triggerAutoSave: false,
+      );
+
+      final first = await vm.saveInvoice();
+      expect(first.outcome, SaveInvoiceOutcome.saved);
+      expect(vault.invoices.length, 1);
+
+      // Attempt 2nd invoice on same calendar day using singular names ("Tomato", "Red Onion")
+      // and split rows (6 kgs + 4 kgs = 10 kgs) -> MUST be caught locally even while offline!
+      vm.resetEditor();
+      vm.setEditorRestaurantId('r1', triggerAutoSave: false);
+      vm.setEditorDate('2026-11-24', triggerAutoSave: false);
+      vm.updateLineItem(
+        0,
+        desc: 'Tomato',
+        qty: 6,
+        unit: 'kgs',
+        sellPrice: 120,
+        triggerAutoSave: false,
+      );
+      vm.addLineItem();
+      vm.updateLineItem(
+        1,
+        desc: 'Roma Tomato',
+        qty: 4,
+        unit: 'kgs',
+        sellPrice: 120,
+        triggerAutoSave: false,
+      );
+      vm.addLineItem();
+      vm.updateLineItem(
+        2,
+        desc: 'Red Onion',
+        qty: 5,
+        unit: 'kgs',
+        sellPrice: 100,
+        triggerAutoSave: false,
+      );
+
+      expect(vm.liveDuplicateMatch, isNotNull);
+      final second = await vm.saveInvoice();
+      expect(second.outcome, SaveInvoiceOutcome.duplicateDetected);
+      expect(second.matchedDuplicate?.id, first.invoice!.id);
+    });
+
+    testWidgets(
+        'InvoiceEditorScreen saves on FIRST tap while a line-item TextFormField has active focus and shows live duplicate banner',
+        (tester) async {
+      final env = await _createTestVault(withSyncCredentials: false);
+      final vault = env.vault;
+      await vault.setRestaurants([
+        const Restaurant(id: 'r1', name: 'Serena Hotel'),
+      ]);
+
+      Invoice? savedCallbackInvoice;
+      await tester.pumpWidget(
+        _wrapWithProviders(
+          vault,
+          InvoiceEditorScreen(
+            prefillRestaurantId: 'r1',
+            prefillDate: '2026-11-24',
+            prefillItems: const [
+              InvoiceLineItem(
+                desc: 'Carrot',
+                qty: 8,
+                unit: 'kgs',
+                buyPrice: 60,
+                sellPrice: 100,
+                total: 800,
+              ),
+            ],
+            onSaved: (inv) => savedCallbackInvoice = inv,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Focus the Sell price TextFormField to simulate active keyboard editing
+      final fields = find.byType(TextFormField);
+      await tester.tap(fields.last);
+      await tester.pump();
+
+      // Single tap on Save Invoice must succeed immediately without being swallowed
+      await tester.tap(find.byKey(const Key('btn_save_invoice')));
+      await tester.pumpAndSettle();
+
+      expect(savedCallbackInvoice, isNotNull);
+      expect(vault.invoices.length, 1);
+
+      // Re-open editor with plural "Carrots" on same day -> live duplicate banner appears immediately
+      await tester.pumpWidget(
+        _wrapWithProviders(
+          vault,
+          const InvoiceEditorScreen(
+            prefillRestaurantId: 'r1',
+            prefillDate: '2026-11-24',
+            prefillItems: [
+              InvoiceLineItem(
+                desc: 'Carrots',
+                qty: 8,
+                unit: 'kgs',
+                buyPrice: 60,
+                sellPrice: 100,
+                total: 800,
+              ),
+            ],
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('live_duplicate_invoice_banner')), findsOneWidget);
+    });
+  });
 }
