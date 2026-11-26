@@ -75,7 +75,8 @@ class BrandedDocumentPdfBuilder {
     final sigImage =
         (sigBytes != null && sigBytes.isNotEmpty) ? pw.MemoryImage(sigBytes) : null;
 
-    final sellerPin = settings.kraProfile.normalizedSellerPin;
+    final sellerPin =
+        document.showKraPin ? settings.kraProfile.normalizedSellerPin : '';
     final displayDate = document.date.trim().isNotEmpty
         ? InvoiceFormatters.formatDisplayDate(document.date)
         : InvoiceFormatters.formatDisplayDate(InvoiceFormatters.todayIso());
@@ -517,7 +518,8 @@ class BrandedDocumentPdfBuilder {
                     'Tel: ${document.recipientPhone.trim()}',
                     style: const pw.TextStyle(fontSize: 8.8, color: _textMuted),
                   ),
-                if (document.recipientKraPin.trim().isNotEmpty)
+                if (document.showKraPin &&
+                    document.recipientKraPin.trim().isNotEmpty)
                   pw.Text(
                     'KRA PIN: ${document.recipientKraPin.trim().toUpperCase()}',
                     style: pw.TextStyle(

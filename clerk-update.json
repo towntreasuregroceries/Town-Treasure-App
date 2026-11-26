@@ -1,8 +1,8 @@
 {
-  "version": "1.2.6",
-  "buildNumber": 2020,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.6/TownTreasureClerk.apk",
-  "sha256": "954d74e78dab04df5b5704880374c99685543c9cd01dc5e6112b643aaa8da0fb",
-  "releaseNotes": "v1.2.6: Upgraded Smart Duplicate Guard (singular/plural produce matching, split-row aggregation & rejected-docket exclusion) and synced release parity with Owner App v1.2.6.",
+  "version": "1.2.7",
+  "buildNumber": 2021,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.7/TownTreasureClerk.apk",
+  "sha256": "b8c974043867dee6e7d7a4862b0bd393c4c20de1d750e6957a5523205b87c8ec",
+  "releaseNotes": "v1.2.7: Upgraded optical layout & document extraction engine and synced release parity with Owner App v1.2.7.",
   "mandatory": false
 }

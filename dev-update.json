@@ -1,8 +1,8 @@
 {
-  "version": "1.2.6",
-  "buildNumber": 2020,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.6/TownTreasureGroceries.apk",
-  "sha256": "66d08fe50affdec73d3d4ac84feda1944c6e266cfa078fc3b7ddf9aa848004ed",
-  "releaseNotes": "v1.2.6 (Official Release Parity): 1-tap Invoice Save, upgraded Smart Duplicate Guard, MS Word-style Branded Document Studio, and full-app safe-area & controller hardening.",
+  "version": "1.2.7",
+  "buildNumber": 2021,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.7/TownTreasureGroceries.apk",
+  "sha256": "61cc3b288a122fc0111b4d0affdb50d069536ac4543b1ee67a85e26315644daa",
+  "releaseNotes": "v1.2.7 (Official Release Parity): Smart OCR Delivery Note Studio, 1-tap Invoice-to-Delivery-Note conversion, LPO price hydration, and optional KRA PIN toggles across all documents.",
   "mandatory": false
 }

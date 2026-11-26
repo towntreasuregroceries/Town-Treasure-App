@@ -314,6 +314,7 @@ class BrandedDocument {
     this.showLetterheadBanner = true,
     this.showWatermark = true,
     this.showRecipientCard = true,
+    this.showKraPin = true,
     this.showStamp = true,
     this.showSignature = true,
     this.showQrCode = true,
@@ -343,6 +344,7 @@ class BrandedDocument {
   final bool showLetterheadBanner;
   final bool showWatermark;
   final bool showRecipientCard;
+  final bool showKraPin;
   final bool showStamp;
   final bool showSignature;
   final bool showQrCode;
@@ -503,6 +505,7 @@ class BrandedDocument {
           date: today,
           subject: 'SERVICE & SEASONAL SUPPLY UPDATE',
           showRecipientCard: false,
+          showKraPin: false,
           blocks: [
             BrandedDocBlock(
               id: AppHelpers.genId(),
@@ -553,6 +556,7 @@ class BrandedDocument {
           referenceNumber: ref,
           date: today,
           subject: 'GOODS DISPATCHED IN FRESH CONDITION',
+          showKraPin: false,
           stampCaption: 'DISPATCHED',
           blocks: [
             BrandedDocBlock(
@@ -615,6 +619,7 @@ class BrandedDocument {
       showLetterheadBanner: json['showLetterheadBanner'] != false,
       showWatermark: json['showWatermark'] != false,
       showRecipientCard: json['showRecipientCard'] != false,
+      showKraPin: json['showKraPin'] != false,
       showStamp: json['showStamp'] != false,
       showSignature: json['showSignature'] != false,
       showQrCode: json['showQrCode'] != false,
@@ -648,6 +653,7 @@ class BrandedDocument {
       'showLetterheadBanner': showLetterheadBanner,
       'showWatermark': showWatermark,
       'showRecipientCard': showRecipientCard,
+      'showKraPin': showKraPin,
       'showStamp': showStamp,
       'showSignature': showSignature,
       'showQrCode': showQrCode,
@@ -678,6 +684,7 @@ class BrandedDocument {
     bool? showLetterheadBanner,
     bool? showWatermark,
     bool? showRecipientCard,
+    bool? showKraPin,
     bool? showStamp,
     bool? showSignature,
     bool? showQrCode,
@@ -707,6 +714,7 @@ class BrandedDocument {
       showLetterheadBanner: showLetterheadBanner ?? this.showLetterheadBanner,
       showWatermark: showWatermark ?? this.showWatermark,
       showRecipientCard: showRecipientCard ?? this.showRecipientCard,
+      showKraPin: showKraPin ?? this.showKraPin,
       showStamp: showStamp ?? this.showStamp,
       showSignature: showSignature ?? this.showSignature,
       showQrCode: showQrCode ?? this.showQrCode,

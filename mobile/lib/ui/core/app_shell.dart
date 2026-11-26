@@ -21,6 +21,8 @@ import '../features/dashboard/dashboard_view_model.dart';
 import '../features/dashboard/overdue_notification_service.dart';
 import '../features/dashboard/signature_scanner_sheet.dart';
 import '../features/dashboard/update_checker_sheet.dart';
+import '../features/documents/document_ocr_converter.dart';
+import '../features/documents/document_ocr_import_sheet.dart';
 import '../features/documents/document_studio_screen.dart';
 import '../features/expenses/expenses_hub_screen.dart';
 import '../features/expenses/expenses_view_model.dart';
@@ -429,6 +431,7 @@ class _AppShellState extends State<AppShell> {
 
   Future<void> _openDocumentStudio() async {
     final vault = context.read<VaultRepository>();
+    final ocr = context.read<OcrConsensusService>();
     PersonalVaultService? vaultService;
     try {
       vaultService = context.read<PersonalVaultService>();
@@ -444,6 +447,30 @@ class _AppShellState extends State<AppShell> {
         builder: (_) => DocumentStudioScreen(
           vault: vault,
           personalVaultService: vaultService,
+          ocrService: ocr,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openScanToDeliveryNote() async {
+    final vault = context.read<VaultRepository>();
+    final ocr = context.read<OcrConsensusService>();
+    final output = await DocumentOcrImportSheet.show(
+      context,
+      vault: vault,
+      ocrService: ocr,
+      initialMode: DocSmartConversionMode.deliveryNote,
+    );
+    if (output == null || !mounted) return;
+    await vault.saveBrandedDocument(output.document);
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => BrandedDocumentEditorScreen(
+          initialDocument: output.document,
+          vault: vault,
+          ocrService: ocr,
         ),
       ),
     );
@@ -663,6 +690,22 @@ class _AppShellState extends State<AppShell> {
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
                   _startScanToPriceList();
+                },
+              ),
+              ListTile(
+                key: const Key('action_scan_delivery_note'),
+                leading: const CircleAvatar(
+                  backgroundColor: AppTheme.sageTint,
+                  foregroundColor: AppTheme.forestGreen,
+                  child: Icon(Icons.local_shipping_outlined),
+                ),
+                title: const Text('Scan Invoice -> Delivery Note'),
+                subtitle: const Text(
+                  'Extract deliverable items & quantities only (no prices)',
+                ),
+                onTap: () {
+                  Navigator.of(sheetCtx).pop();
+                  _openScanToDeliveryNote();
                 },
               ),
               ListTile(

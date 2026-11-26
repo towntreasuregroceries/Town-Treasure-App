@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,10 +9,16 @@ import 'package:provider/provider.dart';
 import 'package:town_treasure_groceries/data/repositories/vault_repository.dart';
 import 'package:town_treasure_groceries/data/services/crypto_service.dart';
 import 'package:town_treasure_groceries/data/services/local_storage_service.dart';
+import 'package:town_treasure_groceries/data/services/ocr_consensus_service.dart';
 import 'package:town_treasure_groceries/domain/models/models.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
 import 'package:town_treasure_groceries/ui/features/documents/branded_document_pdf_builder.dart';
+import 'package:town_treasure_groceries/ui/features/documents/document_ocr_converter.dart';
 import 'package:town_treasure_groceries/ui/features/documents/document_studio_screen.dart';
+import 'package:town_treasure_groceries/ui/features/invoices/invoice_detail_screen.dart';
+import 'package:town_treasure_groceries/ui/features/invoices/invoice_pdf_builder.dart';
+import 'package:town_treasure_groceries/ui/features/reports/reports_view_model.dart';
+import 'package:town_treasure_groceries/ui/features/reports/statement_pdf_builder.dart';
 
 import 'test_fakes.dart';
 
@@ -48,6 +56,21 @@ class _MemStorage extends LocalStorageService {
 
   @override
   Future<void> close() async {}
+}
+
+String _extractPdfTextStreams(Uint8List pdfBytes) {
+  final rawLatin = latin1.decode(pdfBytes);
+  final buf = StringBuffer(rawLatin);
+  final streamRegex = RegExp(r'stream\r?\n([\s\S]*?)\r?\nendstream');
+  for (final m in streamRegex.allMatches(rawLatin)) {
+    final chunk = latin1.encode(m.group(1)!);
+    try {
+      final inflated = zlib.decode(chunk);
+      buf.write('\n');
+      buf.write(latin1.decode(inflated, allowInvalid: true));
+    } catch (_) {}
+  }
+  return buf.toString();
 }
 
 void main() {
@@ -207,6 +230,10 @@ void main() {
       // Switch to Insert tab and insert a Table
       await tester.tap(find.byKey(const Key('ribbon_tab_insert')));
       await tester.pumpAndSettle();
+      await Scrollable.ensureVisible(
+        tester.element(find.byKey(const Key('btn_insert_table'))),
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('btn_insert_table')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('btn_confirm_insert_table')));
@@ -222,6 +249,383 @@ void main() {
       expect(saved.blocks.first.italic, isTrue);
       expect(saved.blocks.first.align, 'center');
       expect(saved.blocks.any((b) => b.isTable), isTrue);
+    });
+  });
+
+  group('v1.2.7 Smart OCR Delivery Note Filter, LPO Price Hydration & KRA PIN Toggles',
+      () {
+    test(
+        'DocumentOcrConverter strips leaked prices and excludes non-goods fee rows on Delivery Notes while hydrating LPO prices on Quotations',
+        () async {
+      final vault = VaultRepository(
+        cryptoService: CryptoService(),
+        localStorage: _MemStorage(),
+        supabase: FakeSupabaseGateway(),
+        syncDebounceDuration: const Duration(milliseconds: 20),
+      );
+      addTearDown(vault.dispose);
+
+      await vault.setRestaurants([
+        const Restaurant(
+          id: 'r1',
+          name: 'Serena Hotel',
+          kraPin: 'P051234567X',
+        ),
+      ], sync: false);
+      await vault.setPriceLists([
+        const PriceList(
+          id: 'pl1',
+          name: 'Hospitality Catalog',
+          items: [
+            PriceListItem(
+              id: 'p1',
+              name: 'Roma Tomatoes',
+              unit: 'kgs',
+              price: 135,
+            ),
+            PriceListItem(
+              id: 'p2',
+              name: 'English Cucumbers',
+              unit: 'kgs',
+              price: 95,
+            ),
+          ],
+        ),
+      ], sync: false);
+
+      const scannedInvoiceLines = [
+        InvoiceLineItem(
+          desc: '01. Fresh Tomato @ KSh 120/kg',
+          qty: 25,
+          unit: 'kgs',
+          buyPrice: 80,
+          sellPrice: 120,
+          total: 3000,
+        ),
+        InvoiceLineItem(
+          desc: '2) English Cucumber - KES 95.00',
+          qty: 10,
+          unit: 'kgs',
+          buyPrice: 60,
+          sellPrice: 95,
+          total: 950,
+        ),
+        InvoiceLineItem(
+          desc: 'Delivery Fee',
+          qty: 1,
+          unit: 'pcs',
+          buyPrice: 0,
+          sellPrice: 350,
+          total: 350,
+        ),
+        InvoiceLineItem(
+          desc: 'Transport Charge',
+          qty: 1,
+          unit: 'pcs',
+          buyPrice: 0,
+          sellPrice: 200,
+          total: 200,
+        ),
+      ];
+
+      final dnStaged = DocumentOcrConverter.prepareSelectableItems(
+        sourceItems: scannedInvoiceLines,
+        mode: DocSmartConversionMode.deliveryNote,
+        vault: vault,
+        matchedRestaurant: vault.restaurants.first,
+      );
+
+      // Physical goods selected & cleaned of price tokens; fee rows automatically unchecked!
+      expect(dnStaged.length, 4);
+      expect(dnStaged[0].selected, isTrue);
+      expect(dnStaged[0].desc, 'Fresh Tomato');
+      expect(dnStaged[0].sellPrice, 0);
+      expect(dnStaged[1].selected, isTrue);
+      expect(dnStaged[1].desc, 'English Cucumber');
+      expect(dnStaged[2].selected, isFalse);
+      expect(dnStaged[3].selected, isFalse);
+
+      final dnDoc = DocumentOcrConverter.buildDocumentFromItems(
+        mode: DocSmartConversionMode.deliveryNote,
+        items: dnStaged,
+        vault: vault,
+        matchedRestaurant: vault.restaurants.first,
+        sourceReference: 'TTG-8842',
+      );
+      expect(dnDoc.documentType, 'DELIVERY NOTE');
+      expect(dnDoc.showKraPin, isFalse); // Default off for Delivery Notes
+      final tableBlock = dnDoc.blocks.firstWhere((b) => b.isTable);
+      expect(tableBlock.tableRows.length, 3); // Header + 2 physical items ONLY
+      final flatTableText =
+          tableBlock.tableRows.expand((r) => r).join(' ').toLowerCase();
+      expect(flatTableText, isNot(contains('delivery fee')));
+      expect(flatTableText, isNot(contains('transport')));
+      expect(flatTableText, isNot(contains('3,000')));
+      expect(flatTableText, isNot(contains('120')));
+
+      // Unpriced LPO scanned into Quotation -> auto-hydrates prices from Vault PriceList!
+      const unpricedLpoLines = [
+        InvoiceLineItem(
+          desc: 'Tomato',
+          qty: 20,
+          unit: 'kgs',
+          buyPrice: 0,
+          sellPrice: 0,
+          total: 0,
+        ),
+        InvoiceLineItem(
+          desc: 'Cucumber',
+          qty: 15,
+          unit: 'kgs',
+          buyPrice: 0,
+          sellPrice: 0,
+          total: 0,
+        ),
+      ];
+      final quoteStaged = DocumentOcrConverter.prepareSelectableItems(
+        sourceItems: unpricedLpoLines,
+        mode: DocSmartConversionMode.quotation,
+        vault: vault,
+      );
+      expect(quoteStaged[0].sellPrice, 135);
+      expect(quoteStaged[0].priceAutoFilledFromVault, isTrue);
+      expect(quoteStaged[1].sellPrice, 95);
+      expect(quoteStaged[1].priceAutoFilledFromVault, isTrue);
+    });
+
+    test('OcrConsensusService.parseRawTextToBrandedDoc reconstructs headings, subject, bullets & tables offline',
+        () {
+      const rawText = '''
+SUPPLY ADVISORY NOTICE
+Date: 26/11/2026
+Ref: TTG-ADV-99
+To: Villa Rosa Kempinski
+RE: MORNING COLD-CHAIN DISPATCH SCHEDULE
+
+Please note our updated holiday kitchen dispatch windows:
+- First dispatch leaves at 5:30 AM daily
+- Emergency top-up orders accepted until 11:00 AM
+
+Window | Cutoff Time | Route
+Morning | 20:00 HRS | Westlands & CBD
+Midday | 11:00 HRS | Karen & Kilimani
+''';
+
+      final parsed = OcrConsensusService.parseRawTextToBrandedDoc(rawText);
+      expect(parsed['documentType'], 'NOTICE');
+      expect(parsed['date'], '2026-11-26');
+      expect(parsed['referenceNumber'], 'TTG-ADV-99');
+      expect(parsed['recipientName'], 'Villa Rosa Kempinski');
+      expect(parsed['subject'], 'MORNING COLD-CHAIN DISPATCH SCHEDULE');
+
+      final blocks = (parsed['blocks'] as List).cast<Map<String, dynamic>>();
+      expect(blocks.any((b) => b['kind'] == 'bullet'), isTrue);
+      expect(blocks.any((b) => b['kind'] == 'table'), isTrue);
+    });
+
+    test('showKraPin toggle cleanly includes or omits Seller & Client KRA PINs across Branded Docs, Invoices, and Statements PDFs',
+        () async {
+      final settingsWithPin = const VaultSettings().withKraProfile(
+        const KraCompanyProfile(
+          sellerKraPin: 'P051112223A',
+          vatRegistered: false,
+        ),
+      );
+      const client = Restaurant(
+        id: 'r1',
+        name: 'Sarova Panafric',
+        kraPin: 'P059998887Z',
+      );
+      const inv = Invoice(
+        id: 'inv1',
+        number: 'TTG-7701',
+        restaurantId: 'r1',
+        restaurantName: 'Sarova Panafric',
+        date: '2026-11-26',
+        items: [
+          InvoiceLineItem(
+            desc: 'Carrots',
+            qty: 10,
+            unit: 'kgs',
+            buyPrice: 50,
+            sellPrice: 90,
+            total: 900,
+          ),
+        ],
+        totalSell: 900,
+      );
+
+      final invWithPin = await InvoicePdfBuilder.buildPdfBytes(
+        invoice: inv,
+        restaurant: client,
+        settings: settingsWithPin,
+        showKraPin: true,
+      );
+      final invNoPin = await InvoicePdfBuilder.buildPdfBytes(
+        invoice: inv,
+        restaurant: client,
+        settings: settingsWithPin,
+        showKraPin: false,
+      );
+      expect(_extractPdfTextStreams(invWithPin), contains('P059998887Z'));
+      expect(_extractPdfTextStreams(invWithPin), contains('P051112223A'));
+      expect(
+        _extractPdfTextStreams(invNoPin),
+        isNot(contains('P059998887Z')),
+      );
+      expect(
+        _extractPdfTextStreams(invNoPin),
+        isNot(contains('P051112223A')),
+      );
+
+      final brandedDoc = BrandedDocument.fromTemplate(
+        BrandedDocTemplate.quotation,
+        refNumber: 'TTG-Q-01',
+        dateIso: '2026-11-26',
+      ).copyWith(recipientName: client.name, recipientKraPin: client.kraPin);
+
+      final docWithPin = await BrandedDocumentPdfBuilder.buildPdfBytes(
+        document: brandedDoc.copyWith(showKraPin: true),
+        settings: settingsWithPin,
+      );
+      final docNoPin = await BrandedDocumentPdfBuilder.buildPdfBytes(
+        document: brandedDoc.copyWith(showKraPin: false),
+        settings: settingsWithPin,
+      );
+      expect(_extractPdfTextStreams(docWithPin), contains('P059998887Z'));
+      expect(_extractPdfTextStreams(docWithPin), contains('P051112223A'));
+      expect(
+        _extractPdfTextStreams(docNoPin),
+        isNot(contains('P059998887Z')),
+      );
+      expect(
+        _extractPdfTextStreams(docNoPin),
+        isNot(contains('P051112223A')),
+      );
+
+      final vault = VaultRepository(
+        cryptoService: CryptoService(),
+        localStorage: _MemStorage(),
+        supabase: FakeSupabaseGateway(),
+      );
+      addTearDown(vault.dispose);
+      await vault.setRestaurants([client], sync: false);
+      await vault.setInvoices([inv], sync: false);
+      final repVm = ReportsViewModel(vault: vault);
+      addTearDown(repVm.dispose);
+      final stmt = repVm.buildStatement(client, '2026-11');
+
+      final stmtWithPin = await StatementPdfBuilder.buildPdfBytes(
+        stmt,
+        settings: settingsWithPin,
+        showKraPin: true,
+      );
+      final stmtNoPin = await StatementPdfBuilder.buildPdfBytes(
+        stmt,
+        settings: settingsWithPin,
+        showKraPin: false,
+      );
+      expect(_extractPdfTextStreams(stmtWithPin), contains('P059998887Z'));
+      expect(_extractPdfTextStreams(stmtWithPin), contains('P051112223A'));
+      expect(
+        _extractPdfTextStreams(stmtNoPin),
+        isNot(contains('P059998887Z')),
+      );
+      expect(
+        _extractPdfTextStreams(stmtNoPin),
+        isNot(contains('P051112223A')),
+      );
+    });
+
+    testWidgets(
+        'InvoiceDetailScreen toggles KRA PIN visibility and converts Invoice into clean Branded Delivery Note in 1 tap',
+        (tester) async {
+      final vault = VaultRepository(
+        cryptoService: CryptoService(),
+        localStorage: _MemStorage(),
+        supabase: FakeSupabaseGateway(),
+        syncDebounceDuration: const Duration(milliseconds: 20),
+      );
+      addTearDown(vault.dispose);
+
+      await vault.setRestaurants([
+        const Restaurant(
+          id: 'r1',
+          name: 'Fairmont Norfolk',
+          kraPin: 'P051234567X',
+        ),
+      ], sync: false);
+      await vault.setInvoices([
+        const Invoice(
+          id: 'inv1',
+          number: 'TTG-9021',
+          restaurantId: 'r1',
+          restaurantName: 'Fairmont Norfolk',
+          date: '2026-11-26',
+          items: [
+            InvoiceLineItem(
+              desc: 'Roma Tomatoes',
+              qty: 15,
+              unit: 'kgs',
+              buyPrice: 80,
+              sellPrice: 120,
+              total: 1800,
+            ),
+            InvoiceLineItem(
+              desc: 'Delivery Charge',
+              qty: 1,
+              unit: 'pcs',
+              buyPrice: 0,
+              sellPrice: 300,
+              total: 300,
+            ),
+          ],
+          totalSell: 2100,
+        ),
+      ], sync: false);
+
+      await tester.pumpWidget(
+        ChangeNotifierProvider<VaultRepository>.value(
+          value: vault,
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: const InvoiceDetailScreen(invoiceId: 'inv1'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // KRA PIN shown initially -> toggle Include KRA PIN off hides it immediately
+      expect(find.text('KRA PIN: P051234567X'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('chip_invoice_show_kra_pin')));
+      await tester.pumpAndSettle();
+      expect(find.text('KRA PIN: P051234567X'), findsNothing);
+
+      // Tap Delivery Note -> opens DocumentOcrImportSheet with non-goods fee excluded & KRA PIN off by default
+      await tester.tap(
+        find.byKey(const Key('btn_invoice_generate_delivery_note')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Delivery Note Items (1 deliverable)'), findsOneWidget);
+      expect(
+        find.textContaining('1 non-goods fee line(s) automatically excluded'),
+        findsOneWidget,
+      );
+
+      // Confirm -> saves & opens BrandedDocumentEditorScreen with Delivery Note
+      await tester.tap(
+        find.byKey(const Key('btn_create_converted_branded_doc')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(vault.brandedDocuments.length, 1);
+      final createdDn = vault.brandedDocuments.first;
+      expect(createdDn.documentType, 'DELIVERY NOTE');
+      expect(createdDn.showKraPin, isFalse);
+      final dnTable = createdDn.blocks.firstWhere((b) => b.isTable);
+      expect(dnTable.tableRows.length, 2); // Header + Roma Tomatoes ONLY
+      expect(dnTable.tableRows[1][1], 'Roma Tomatoes');
     });
   });
 }

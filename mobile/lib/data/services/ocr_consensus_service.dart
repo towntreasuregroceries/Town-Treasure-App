@@ -228,6 +228,46 @@ class OcrPriceListResult {
   final List<String> enginesUsed;
 }
 
+/// Structured general document OCR result (letters, LPOs, contracts, memos, tables)
+/// for the MS Word-style Branded Document Studio.
+class OcrBrandedDocResult {
+  const OcrBrandedDocResult({
+    required this.title,
+    required this.documentType,
+    required this.referenceNumber,
+    required this.date,
+    required this.recipientName,
+    required this.recipientContact,
+    required this.recipientAddress,
+    required this.recipientPhone,
+    required this.recipientKraPin,
+    required this.subject,
+    required this.blocks,
+    required this.items,
+    required this.rawText,
+    required this.pageCount,
+    required this.enginesUsed,
+    required this.confidence,
+  });
+
+  final String title;
+  final String documentType;
+  final String referenceNumber;
+  final String date;
+  final String recipientName;
+  final String recipientContact;
+  final String recipientAddress;
+  final String recipientPhone;
+  final String recipientKraPin;
+  final String subject;
+  final List<BrandedDocBlock> blocks;
+  final List<InvoiceLineItem> items;
+  final String rawText;
+  final int pageCount;
+  final List<String> enginesUsed;
+  final int confidence;
+}
+
 /// Redundant Consensus OCR & CSV Pipeline matching `ocr-consensus.js`:
 /// - Engine 1: Optional Gemini Vision REST API (when an API key is configured)
 /// - Engine 2: On-device Google ML Kit Latin text recognition + deterministic line parser
@@ -769,6 +809,467 @@ class OcrConsensusService {
     );
   }
 
+  /// Digitizes any printed or handwritten document (letters, LPOs, memos, notices,
+  /// contracts, or tabular sheets) into structured [BrandedDocBlock] elements
+  /// with Cloud Vision + offline Google ML Kit 2D Spatial fallback.
+  Future<OcrBrandedDocResult> processGeneralDocument(
+    List<OcrImagePage> pages, {
+    void Function(String status)? onProgress,
+    String? geminiApiKey,
+  }) async {
+    if (pages.isEmpty) {
+      throw ArgumentError('At least one document page is required.');
+    }
+    final pageCount = pages.length;
+    onProgress?.call(
+      'Analyzing $pageCount document page${pageCount > 1 ? 's' : ''} for headings, paragraphs & tables...',
+    );
+
+    final apiKey = getApiKey(geminiApiKey);
+    Map<String, dynamic>? visionJson;
+    final enginesUsed = <String>[];
+    Object? lastError;
+
+    if (apiKey.isNotEmpty) {
+      final dataUrls = pages.map((p) => p.dataUrl).toList();
+      for (var i = 0; i < models.length; i++) {
+        final model = models[i];
+        try {
+          onProgress?.call(
+            'Extracting document structure, tables & formatting (Cloud Vision)...',
+          );
+          final candidate = await _runGeminiGeneralDocumentVision(
+            dataUrls,
+            model,
+            apiKey,
+          );
+          final blocks = candidate['blocks'];
+          final items = candidate['items'];
+          if ((blocks is List && blocks.isNotEmpty) ||
+              (items is List && items.isNotEmpty)) {
+            visionJson = candidate;
+            enginesUsed.add('Town Treasure Optical Engine');
+            break;
+          }
+          lastError = StateError('Vision model $model returned empty blocks.');
+        } catch (err) {
+          lastError = err;
+          if (_isNetworkUnavailableError(err)) {
+            onProgress?.call(
+              'Offline mode — running on-device Google ML Kit layout reconstruction...',
+            );
+            break;
+          }
+        }
+        if (i + 1 < models.length) {
+          await Future<void>.delayed(const Duration(milliseconds: 350));
+        }
+      }
+    }
+
+    final mlKitPageTexts = <String>[];
+    for (final page in pages) {
+      if (page.filePath != null && page.filePath!.isNotEmpty) {
+        try {
+          if (_textRecognizer is OcrSpatialRecognizerGateway) {
+            final spatial = _textRecognizer as OcrSpatialRecognizerGateway;
+            final boxes = await spatial.recognizeBoxesFromFile(page.filePath!);
+            if (boxes.isNotEmpty) {
+              final rows = SpatialOcrParser.reconstructDeskewedRows(boxes);
+              final txt = SpatialOcrParser.rowsToPlainText(rows);
+              if (txt.trim().isNotEmpty) {
+                mlKitPageTexts.add(txt.trim());
+                continue;
+              }
+            }
+          }
+          final txt = await _textRecognizer.recognizeTextFromFile(page.filePath!);
+          if (txt.trim().isNotEmpty) {
+            mlKitPageTexts.add(txt.trim());
+          }
+        } catch (err) {
+          lastError ??= err;
+        }
+      }
+    }
+
+    final rawMlText = mlKitPageTexts.join('\n\n');
+    if (rawMlText.isNotEmpty) {
+      enginesUsed.add('Google ML Kit On-Device');
+    }
+
+    final parsed = visionJson ??
+        (rawMlText.isNotEmpty ? parseRawTextToBrandedDoc(rawMlText) : null);
+
+    if (parsed == null) {
+      final errStr = (lastError ?? '').toString().toLowerCase();
+      if (errStr.contains('socket') ||
+          errStr.contains('network') ||
+          errStr.contains('host lookup') ||
+          errStr.contains('timeout')) {
+        throw StateError(
+          'Could not reach the cloud scanner and the page was unclear offline. Please check your connection or take a clearer photo.',
+        );
+      }
+      throw StateError(
+        'Could not read text clearly from this page. Please ensure good lighting and focus.',
+      );
+    }
+
+    final blocks = <BrandedDocBlock>[];
+    final rawBlocks = parsed['blocks'];
+    if (rawBlocks is List) {
+      for (final entry in rawBlocks) {
+        if (entry is! Map) continue;
+        final map = Map<String, dynamic>.from(entry);
+        final kind = (map['kind'] ?? 'paragraph').toString().toLowerCase().trim();
+        if (kind == 'table') {
+          final rowsRaw = map['tableRows'] ?? map['rows'];
+          final tableRows = <List<String>>[];
+          if (rowsRaw is List) {
+            for (final r in rowsRaw) {
+              if (r is List) {
+                tableRows.add(r.map((c) => (c ?? '').toString().trim()).toList());
+              }
+            }
+          }
+          if (tableRows.isNotEmpty) {
+            blocks.add(
+              BrandedDocBlock(
+                id: AppHelpers.genId(),
+                kind: 'table',
+                fontSize: 10,
+                tableRows: tableRows,
+              ),
+            );
+          }
+          continue;
+        }
+        if (kind == 'divider') {
+          blocks.add(BrandedDocBlock(id: AppHelpers.genId(), kind: 'divider'));
+          continue;
+        }
+        final text = (map['text'] ?? '').toString().trim();
+        if (text.isEmpty) continue;
+        final validKind = const {
+          'paragraph',
+          'heading1',
+          'heading2',
+          'heading3',
+          'bullet',
+          'numbered',
+          'callout',
+        }.contains(kind)
+            ? kind
+            : 'paragraph';
+        final defaultSize = switch (validKind) {
+          'heading1' => 16.0,
+          'heading2' => 14.0,
+          'heading3' => 12.5,
+          'callout' => 10.5,
+          _ => 11.0,
+        };
+        blocks.add(
+          BrandedDocBlock(
+            id: AppHelpers.genId(),
+            kind: validKind,
+            text: text,
+            bold: map['bold'] == true || validKind.startsWith('heading'),
+            italic: map['italic'] == true,
+            fontSize: defaultSize,
+            colorHex: validKind.startsWith('heading') ? '#1B5E20' : '#1E293B',
+          ),
+        );
+      }
+    }
+
+    final extractedItems = <InvoiceLineItem>[];
+    final rawItems = parsed['items'];
+    if (rawItems is List) {
+      for (final raw in rawItems) {
+        if (raw is! Map) continue;
+        final it = Map<String, dynamic>.from(raw);
+        final desc = (it['desc'] ?? it['name'] ?? '').toString().trim();
+        if (desc.isEmpty) continue;
+        final qty = AppHelpers.parseDouble(it['qty'], 1);
+        final unit = normalizeDropdownUnit((it['unit'] ?? 'kgs').toString());
+        final price = AppHelpers.parseDouble(it['price'] ?? it['sellPrice']);
+        final total = AppHelpers.parseDouble(it['total'], qty * price);
+        extractedItems.add(
+          InvoiceLineItem(
+            desc: desc,
+            qty: qty > 0 ? qty : 1,
+            unit: unit,
+            buyPrice: 0,
+            sellPrice: price,
+            total: total,
+          ),
+        );
+      }
+    }
+
+    if (blocks.isEmpty && rawMlText.isNotEmpty) {
+      final fallback = parseRawTextToBrandedDoc(rawMlText);
+      final fbBlocks = fallback['blocks'];
+      if (fbBlocks is List) {
+        for (final b in fbBlocks.whereType<Map>()) {
+          blocks.add(BrandedDocBlock.fromJson(Map<String, dynamic>.from(b)));
+        }
+      }
+    }
+
+    final today = AppHelpers.normalizeAppDate(DateTime.now());
+    final normDate = AppHelpers.normalizeAppDate(parsed['date']);
+    final docTypeRaw =
+        (parsed['documentType'] ?? parsed['document_type'] ?? 'OFFICIAL DOCUMENT')
+            .toString()
+            .trim()
+            .toUpperCase();
+
+    return OcrBrandedDocResult(
+      title: (parsed['title'] ?? '').toString().trim().isNotEmpty
+          ? parsed['title'].toString().trim()
+          : 'Scanned Document',
+      documentType: docTypeRaw.isNotEmpty ? docTypeRaw : 'OFFICIAL DOCUMENT',
+      referenceNumber:
+          (parsed['referenceNumber'] ?? parsed['reference_number'] ?? '')
+              .toString()
+              .trim(),
+      date: normDate.isNotEmpty ? normDate : today,
+      recipientName:
+          (parsed['recipientName'] ?? parsed['recipient_name'] ?? '')
+              .toString()
+              .trim(),
+      recipientContact:
+          (parsed['recipientContact'] ?? parsed['recipient_contact'] ?? '')
+              .toString()
+              .trim(),
+      recipientAddress:
+          (parsed['recipientAddress'] ?? parsed['recipient_address'] ?? '')
+              .toString()
+              .trim(),
+      recipientPhone:
+          (parsed['recipientPhone'] ?? parsed['recipient_phone'] ?? '')
+              .toString()
+              .trim(),
+      recipientKraPin: Restaurant.normalizeKraPin(
+        (parsed['recipientKraPin'] ?? parsed['recipient_kra_pin'] ?? '')
+            .toString(),
+      ),
+      subject: (parsed['subject'] ?? '').toString().trim(),
+      blocks: blocks,
+      items: extractedItems,
+      rawText: rawMlText,
+      pageCount: pageCount,
+      enginesUsed: enginesUsed,
+      confidence: visionJson != null ? 98 : 84,
+    );
+  }
+
+  /// Offline deterministic layout parser converting raw OCR text into headings,
+  /// subject bars, bullet/numbered lists, pipe/column tables, and paragraphs.
+  static Map<String, dynamic> parseRawTextToBrandedDoc(String rawText) {
+    final lines = rawText
+        .split(RegExp(r'\r?\n'))
+        .map((l) => l.trim())
+        .toList();
+
+    var title = '';
+    var docType = 'OFFICIAL DOCUMENT';
+    var refNo = '';
+    var dateIso = '';
+    var recipientName = '';
+    var subject = '';
+    final blocks = <Map<String, dynamic>>[];
+
+    final refPattern = RegExp(
+      r'^(?:ref(?:\s*no\.?)?|lpo(?:\s*no\.?)?|invoice(?:\s*no\.?)?|docket(?:\s*no\.?)?|quote(?:\s*no\.?)?)\s*[:#\-]\s*(.+)$',
+      caseSensitive: false,
+    );
+    final subjectPattern = RegExp(
+      r'^(?:re|subject|subj)\s*[:\-]\s*(.+)$',
+      caseSensitive: false,
+    );
+    final toPattern = RegExp(
+      r'^(?:to|client|customer|deliver\s*to|attention|attn)\s*[:\-]\s*(.+)$',
+      caseSensitive: false,
+    );
+    final datePattern = RegExp(
+      r'\b(\d{4}-\d{2}-\d{2}|\d{2}[/-]\d{2}[/-]\d{4})\b',
+    );
+    final bulletPattern = RegExp(r'^(?:[-*•▪◦])\s+(.+)$');
+    final numberedPattern = RegExp(r'^\d{1,2}[\.\)]\s+(.+)$');
+
+    final docketCheck = parseRawTextToDocket(rawText);
+    final docketItems = (docketCheck['items'] is List)
+        ? List<Map<String, dynamic>>.from(
+            (docketCheck['items'] as List)
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e)),
+          )
+        : <Map<String, dynamic>>[];
+
+    final paragraphBuf = <String>[];
+    final tableBuf = <List<String>>[];
+
+    void flushParagraph() {
+      if (paragraphBuf.isEmpty) return;
+      blocks.add({
+        'id': AppHelpers.genId(),
+        'kind': 'paragraph',
+        'text': paragraphBuf.join(' '),
+      });
+      paragraphBuf.clear();
+    }
+
+    void flushTable() {
+      if (tableBuf.length >= 2) {
+        blocks.add({
+          'id': AppHelpers.genId(),
+          'kind': 'table',
+          'tableRows': List<List<String>>.from(tableBuf),
+        });
+      } else if (tableBuf.length == 1) {
+        blocks.add({
+          'id': AppHelpers.genId(),
+          'kind': 'paragraph',
+          'text': tableBuf.first.join('  |  '),
+        });
+      }
+      tableBuf.clear();
+    }
+
+    for (final line in lines) {
+      if (line.isEmpty || line == '--- PAGE BREAK ---') {
+        flushParagraph();
+        flushTable();
+        continue;
+      }
+
+      final upper = line.toUpperCase();
+      if (upper.contains('DELIVERY NOTE')) {
+        docType = 'DELIVERY NOTE';
+      } else if (upper.contains('QUOTATION') || upper.contains('PROFORMA')) {
+        docType = 'QUOTATION';
+      } else if (upper.contains('PURCHASE ORDER') || upper.startsWith('LPO')) {
+        docType = 'DELIVERY NOTE';
+      } else if (upper.contains('MEMORANDUM') || upper == 'MEMO') {
+        docType = 'MEMORANDUM';
+      } else if (upper.contains('NOTICE')) {
+        docType = 'NOTICE';
+      }
+
+      if (dateIso.isEmpty) {
+        final dm = datePattern.firstMatch(line);
+        if (dm != null) {
+          final norm = AppHelpers.normalizeAppDate(dm.group(1));
+          if (norm.isNotEmpty) dateIso = norm;
+        }
+      }
+
+      final rm = refPattern.firstMatch(line);
+      if (rm != null && refNo.isEmpty) {
+        refNo = rm.group(1)!.trim();
+        continue;
+      }
+
+      final sm = subjectPattern.firstMatch(line);
+      if (sm != null && subject.isEmpty) {
+        flushParagraph();
+        flushTable();
+        subject = sm.group(1)!.trim();
+        if (title.isEmpty) title = subject;
+        continue;
+      }
+
+      final tm = toPattern.firstMatch(line);
+      if (tm != null && recipientName.isEmpty) {
+        recipientName = tm.group(1)!.trim();
+        continue;
+      }
+
+      // Pipe-delimited or multi-column tab row
+      if (line.contains('|') || line.contains('\t')) {
+        flushParagraph();
+        final cells = (line.contains('|') ? line.split('|') : line.split('\t'))
+            .map((c) => c.trim())
+            .where((c) => c.isNotEmpty)
+            .toList();
+        if (cells.length >= 2) {
+          tableBuf.add(cells);
+          continue;
+        }
+      } else {
+        flushTable();
+      }
+
+      final bm = bulletPattern.firstMatch(line);
+      if (bm != null) {
+        flushParagraph();
+        blocks.add({
+          'id': AppHelpers.genId(),
+          'kind': 'bullet',
+          'text': bm.group(1)!.trim(),
+        });
+        continue;
+      }
+
+      final nm = numberedPattern.firstMatch(line);
+      if (nm != null && docketItems.isEmpty) {
+        flushParagraph();
+        blocks.add({
+          'id': AppHelpers.genId(),
+          'kind': 'numbered',
+          'text': nm.group(1)!.trim(),
+        });
+        continue;
+      }
+
+      final isShortHeading = line.length <= 65 &&
+          !line.endsWith('.') &&
+          (line == upper && RegExp(r'[A-Z]{3,}').hasMatch(line));
+      if (isShortHeading) {
+        flushParagraph();
+        if (title.isEmpty && !upper.contains('TOWN TREASURE')) {
+          title = line;
+        }
+        blocks.add({
+          'id': AppHelpers.genId(),
+          'kind': 'heading2',
+          'text': line,
+          'bold': true,
+        });
+        continue;
+      }
+
+      paragraphBuf.add(line);
+    }
+
+    flushParagraph();
+    flushTable();
+
+    if (recipientName.isEmpty) {
+      recipientName = (docketCheck['restaurant_name'] ?? '').toString().trim();
+    }
+    if (refNo.isEmpty) {
+      refNo = (docketCheck['invoice_number'] ?? '').toString().trim();
+    }
+    if (title.isEmpty) {
+      title = subject.isNotEmpty ? subject : 'Scanned Branded Document';
+    }
+
+    return {
+      'title': title,
+      'documentType': docType,
+      'referenceNumber': refNo,
+      'date': dateIso,
+      'recipientName': recipientName,
+      'subject': subject,
+      'blocks': blocks,
+      'items': docketItems,
+    };
+  }
+
   /// Engine 3: Deterministic Mathematical Invariant Validator & Discrepancy Arbiter.
   /// Matches `_reconcileWithMath` in `ocr-consensus.js`.
   static ({
@@ -1289,6 +1790,39 @@ Return ONLY JSON matching:
       apiKey,
       systemPrompt,
       'price list',
+    );
+  }
+
+  Future<Map<String, dynamic>> _runGeminiGeneralDocumentVision(
+    List<String> imgList,
+    String modelName,
+    String apiKey,
+  ) async {
+    final isMultiPage = imgList.length > 1;
+    final systemPrompt = '''You are an executive document digitization & optical layout specialist for Town Treasure Limited in Nairobi, Kenya.
+Analyze this document (${isMultiPage ? '${imgList.length} pages — combine all pages in reading order' : 'single page'}) and extract BOTH its full document structure AND any line-item table rows if it is an invoice, LPO, delivery note, or quotation.
+
+RULES:
+1. Identify "documentType" as one of: "DELIVERY NOTE", "QUOTATION", "PROPOSAL", "OFFICIAL LETTER", "MEMORANDUM", "NOTICE", "CONTRACT", or "OFFICIAL DOCUMENT".
+2. Extract metadata if visible: "title", "referenceNumber" (Invoice #, LPO #, Ref #), "date" (YYYY-MM-DD), "recipientName", "recipientContact", "recipientAddress", "recipientPhone", "recipientKraPin", and "subject" (RE: line).
+3. Reconstruct the body into ordered "blocks":
+   - {"kind": "heading1" | "heading2" | "heading3", "text": "Heading text", "bold": true}
+   - {"kind": "paragraph", "text": "Paragraph text using **bold** or *italic* where emphasized"}
+   - {"kind": "bullet", "text": "Bullet point text"}
+   - {"kind": "numbered", "text": "Numbered list item text (without leading number)"}
+   - {"kind": "callout", "text": "Important notice / terms box text"}
+   - {"kind": "table", "tableRows": [["Col 1", "Col 2"], ["Val 1", "Val 2"]]}
+4. ALSO, if the document contains order/invoice/LPO/quotation line items, populate "items":
+   [{"desc": "Clean item description without prices or serial numbers", "qty": 10.0, "unit": "kgs", "price": 120.0, "total": 1200.0}]
+
+Return ONLY valid JSON matching that schema.''';
+
+    return _callGeminiVision(
+      imgList,
+      modelName,
+      apiKey,
+      systemPrompt,
+      'branded document',
     );
   }
 

@@ -39,6 +39,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
   late String _selectedRestaurantId;
   late String _selectedMonth;
   bool _busy = false;
+  bool _showKraPin = true;
 
   ReportsViewModel get _vm => widget.viewModel ?? _ownedVm!;
 
@@ -115,6 +116,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
         buildPdf: (_) => StatementPdfBuilder.buildPdfBytes(
           stmt,
           settings: _vm.settings,
+          showKraPin: _showKraPin,
         ),
         buildEscPos: (cols) => EscPosReceiptBuilder.buildSummaryReceipt(
           title: 'Statement: ${rest.name}',
@@ -148,6 +150,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
       final file = await StatementPdfBuilder.writeTempPdfFile(
         stmt,
         settings: _vm.settings,
+        showKraPin: _showKraPin,
       );
       final text = ReportsViewModel.buildStatementWhatsAppText(
         rest,
@@ -201,6 +204,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
       final file = await StatementPdfBuilder.writeTempPdfFile(
         stmt,
         settings: _vm.settings,
+        showKraPin: _showKraPin,
       );
       await AppLockGuard.runWithoutRelock(
         () => Share.shareXFiles(
@@ -319,6 +323,17 @@ class _StatementsScreenState extends State<StatementsScreen> {
                             label: const Text('WhatsApp'),
                           ),
                         ],
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: FilterChip(
+                          key: const Key('chip_statement_show_kra_pin'),
+                          label: const Text('Include KRA PIN on PDF'),
+                          selected: _showKraPin,
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (v) => setState(() => _showKraPin = v),
+                        ),
                       ),
                     ],
                   ),

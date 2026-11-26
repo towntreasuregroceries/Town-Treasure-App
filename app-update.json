@@ -1,8 +1,8 @@
 {
-  "version": "1.2.6",
-  "buildNumber": 2020,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.6/TownTreasureGroceries.apk",
-  "sha256": "66d08fe50affdec73d3d4ac84feda1944c6e266cfa078fc3b7ddf9aa848004ed",
-  "releaseNotes": "v1.2.6: Fixed two-click Invoice Save (keyboard focus & offline save flow), upgraded Smart Duplicate Guard (local+cloud merge, singular/plural Kenyan produce matching, split-row aggregation & live editor warning), added the MS Word-style Branded Document Studio on official Town Treasure PDF letterhead, and fixed app-wide modal safe areas & controller cleanup.",
+  "version": "1.2.7",
+  "buildNumber": 2021,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.7/TownTreasureGroceries.apk",
+  "sha256": "61cc3b288a122fc0111b4d0affdb50d069536ac4543b1ee67a85e26315644daa",
+  "releaseNotes": "v1.2.7: Added Smart OCR & Invoice-to-Delivery-Note conversion in Branded Document Studio (strips all prices, totals & non-goods fee rows, supports partial deliveries, offline ML Kit layout OCR, and automatic LPO price hydration from Vault Price Lists), 1-tap Delivery Note creation from any saved Invoice, and optional 'Include KRA PIN' toggles across Branded Documents, Invoices, and Monthly Statements.",
   "mandatory": false
 }

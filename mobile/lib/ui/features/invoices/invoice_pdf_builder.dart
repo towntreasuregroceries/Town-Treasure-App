@@ -34,6 +34,7 @@ class InvoicePdfBuilder {
     Restaurant? restaurant,
     VaultSettings settings = const VaultSettings(),
     PdfPageFormat pageFormat = PdfPageFormat.a4,
+    bool showKraPin = true,
     Uint8List? logoBytesOverride,
     Uint8List? stampBytesOverride,
   }) async {
@@ -42,6 +43,7 @@ class InvoicePdfBuilder {
       restaurants: restaurant != null ? [restaurant] : const [],
       settings: settings,
       pageFormat: pageFormat,
+      showKraPin: showKraPin,
       logoBytesOverride: logoBytesOverride,
       stampBytesOverride: stampBytesOverride,
     );
@@ -53,6 +55,7 @@ class InvoicePdfBuilder {
     required List<Restaurant> restaurants,
     VaultSettings settings = const VaultSettings(),
     PdfPageFormat pageFormat = PdfPageFormat.a4,
+    bool showKraPin = true,
     Uint8List? logoBytesOverride,
     Uint8List? stampBytesOverride,
   }) async {
@@ -65,6 +68,7 @@ class InvoicePdfBuilder {
         restaurants: restaurants,
         settings: settings,
         pageFormat: pageFormat,
+        showKraPin: showKraPin,
       );
     }
 
@@ -101,7 +105,7 @@ class InvoicePdfBuilder {
               : (invoice.restaurantName.trim().isNotEmpty
                   ? invoice.restaurantName
                   : 'Unknown');
-      final kraPin = Restaurant.normalizeKraPin(restaurant?.kraPin);
+      final kraPin = showKraPin ? Restaurant.normalizeKraPin(restaurant?.kraPin) : '';
       final clientAddress = restaurant?.address.trim() ?? '';
       final clientPhone = restaurant?.phone.trim() ?? '';
 
@@ -109,7 +113,8 @@ class InvoicePdfBuilder {
         invoice,
         profile: settings.kraProfile,
       );
-      final sellerPin = settings.kraProfile.normalizedSellerPin;
+      final sellerPin =
+          showKraPin ? settings.kraProfile.normalizedSellerPin : '';
       final cuSerial = settings.kraProfile.cuSerialNumber.trim();
       final isTaxInvoice =
           settings.kraProfile.vatRegistered &&
@@ -187,6 +192,7 @@ class InvoicePdfBuilder {
     required List<Restaurant> restaurants,
     VaultSettings settings = const VaultSettings(),
     PdfPageFormat pageFormat = PdfPageFormat.roll80,
+    bool showKraPin = true,
   }) async {
     final is58mm = pageFormat.width <= PdfPageFormat.roll57.width + 1;
     final baseFont = is58mm ? 7.5 : 9.0;
@@ -204,8 +210,9 @@ class InvoicePdfBuilder {
         invoice,
         restaurants,
       ).restaurant;
-      final kraPin = Restaurant.normalizeKraPin(rest?.kraPin);
-      final sellerPin = settings.kraProfile.normalizedSellerPin;
+      final kraPin = showKraPin ? Restaurant.normalizeKraPin(rest?.kraPin) : '';
+      final sellerPin =
+          showKraPin ? settings.kraProfile.normalizedSellerPin : '';
       final taxSummary = KraTaxCalculator.computeInvoiceTaxSummary(
         invoice,
         profile: settings.kraProfile,
@@ -1160,12 +1167,14 @@ class InvoicePdfBuilder {
     required Invoice invoice,
     Restaurant? restaurant,
     VaultSettings settings = const VaultSettings(),
+    bool showKraPin = true,
     String? summaryText,
   }) async {
     final bytes = await buildPdfBytes(
       invoice: invoice,
       restaurant: restaurant,
       settings: settings,
+      showKraPin: showKraPin,
     );
     final dir = await getTemporaryDirectory();
     final filename = pdfFilename(invoice, restaurant);
@@ -1235,6 +1244,7 @@ class InvoicePdfBuilder {
     required Invoice invoice,
     Restaurant? restaurant,
     VaultSettings settings = const VaultSettings(),
+    bool showKraPin = true,
   }) async {
     final summary = buildWhatsAppSummaryText(
       invoice: invoice,
@@ -1244,6 +1254,7 @@ class InvoicePdfBuilder {
       invoice: invoice,
       restaurant: restaurant,
       settings: settings,
+      showKraPin: showKraPin,
       summaryText: summary,
     );
   }

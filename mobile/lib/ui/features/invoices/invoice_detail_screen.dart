@@ -9,6 +9,9 @@ import '../../../domain/models/models.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_print_helper.dart';
 import '../../core/widgets/print_options_sheet.dart';
+import '../documents/document_ocr_converter.dart';
+import '../documents/document_ocr_import_sheet.dart';
+import '../documents/document_studio_screen.dart';
 import '../kra/kra_tax_center_screen.dart';
 import 'invoice_editor_screen.dart';
 import 'invoice_formatters.dart';
@@ -39,6 +42,7 @@ class InvoiceDetailScreen extends StatefulWidget {
 class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
   InvoicesViewModel? _ownedVm;
   bool _pdfBusy = false;
+  bool _showKraPin = true;
 
   InvoicesViewModel get _vm => widget.viewModel ?? _ownedVm!;
 
@@ -114,12 +118,40 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         restaurant: rest,
         settings: vault.settings,
         pageFormat: format,
+        showKraPin: _showKraPin,
       ),
       buildEscPos: (cols) => EscPosReceiptBuilder.buildInvoicesReceipt(
         invoices: [inv],
         restaurants: vault.restaurants,
-        settings: vault.settings,
+        settings: _showKraPin
+            ? vault.settings
+            : vault.settings.withKraProfile(
+                vault.settings.kraProfile.copyWith(sellerKraPin: ''),
+              ),
         lineWidth: cols,
+      ),
+    );
+  }
+
+  Future<void> _handleGenerateDeliveryNote(
+    Invoice inv,
+    VaultRepository vault,
+  ) async {
+    final output = await DocumentOcrImportSheet.show(
+      context,
+      vault: vault,
+      initialMode: DocSmartConversionMode.deliveryNote,
+      preselectedInvoice: inv,
+    );
+    if (output == null || !mounted) return;
+    await vault.saveBrandedDocument(output.document);
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => BrandedDocumentEditorScreen(
+          initialDocument: output.document,
+          vault: vault,
+        ),
       ),
     );
   }
@@ -146,6 +178,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         invoice: inv,
         restaurant: rest,
         settings: vault.settings,
+        showKraPin: _showKraPin,
       );
     } catch (e) {
       _showSnack('Failed to share PDF: $e', isError: true);
@@ -162,6 +195,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
         invoice: inv,
         restaurant: rest,
         settings: vault.settings,
+        showKraPin: _showKraPin,
       );
     } catch (e) {
       _showSnack('Could not open WhatsApp: $e', isError: true);
@@ -386,6 +420,14 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                   icon: const Icon(Icons.share_outlined, size: 18),
                   label: const Text('Share'),
                 ),
+                OutlinedButton.icon(
+                  key: const Key('btn_invoice_generate_delivery_note'),
+                  onPressed: _pdfBusy
+                      ? null
+                      : () => _handleGenerateDeliveryNote(inv, vault),
+                  icon: const Icon(Icons.local_shipping_outlined, size: 18),
+                  label: const Text('Delivery Note'),
+                ),
                 FilledButton.tonalIcon(
                   style: FilledButton.styleFrom(
                     backgroundColor: AppTheme.sageTint,
@@ -557,6 +599,15 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                                       color: AppTheme.slateMuted,
                                     ),
                                   ),
+                                  const SizedBox(height: 6),
+                                  FilterChip(
+                                    key: const Key('chip_invoice_show_kra_pin'),
+                                    label: const Text('Include KRA PIN'),
+                                    selected: _showKraPin,
+                                    visualDensity: VisualDensity.compact,
+                                    onSelected: (v) =>
+                                        setState(() => _showKraPin = v),
+                                  ),
                                 ],
                               ),
                             ],
@@ -625,7 +676,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                                         color: AppTheme.slateInk,
                                       ),
                                     ),
-                                    if (kraPin.isNotEmpty) ...[
+                                    if (_showKraPin && kraPin.isNotEmpty) ...[
                                       const SizedBox(height: 3),
                                       Text(
                                         'KRA PIN: $kraPin',

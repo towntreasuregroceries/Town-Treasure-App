@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/services/ocr_consensus_service.dart';
 import '../../../data/services/personal_vault_service.dart';
 import '../../../data/services/print_service.dart';
 import '../../../domain/models/models.dart';
@@ -14,6 +15,8 @@ import '../../core/widgets/app_print_helper.dart';
 import '../../core/widgets/print_options_sheet.dart';
 import '../../core/widgets/scoped_text_controllers.dart';
 import 'branded_document_pdf_builder.dart';
+import 'document_ocr_converter.dart';
+import 'document_ocr_import_sheet.dart';
 
 /// Custom [TextEditingController] that renders inline `**bold**`, `*italic*`,
 /// and `__underline__` spans live inside the editor while keeping exact UTF-16
@@ -119,10 +122,12 @@ class DocumentStudioScreen extends StatefulWidget {
     super.key,
     this.vault,
     this.personalVaultService,
+    this.ocrService,
   });
 
   final VaultRepository? vault;
   final PersonalVaultService? personalVaultService;
+  final OcrConsensusService? ocrService;
 
   @override
   State<DocumentStudioScreen> createState() => _DocumentStudioScreenState();
@@ -160,9 +165,27 @@ class _DocumentStudioScreenState extends State<DocumentStudioScreen> {
           initialDocument: doc,
           vault: _vault,
           personalVaultService: widget.personalVaultService,
+          ocrService: widget.ocrService,
         ),
       ),
     );
+  }
+
+  Future<void> _openSmartOcrConverter({
+    DocSmartConversionMode initialMode = DocSmartConversionMode.deliveryNote,
+    bool startOnSavedInvoicesTab = false,
+  }) async {
+    final output = await DocumentOcrImportSheet.show(
+      context,
+      vault: _vault,
+      ocrService: widget.ocrService,
+      initialMode: initialMode,
+      startOnSavedInvoicesTab: startOnSavedInvoicesTab,
+    );
+    if (output == null || !mounted) return;
+    await _vault.saveBrandedDocument(output.document);
+    if (!mounted) return;
+    await _openEditor(output.document);
   }
 
   Future<void> _duplicateDocument(BrandedDocument doc) async {
@@ -255,6 +278,14 @@ class _DocumentStudioScreenState extends State<DocumentStudioScreen> {
             title: const Text('Branded Document Studio'),
             actions: [
               IconButton(
+                key: const Key('btn_studio_ocr'),
+                tooltip: 'Scan Invoice / Document via OCR',
+                onPressed: () => _openSmartOcrConverter(
+                  initialMode: DocSmartConversionMode.deliveryNote,
+                ),
+                icon: const Icon(Icons.document_scanner_outlined),
+              ),
+              IconButton(
                 key: const Key('btn_new_blank_branded_doc'),
                 tooltip: 'New Blank Branded Document',
                 onPressed: () => _createFromTemplate(BrandedDocTemplate.blank),
@@ -274,6 +305,97 @@ class _DocumentStudioScreenState extends State<DocumentStudioScreen> {
           body: ListView(
             padding: const EdgeInsets.fromLTRB(16, 14, 16, 88),
             children: [
+              Card(
+                color: AppTheme.surfaceCard,
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(
+                            Icons.document_scanner_outlined,
+                            color: AppTheme.forestGreen,
+                            size: 20,
+                          ),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Smart OCR & Invoice-to-Delivery-Note',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 14,
+                                color: AppTheme.slateInk,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      const Text(
+                        'Scan a paper invoice or LPO into a Delivery Note (prices & fee rows automatically stripped), auto-priced Quotation, or editable Word page — or convert any saved invoice in 1 tap.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.slateMuted,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          FilledButton.icon(
+                            key: const Key('btn_hub_scan_delivery_note'),
+                            style: FilledButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            onPressed: () => _openSmartOcrConverter(
+                              initialMode: DocSmartConversionMode.deliveryNote,
+                            ),
+                            icon: const Icon(
+                              Icons.local_shipping_outlined,
+                              size: 16,
+                            ),
+                            label: const Text('Scan -> Delivery Note'),
+                          ),
+                          FilledButton.tonalIcon(
+                            key: const Key('btn_hub_from_saved_invoice'),
+                            style: FilledButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            onPressed: () => _openSmartOcrConverter(
+                              initialMode: DocSmartConversionMode.deliveryNote,
+                              startOnSavedInvoicesTab: true,
+                            ),
+                            icon: const Icon(
+                              Icons.receipt_long_outlined,
+                              size: 16,
+                            ),
+                            label: const Text('From Saved Invoice'),
+                          ),
+                          OutlinedButton.icon(
+                            key: const Key('btn_hub_scan_any_doc'),
+                            style: OutlinedButton.styleFrom(
+                              visualDensity: VisualDensity.compact,
+                            ),
+                            onPressed: () => _openSmartOcrConverter(
+                              initialMode:
+                                  DocSmartConversionMode.fullEditableDocument,
+                            ),
+                            icon: const Icon(
+                              Icons.photo_camera_outlined,
+                              size: 16,
+                            ),
+                            label: const Text('Scan Quote / Letter'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
               const Text(
                 'START A NEW BRANDED DOCUMENT',
                 style: TextStyle(
@@ -642,11 +764,13 @@ class BrandedDocumentEditorScreen extends StatefulWidget {
     required this.initialDocument,
     required this.vault,
     this.personalVaultService,
+    this.ocrService,
   });
 
   final BrandedDocument initialDocument;
   final VaultRepository vault;
   final PersonalVaultService? personalVaultService;
+  final OcrConsensusService? ocrService;
 
   @override
   State<BrandedDocumentEditorScreen> createState() =>
@@ -1281,6 +1405,81 @@ class _BrandedDocumentEditorScreenState
     }
   }
 
+  Future<void> _openEditorOcrImport({
+    bool startOnSavedInvoicesTab = false,
+  }) async {
+    final defaultMode = _doc.documentType.toUpperCase().contains('DELIVERY')
+        ? DocSmartConversionMode.deliveryNote
+        : (_doc.documentType.toUpperCase().contains('QUOT')
+            ? DocSmartConversionMode.quotation
+            : DocSmartConversionMode.deliveryNote);
+
+    final output = await DocumentOcrImportSheet.show(
+      context,
+      vault: widget.vault,
+      ocrService: widget.ocrService,
+      initialMode: defaultMode,
+      startOnSavedInvoicesTab: startOnSavedInvoicesTab,
+      allowInsertIntoCurrentDoc: true,
+    );
+    if (output == null || !mounted) return;
+
+    if (output.insertIntoCurrentDoc) {
+      final nextBlocks = List<BrandedDocBlock>.from(_doc.blocks);
+      final activeIdx = _activeBlockId == null
+          ? -1
+          : nextBlocks.indexWhere((b) => b.id == _activeBlockId);
+      if (activeIdx >= 0 && activeIdx < nextBlocks.length - 1) {
+        nextBlocks.insertAll(activeIdx + 1, output.insertBlocks);
+      } else {
+        nextBlocks.addAll(output.insertBlocks);
+      }
+      final updated = _doc.copyWith(
+        blocks: nextBlocks,
+        recipientName: _doc.recipientName.trim().isEmpty
+            ? output.document.recipientName
+            : _doc.recipientName,
+        recipientContact: _doc.recipientContact.trim().isEmpty
+            ? output.document.recipientContact
+            : _doc.recipientContact,
+        recipientAddress: _doc.recipientAddress.trim().isEmpty
+            ? output.document.recipientAddress
+            : _doc.recipientAddress,
+        recipientPhone: _doc.recipientPhone.trim().isEmpty
+            ? output.document.recipientPhone
+            : _doc.recipientPhone,
+        recipientKraPin: _doc.recipientKraPin.trim().isEmpty
+            ? output.document.recipientKraPin
+            : _doc.recipientKraPin,
+        showRecipientCard:
+            _doc.showRecipientCard || output.document.showRecipientCard,
+      );
+      _recipientNameCtrl.text = updated.recipientName;
+      _recipientContactCtrl.text = updated.recipientContact;
+      _recipientAddressCtrl.text = updated.recipientAddress;
+      _recipientPhoneCtrl.text = updated.recipientPhone;
+      _recipientPinCtrl.text = updated.recipientKraPin;
+      _applyDocUpdate(updated);
+      return;
+    }
+
+    // Replace current document content while keeping this document's ID
+    final replaced = output.document.copyWith(
+      id: _doc.id,
+      createdAt: _doc.createdAt,
+    );
+    _titleCtrl.text = replaced.title;
+    _subjectCtrl.text = replaced.subject;
+    _recipientNameCtrl.text = replaced.recipientName;
+    _recipientContactCtrl.text = replaced.recipientContact;
+    _recipientAddressCtrl.text = replaced.recipientAddress;
+    _recipientPhoneCtrl.text = replaced.recipientPhone;
+    _recipientPinCtrl.text = replaced.recipientKraPin;
+    _activeBlockId =
+        replaced.blocks.isNotEmpty ? replaced.blocks.first.id : null;
+    _applyDocUpdate(replaced);
+  }
+
   @override
   Widget build(BuildContext context) {
     final active = _activeBlock;
@@ -1293,6 +1492,14 @@ class _BrandedDocumentEditorScreenState
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          TextFieldTapRegion(
+            child: IconButton(
+              key: const Key('btn_editor_ocr_scan'),
+              tooltip: 'Scan OCR or Import from Invoice',
+              onPressed: () => _openEditorOcrImport(),
+              icon: const Icon(Icons.document_scanner_outlined),
+            ),
+          ),
           TextFieldTapRegion(
             child: IconButton(
               key: const Key('btn_doc_preview_pdf'),
@@ -1730,6 +1937,22 @@ class _BrandedDocumentEditorScreenState
       scrollDirection: Axis.horizontal,
       child: Row(
         children: [
+          FilledButton.icon(
+            key: const Key('btn_insert_ocr_scan'),
+            style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+            onPressed: () => _openEditorOcrImport(startOnSavedInvoicesTab: false),
+            icon: const Icon(Icons.document_scanner_outlined, size: 16),
+            label: const Text('Scan OCR'),
+          ),
+          const SizedBox(width: 6),
+          FilledButton.tonalIcon(
+            key: const Key('btn_insert_from_invoice'),
+            style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
+            onPressed: () => _openEditorOcrImport(startOnSavedInvoicesTab: true),
+            icon: const Icon(Icons.receipt_long_outlined, size: 16),
+            label: const Text('From Invoice'),
+          ),
+          const SizedBox(width: 6),
           FilledButton.tonalIcon(
             key: const Key('btn_insert_paragraph'),
             style: FilledButton.styleFrom(visualDensity: VisualDensity.compact),
@@ -1906,6 +2129,17 @@ class _BrandedDocumentEditorScreenState
               syncControllers: false,
             ),
           ),
+          const SizedBox(width: 6),
+          FilterChip(
+            key: const Key('chip_layout_show_kra_pin'),
+            label: const Text('Include KRA PIN'),
+            selected: _doc.showKraPin,
+            visualDensity: VisualDensity.compact,
+            onSelected: (v) => _applyDocUpdate(
+              _doc.copyWith(showKraPin: v),
+              syncControllers: false,
+            ),
+          ),
         ],
       ),
     );
@@ -1932,6 +2166,17 @@ class _BrandedDocumentEditorScreenState
             visualDensity: VisualDensity.compact,
             onSelected: (v) => _applyDocUpdate(
               _doc.copyWith(showWatermark: v),
+              syncControllers: false,
+            ),
+          ),
+          const SizedBox(width: 6),
+          FilterChip(
+            key: const Key('chip_brand_show_kra_pin'),
+            label: const Text('Include KRA PIN'),
+            selected: _doc.showKraPin,
+            visualDensity: VisualDensity.compact,
+            onSelected: (v) => _applyDocUpdate(
+              _doc.copyWith(showKraPin: v),
               syncControllers: false,
             ),
           ),
@@ -2243,21 +2488,24 @@ class _BrandedDocumentEditorScreenState
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: TextField(
-                                controller: _recipientPinCtrl,
-                                decoration: const InputDecoration(
-                                  labelText: 'Recipient KRA PIN (Opt)',
-                                  isDense: true,
-                                ),
-                                onChanged: (v) => _applyDocUpdate(
-                                  _doc.copyWith(recipientKraPin: v),
-                                  recordUndo: false,
-                                  syncControllers: false,
+                            if (_doc.showKraPin) ...[
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: TextField(
+                                  key: const Key('field_doc_recipient_kra_pin'),
+                                  controller: _recipientPinCtrl,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Recipient KRA PIN (Opt)',
+                                    isDense: true,
+                                  ),
+                                  onChanged: (v) => _applyDocUpdate(
+                                    _doc.copyWith(recipientKraPin: v),
+                                    recordUndo: false,
+                                    syncControllers: false,
+                                  ),
                                 ),
                               ),
-                            ),
+                            ],
                           ],
                         ),
                       ],

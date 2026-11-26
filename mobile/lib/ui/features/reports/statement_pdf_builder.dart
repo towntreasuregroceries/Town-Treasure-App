@@ -24,6 +24,7 @@ class StatementPdfBuilder {
     ClientStatementData statement, {
     VaultSettings settings = const VaultSettings(),
     DateTime? generatedDate,
+    bool showKraPin = true,
   }) async {
     final logoBytes = await _loadAsset('assets/logo.png');
     final stampBytes = await _loadAsset('assets/stamp.png');
@@ -59,9 +60,10 @@ class StatementPdfBuilder {
               dateText,
               kraProfile: kraProfile,
               monthlyEtims: monthlyEtims,
+              showKraPin: showKraPin,
             ),
             pw.SizedBox(height: 20),
-            _buildAddressRow(statement.restaurant),
+            _buildAddressRow(statement.restaurant, showKraPin: showKraPin),
             pw.SizedBox(height: 18),
             _buildOpeningBalanceBanner(statement, firstMonthWord),
             pw.SizedBox(height: 18),
@@ -87,8 +89,13 @@ class StatementPdfBuilder {
   static Future<File> writeTempPdfFile(
     ClientStatementData statement, {
     VaultSettings settings = const VaultSettings(),
+    bool showKraPin = true,
   }) async {
-    final bytes = await buildPdfBytes(statement, settings: settings);
+    final bytes = await buildPdfBytes(
+      statement,
+      settings: settings,
+      showKraPin: showKraPin,
+    );
     final dir = await getTemporaryDirectory();
     final safeName =
         statement.restaurant.name.replaceAll(RegExp(r'\s+'), '_');
@@ -141,6 +148,7 @@ class StatementPdfBuilder {
     String dateText, {
     KraCompanyProfile kraProfile = const KraCompanyProfile(),
     MonthlyClientEtims? monthlyEtims,
+    bool showKraPin = true,
   }) {
     final hasMonthlyEtims = monthlyEtims != null &&
         (monthlyEtims.hasQr || monthlyEtims.cuInvoiceNumber.trim().isNotEmpty);
@@ -185,7 +193,7 @@ class StatementPdfBuilder {
               'Generated: $dateText',
               style: const pw.TextStyle(fontSize: 9.5, color: _textMuted),
             ),
-            if (kraProfile.hasValidSellerPin) ...[
+            if (showKraPin && kraProfile.hasValidSellerPin) ...[
               pw.SizedBox(height: 3),
               pw.Text(
                 'KRA PIN: ${kraProfile.normalizedSellerPin}',
@@ -207,7 +215,10 @@ class StatementPdfBuilder {
     );
   }
 
-  static pw.Widget _buildAddressRow(Restaurant rest) {
+  static pw.Widget _buildAddressRow(
+    Restaurant rest, {
+    bool showKraPin = true,
+  }) {
     return pw.Row(
       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -273,7 +284,7 @@ class StatementPdfBuilder {
                 rest.phone,
                 style: const pw.TextStyle(fontSize: 9, color: _textMuted),
               ),
-            if (Restaurant.isValidKraPin(rest.kraPin))
+            if (showKraPin && Restaurant.isValidKraPin(rest.kraPin))
               pw.Text(
                 'KRA PIN: ${Restaurant.normalizeKraPin(rest.kraPin)}',
                 style: pw.TextStyle(
