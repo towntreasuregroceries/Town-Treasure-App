@@ -1,8 +1,8 @@
 {
-  "version": "1.2.9",
-  "buildNumber": 2023,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.9/TownTreasureGroceries.apk",
-  "sha256": "158b6768b1012c724f9dd490dc036f9df6935781d468be53a00d51c5a5a443cb",
-  "releaseNotes": "v1.2.9: Scrubbed internal clerk approval provenance ('Added from clerk approval'), internal audit tags, and Town Treasure's own supplier phone from client recipient cards, PDFs, and WhatsApp greetings (including existing saved records), and added smart multi-page PDF arrangement with repeating table headers and unbreakable closing confirmation, signatory, and official stamp blocks.",
+  "version": "1.2.10",
+  "buildNumber": 2024,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.10/TownTreasureGroceries.apk",
+  "sha256": "a7f4a3261d8859e0596979191c8f96015221029e7bd8cc5183b2cf0bbcb27321",
+  "releaseNotes": "v1.2.10: End-to-end security hardening with zero workflow friction — transparent AES-256-GCM local cache encryption with automatic migration, strict HTTPS GitHub OTA host verification, automatic >24h temporary PDF cleanup, and hardened multi-owner Cloudflare D1/R2 & KRA eTIMS protections while keeping screenshots and instant app-switching intact.",
   "mandatory": false
 }

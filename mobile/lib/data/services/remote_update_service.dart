@@ -78,28 +78,45 @@ typedef PackageVersionProvider = Future<({String version, int buildNumber})> Fun
 typedef TempDirProvider = Future<Directory> Function();
 typedef ApkFileOpener = Future<bool> Function(String filePath);
 
-/// Checks a remote JSON manifest, downloads the APK, verifies its SHA-256 digest,
-/// and hands off installation to Android via `open_filex` + FileProvider.
+/// Checks a remote JSON manifest, validates HTTPS + trusted GitHub release host,
+/// downloads the APK, verifies its SHA-256 digest, and hands off installation
+/// to Android via `open_filex` + FileProvider.
 class RemoteUpdateService {
   static const String defaultOwnerManifestUrl =
       'https://towntreasuregroceries.github.io/Town-Treasure-App/app-update.json';
   static const String defaultClerkManifestUrl =
       'https://towntreasuregroceries.github.io/Town-Treasure-App/clerk-update.json';
 
+  static const Set<String> defaultAllowedApkHosts = {
+    'github.com',
+    'objects.githubusercontent.com',
+    'release-assets.githubusercontent.com',
+    'towntreasuregroceries.github.io',
+  };
+
+  static const String _expectedGitHubRepoPrefix =
+      '/towntreasuregroceries/town-treasure-app/';
+
   RemoteUpdateService({
     http.Client? httpClient,
     PackageVersionProvider? versionProvider,
     TempDirProvider? tempDirProvider,
     ApkFileOpener? apkOpener,
+    Set<String>? allowedApkHosts,
   })  : _httpClient = httpClient ?? http.Client(),
         _versionProvider = versionProvider ?? _defaultVersionProvider,
         _tempDirProvider = tempDirProvider ?? getTemporaryDirectory,
-        _apkOpener = apkOpener ?? _defaultApkOpener;
+        _apkOpener = apkOpener ?? _defaultApkOpener,
+        _allowedApkHosts = (allowedApkHosts ?? defaultAllowedApkHosts)
+            .map((h) => h.trim().toLowerCase())
+            .where((h) => h.isNotEmpty)
+            .toSet();
 
   final http.Client _httpClient;
   final PackageVersionProvider _versionProvider;
   final TempDirProvider _tempDirProvider;
   final ApkFileOpener _apkOpener;
+  final Set<String> _allowedApkHosts;
 
   static Future<({String version, int buildNumber})> _defaultVersionProvider() async {
     final info = await PackageInfo.fromPlatform();
@@ -117,10 +134,86 @@ class RemoteUpdateService {
     return result.type == ResultType.done;
   }
 
+  /// Validates that an OTA URL uses `https://` and points strictly to an
+  /// allowlisted Town Treasure GitHub release host.
+  static Uri validateTrustedHttpsUrl(
+    String rawUrl, {
+    Set<String> allowedHosts = defaultAllowedApkHosts,
+    bool enforceRepoPathOnGitHub = true,
+  }) {
+    final uri = Uri.tryParse(rawUrl.trim());
+    if (uri == null || uri.scheme.toLowerCase() != 'https' || uri.host.isEmpty) {
+      throw const ApkVerificationException(
+        'Untrusted update URL: HTTPS is required.',
+      );
+    }
+    final host = uri.host.toLowerCase();
+    if (!allowedHosts.contains(host)) {
+      throw ApkVerificationException(
+        'Untrusted update host "$host": updates are restricted to official Town Treasure GitHub releases.',
+      );
+    }
+    if (enforceRepoPathOnGitHub &&
+        host == 'github.com' &&
+        !uri.path.toLowerCase().startsWith(_expectedGitHubRepoPrefix)) {
+      throw const ApkVerificationException(
+        'Untrusted GitHub repository path in update URL.',
+      );
+    }
+    return uri;
+  }
+
+  /// Purges stale temporary exported PDFs, rendered page JPEGs, and downloaded
+  /// update APKs so sensitive exports do not linger indefinitely in cache.
+  ///
+  /// By default (`purgeAll == false`), only files older than [maxAge] (24 hours)
+  /// are removed so active WhatsApp/print share intents are never interrupted.
+  static Future<int> purgeStaleTempExports({
+    Directory? directory,
+    Duration maxAge = const Duration(hours: 24),
+    bool purgeAll = false,
+    DateTime? now,
+  }) async {
+    try {
+      final dir = directory ?? await getTemporaryDirectory();
+      if (!await dir.exists()) return 0;
+      final refNow = now ?? DateTime.now();
+      var deletedCount = 0;
+
+      await for (final entity in dir.list(followLinks: false)) {
+        if (entity is! File) continue;
+        final name = p.basename(entity.path);
+        final lower = name.toLowerCase();
+        final isSensitiveTemp = lower.endsWith('.pdf') ||
+            (lower.startsWith('ttg_update_') && lower.endsWith('.apk')) ||
+            (lower.startsWith('ttg_pdf_') && lower.endsWith('.jpg'));
+        if (!isSensitiveTemp) continue;
+
+        if (!purgeAll) {
+          final stat = await entity.stat();
+          if (refNow.difference(stat.modified) < maxAge) {
+            continue;
+          }
+        }
+        try {
+          await entity.delete();
+          deletedCount++;
+        } catch (_) {}
+      }
+      return deletedCount;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   /// Checks `manifestUrl` and compares `buildNumber` and semantic `version`.
   Future<UpdateCheckResult> checkForUpdate(String manifestUrl) async {
     final current = await _versionProvider();
-    final uri = Uri.parse(manifestUrl);
+    final uri = validateTrustedHttpsUrl(
+      manifestUrl,
+      allowedHosts: _allowedApkHosts,
+      enforceRepoPathOnGitHub: false,
+    );
     final response = await _httpClient.get(uri);
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ApkVerificationException(
@@ -133,6 +226,10 @@ class RemoteUpdateService {
     }
     final manifest = AppUpdateManifest.fromJson(
       Map<String, dynamic>.from(decoded),
+    );
+    validateTrustedHttpsUrl(
+      manifest.apkUrl,
+      allowedHosts: _allowedApkHosts,
     );
 
     final isNewer = manifest.buildNumber > current.buildNumber ||
@@ -157,7 +254,10 @@ class RemoteUpdateService {
     AppUpdateManifest manifest, {
     void Function(int receivedBytes, int totalBytes)? onProgress,
   }) async {
-    final uri = Uri.parse(manifest.apkUrl);
+    final uri = validateTrustedHttpsUrl(
+      manifest.apkUrl,
+      allowedHosts: _allowedApkHosts,
+    );
     final request = http.Request('GET', uri);
     final streamed = await _httpClient.send(request);
     if (streamed.statusCode < 200 || streamed.statusCode >= 300) {

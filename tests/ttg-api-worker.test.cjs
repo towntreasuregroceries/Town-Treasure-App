@@ -44,6 +44,7 @@ function createFakeD1() {
   const vaultHistory = []; // { user_id, revision, r2_key, created_at }
   const clerkInvites = new Map(); // id -> row
   const stagedInvoices = new Map(); // id -> row
+  const clerkRateLimits = new Map(); // `${invite_id}|${hour_bucket}` -> row
 
   function prepare(rawSql) {
     const sql = rawSql.replace(/\s+/g, ' ').trim();
@@ -132,10 +133,14 @@ function createFakeD1() {
           const ok = r && r.owner_user_id === a[1] && r.submitted_by_invite_id === a[2] && ['pending', 'rejected'].includes(r.status);
           return { results: ok ? [{ id: r.id, photo_keys_json: r.photo_keys_json }] : [] };
         }
-        if (sql === 'SELECT id, status FROM staged_invoices WHERE id = ? AND owner_user_id = ? AND submitted_by_invite_id = ?') {
+        if (sql === 'SELECT id, status, photo_keys_json FROM staged_invoices WHERE id = ? AND owner_user_id = ? AND submitted_by_invite_id = ?') {
           const r = stagedInvoices.get(a[0]);
           const ok = r && r.owner_user_id === a[1] && r.submitted_by_invite_id === a[2];
-          return { results: ok ? [{ id: r.id, status: r.status }] : [] };
+          return { results: ok ? [{ id: r.id, status: r.status, photo_keys_json: r.photo_keys_json }] : [] };
+        }
+        if (sql === 'SELECT submissions FROM clerk_rate_limits WHERE invite_id = ? AND hour_bucket = ?') {
+          const r = clerkRateLimits.get(`${a[0]}|${a[1]}`);
+          return { results: r ? [{ submissions: r.submissions }] : [] };
         }
 
         // staged_invoices (owner)
@@ -155,10 +160,10 @@ function createFakeD1() {
           const r = stagedInvoices.get(a[1]);
           return { results: r && r.owner_user_id === a[0] ? [{ ...r }] : [] };
         }
-        if (sql === 'SELECT photo_keys_json, created_at FROM staged_invoices WHERE id = ? AND owner_user_id = ?') {
+        if (sql === 'SELECT owner_user_id, photo_keys_json, created_at FROM staged_invoices WHERE id = ?') {
           const r = stagedInvoices.get(a[0]);
           return {
-            results: r && r.owner_user_id === a[1] ? [{ photo_keys_json: r.photo_keys_json, created_at: r.created_at }] : [],
+            results: r ? [{ owner_user_id: r.owner_user_id, photo_keys_json: r.photo_keys_json, created_at: r.created_at }] : [],
           };
         }
         if (sql === 'SELECT * FROM staged_invoices WHERE id = ?') {
@@ -251,11 +256,15 @@ function createFakeD1() {
               updated_at: a[18],
             });
           } else {
+            const cur = stagedInvoices.get(a[0]);
+            if (cur && sql.includes('WHERE staged_invoices.owner_user_id = excluded.owner_user_id') && cur.owner_user_id !== a[1]) {
+              return { meta: { changes: 0 } };
+            }
             stagedInvoices.set(a[0], {
               id: a[0],
-              owner_user_id: a[1],
-              submitted_by_invite_id: a[2],
-              submission_key: a[3],
+              owner_user_id: cur ? cur.owner_user_id : a[1],
+              submitted_by_invite_id: cur ? cur.submitted_by_invite_id : a[2],
+              submission_key: cur ? cur.submission_key : a[3],
               clerk_name: a[4],
               restaurant_name: a[5],
               invoice_date: a[6],
@@ -268,14 +277,35 @@ function createFakeD1() {
               notes: a[13],
               status: a[14],
               rejection_reason: a[15],
-              target_user_id: a[16],
-              target_user_email: a[17],
-              target_user_name: a[18],
-              created_at: a[19],
+              target_user_id: cur ? cur.target_user_id : a[16],
+              target_user_email: cur ? cur.target_user_email : a[17],
+              target_user_name: cur ? cur.target_user_name : a[18],
+              created_at: cur ? cur.created_at : a[19],
               updated_at: a[20],
             });
           }
           return { meta: { changes: 1 } };
+        }
+        if (sql.startsWith('INSERT INTO clerk_rate_limits')) {
+          const key = `${a[0]}|${a[1]}`;
+          const cur = clerkRateLimits.get(key);
+          clerkRateLimits.set(key, {
+            invite_id: a[0],
+            hour_bucket: a[1],
+            submissions: (cur?.submissions ?? 0) + 1,
+            updated_at: a[2],
+          });
+          return { meta: { changes: 1 } };
+        }
+        if (sql === 'DELETE FROM clerk_rate_limits WHERE hour_bucket < ?') {
+          let changes = 0;
+          for (const [k, v] of clerkRateLimits.entries()) {
+            if (v.hour_bucket < a[0]) {
+              clerkRateLimits.delete(k);
+              changes++;
+            }
+          }
+          return { meta: { changes } };
         }
         if (sql === 'DELETE FROM staged_invoices WHERE id = ?') {
           const had = stagedInvoices.delete(a[0]);
@@ -289,7 +319,7 @@ function createFakeD1() {
           }
           return { meta: { changes: 0 } };
         }
-        if (sql.startsWith('UPDATE staged_invoices SET') && sql.includes("status = 'rejected'")) {
+        if (sql.startsWith("UPDATE staged_invoices SET status = 'rejected'")) {
           const r = stagedInvoices.get(a[2]);
           if (r && r.owner_user_id === a[3] && r.status === 'pending') {
             r.status = 'rejected';
@@ -581,4 +611,251 @@ test('ttg-api /clerk create_invite -> submit -> idempotency -> owner approve & r
     authFetch,
   );
   assert.deepEqual(await approveRes.json(), { updated: true });
+});
+
+test('ttg-api security: blocks cross-tenant PUT /staged/:id, hides owner email on clerk list, enforces persistent 30/hr rate limit across submit+delete, and cleans orphaned R2 photos', async () => {
+  const { handleApiRequest } = await loadTtgApiWorker();
+  const db = createFakeD1();
+  const storage = createFakeR2Bucket();
+  const env = {
+    DB: db,
+    STORAGE: storage,
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_ANON_KEY: 'anon',
+    ALLOWED_OWNER_IDS: '911aab5c-2d62-4377-b665-e9f8d65e3e2e,25300b62-0945-4c37-8740-ff3302ff631e',
+    ALLOWED_OWNER_EMAILS: 'veronjuguna89@gmail.com,onderegerald@gmail.com',
+  };
+  const authFetch = makeFakeAuthFetch({
+    'jwt-vero': {
+      id: '911aab5c-2d62-4377-b665-e9f8d65e3e2e',
+      email: 'veronjuguna89@gmail.com',
+      user_metadata: { full_name: 'Veronicah' },
+    },
+    'jwt-ondere': {
+      id: '25300b62-0945-4c37-8740-ff3302ff631e',
+      email: 'onderegerald@gmail.com',
+      user_metadata: { full_name: 'Ondere' },
+    },
+    'jwt-intruder': {
+      id: '00000000-0000-0000-0000-000000000999',
+      email: 'intruder@example.com',
+    },
+  });
+
+  // Unlisted Supabase user is blocked by owner allowlist
+  const intruderRes = await handleApiRequest(
+    new Request('https://api.example/vault', {
+      headers: { Authorization: 'Bearer jwt-intruder' },
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  assert.equal(intruderRes.status, 403);
+
+  // Veronicah creates a staged docket
+  const veroPut = await handleApiRequest(
+    new Request('https://api.example/staged/stg_vero_1', {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer jwt-vero', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clerk_name: 'Mary',
+        restaurant_name: 'Java House',
+        invoice_date: '2026-11-26',
+        items_json: [{ desc: 'Carrots', qty: 10, unit: 'kgs', sellPrice: 100 }],
+        total_sell: 1000,
+      }),
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  assert.equal(veroPut.status, 200);
+
+  // Cross-tenant PUT /staged/stg_vero_1 by another account returns 403 and preserves Veronicah's data
+  const crossPut = await handleApiRequest(
+    new Request('https://api.example/staged/stg_vero_1', {
+      method: 'PUT',
+      headers: { Authorization: 'Bearer jwt-ondere', 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clerk_name: 'Tampered',
+        restaurant_name: 'Tampered',
+        invoice_date: '2026-11-26',
+        items_json: [],
+        total_sell: 0,
+      }),
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  assert.equal(crossPut.status, 403);
+  assert.equal(db.stagedInvoices.get('stg_vero_1').restaurant_name, 'Java House');
+
+  // Clerk invite list hides Veronicah's login email while keeping her display name
+  const invRes = await handleApiRequest(
+    new Request('https://api.example/clerk', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer jwt-vero', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_invite' }),
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  const { token } = await invRes.json();
+
+  const clerkListRes = await handleApiRequest(
+    new Request('https://api.example/clerk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'list', invite_token: token }),
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  const clerkListJson = await clerkListRes.json();
+  assert.equal(clerkListJson.owner.name, 'Veronicah');
+  assert.equal(clerkListJson.owner.email, undefined);
+
+  // Returned docket resubmission with fewer photos deletes orphaned page-1.txt from R2
+  const twoPhotoSub = await handleApiRequest(
+    new Request('https://api.example/clerk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'submit',
+        invite_token: token,
+        submission_key: 'sub_orphan_test_0001',
+        docket: {
+          clerk_name: 'Mary',
+          restaurant_name: 'Artcaffe',
+          invoice_date: '2026-11-26',
+          items_json: [{ desc: 'Onions', qty: 2, unit: 'kgs', sellPrice: 90 }],
+          receipt_photos: [
+            'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+            'data:image/jpeg;base64,/9j/4AAQSkZJRg==',
+          ],
+        },
+      }),
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  const twoPhotoId = (await twoPhotoSub.json()).submission.id;
+  assert.equal(storage.store.has(`staged/911aab5c-2d62-4377-b665-e9f8d65e3e2e/${twoPhotoId}/page-1.txt`), true);
+
+  await handleApiRequest(
+    new Request(`https://api.example/staged/${encodeURIComponent(twoPhotoId)}/reject`, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer jwt-vero', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: 'Remove blurry page 2' }),
+    }),
+    env,
+    {},
+    authFetch,
+  );
+
+  const correctedSub = await handleApiRequest(
+    new Request('https://api.example/clerk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'submit',
+        invite_token: token,
+        submission_key: 'sub_orphan_test_0002',
+        docket: {
+          id: twoPhotoId,
+          clerk_name: 'Mary',
+          restaurant_name: 'Artcaffe',
+          invoice_date: '2026-11-26',
+          items_json: [{ desc: 'Onions', qty: 2, unit: 'kgs', sellPrice: 90 }],
+          receipt_photos: ['data:image/jpeg;base64,/9j/4AAQSkZJRg=='],
+        },
+      }),
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  assert.equal(correctedSub.status, 200);
+  assert.equal(storage.store.has(`staged/911aab5c-2d62-4377-b665-e9f8d65e3e2e/${twoPhotoId}/page-1.txt`), false);
+
+  // Submit + delete loop still hits 429 after 30 total submissions in the hour
+  for (let i = 3; i <= 30; i++) {
+    const sRes = await handleApiRequest(
+      new Request('https://api.example/clerk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          action: 'submit',
+          invite_token: token,
+          submission_key: `sub_loop_rate_limit_${String(i).padStart(4, '0')}`,
+          docket: {
+            clerk_name: 'Mary',
+            restaurant_name: 'Artcaffe',
+            invoice_date: '2026-11-26',
+            items_json: [{ desc: 'Peas', qty: 1, unit: 'kgs', sellPrice: 50 }],
+          },
+        }),
+      }),
+      env,
+      {},
+      authFetch,
+    );
+    assert.equal(sRes.status, 200);
+    const createdId = (await sRes.json()).submission.id;
+    const delRes = await handleApiRequest(
+      new Request('https://api.example/clerk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'delete', invite_token: token, id: createdId }),
+      }),
+      env,
+      {},
+      authFetch,
+    );
+    assert.equal(delRes.status, 200);
+  }
+
+  const blocked31 = await handleApiRequest(
+    new Request('https://api.example/clerk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'submit',
+        invite_token: token,
+        submission_key: 'sub_loop_rate_limit_0031',
+        docket: {
+          clerk_name: 'Mary',
+          restaurant_name: 'Artcaffe',
+          invoice_date: '2026-11-26',
+          items_json: [{ desc: 'Peas', qty: 1, unit: 'kgs', sellPrice: 50 }],
+        },
+      }),
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  assert.equal(blocked31.status, 429);
+
+  // Declared oversized Content-Length fails closed with 413
+  const oversized = await handleApiRequest(
+    new Request('https://api.example/vault/cas', {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer jwt-vero',
+        'Content-Type': 'application/json',
+        'Content-Length': String(30 * 1024 * 1024),
+      },
+      body: '{}',
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  assert.equal(oversized.status, 413);
 });

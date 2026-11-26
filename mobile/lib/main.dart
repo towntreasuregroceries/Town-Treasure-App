@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -57,6 +59,7 @@ Future<void> main() async {
   await BackgroundUpdateWorker.initializeAndSchedule(
     localStorage: localStorageService,
   );
+  unawaited(RemoteUpdateService.purgeStaleTempExports());
 
   runApp(
     TownTreasureApp(
@@ -272,6 +275,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
 
     if (_biometricLockEnabled) {
       _lockedInBackground = true;
+      context.read<LocalStorageService>().evictInMemoryKeys();
       _dismissOpenOverlaysAndSubRoutes();
       if (mounted) {
         setState(() {
@@ -288,6 +292,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     _biometricLockEnabled = enabled;
     if (enabled && mounted && _unlockedUser != null && !AppLockGuard.isSuppressed) {
       _lockedInBackground = true;
+      context.read<LocalStorageService>().evictInMemoryKeys();
       _dismissOpenOverlaysAndSubRoutes();
       setState(() {
         _unlockedUser = null;

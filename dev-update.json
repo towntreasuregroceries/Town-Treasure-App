@@ -1,8 +1,8 @@
 {
-  "version": "1.2.9",
-  "buildNumber": 2023,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.9/TownTreasureGroceries.apk",
-  "sha256": "158b6768b1012c724f9dd490dc036f9df6935781d468be53a00d51c5a5a443cb",
-  "releaseNotes": "v1.2.9 (Official Release Parity): Sanitized client recipient metadata across all schemas (scrubs internal clerk notes & self-phone echoes) + smart multi-page PDF arrangement (repeating table headers & unbroken confirmation/signatory/stamp packs).",
+  "version": "1.2.10",
+  "buildNumber": 2024,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.10/TownTreasureGroceries.apk",
+  "sha256": "a7f4a3261d8859e0596979191c8f96015221029e7bd8cc5183b2cf0bbcb27321",
+  "releaseNotes": "v1.2.10 (Official Release Parity): Transparent AES-256-GCM SQLite cache encryption with seamless migration, trusted GitHub OTA URL allowlist, >24h stale temp PDF cleanup, and Cloudflare D1/R2 + KRA sandbox/CEO guardrails.",
   "mandatory": false
 }

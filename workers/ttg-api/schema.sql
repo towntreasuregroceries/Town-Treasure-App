@@ -72,3 +72,11 @@ CREATE TABLE IF NOT EXISTS oscu_items (
   synced_at TEXT NOT NULL,
   PRIMARY KEY (tin, item_cd)
 );
+
+CREATE TABLE IF NOT EXISTS clerk_rate_limits (
+  invite_id TEXT NOT NULL,
+  hour_bucket TEXT NOT NULL,
+  submissions INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (invite_id, hour_bucket)
+);

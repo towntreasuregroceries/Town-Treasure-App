@@ -3,6 +3,7 @@ import 'package:local_auth/local_auth.dart';
 
 import '../services/crypto_service.dart';
 import '../services/local_storage_service.dart';
+import '../services/remote_update_service.dart';
 import '../services/supabase_service.dart';
 import 'vault_repository.dart';
 
@@ -139,6 +140,7 @@ class AuthRepository extends ChangeNotifier {
     _currentUser = null;
     await _vault.clearLocalData();
     await _storage.clearAllOnSignOut();
+    await RemoteUpdateService.purgeStaleTempExports(purgeAll: true);
     notifyListeners();
     return true;
   }

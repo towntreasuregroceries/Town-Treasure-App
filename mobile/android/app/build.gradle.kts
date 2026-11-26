@@ -66,10 +66,15 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            val isReleaseTask = gradle.startParameter.taskNames.any {
+                it.contains("release", ignoreCase = true)
+            }
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            } else if (isReleaseTask) {
+                throw GradleException(
+                    "Missing key.properties! Refusing to sign a release APK with the debug keystore."
+                )
             }
             isMinifyEnabled = true
             isShrinkResources = true

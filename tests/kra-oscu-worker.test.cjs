@@ -60,13 +60,27 @@ function createFakeOscuD1() {
   };
 }
 
-test('kra-oscu worker fails closed when unauthenticated, non-allowed owner, or missing KRA_CMC_KEY', async () => {
+test('kra-oscu worker fails closed when unauthenticated, allowlist unset, non-allowed owner, or missing KRA_CMC_KEY', async () => {
   const { handleOscuRequest } = await loadOscuWorker();
   const env = {
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_ANON_KEY: 'anon-key',
-    ALLOWED_OWNER_EMAILS: 'vero@example.com',
+    ALLOWED_OWNER_EMAILS: 'veronjuguna89@gmail.com,onderegerald@gmail.com',
+    SANDBOX_ONLY_EMAILS: 'onderegerald@gmail.com',
   };
+
+  // Missing allowlist fails closed with 503
+  const unsetAllowlist = await handleOscuRequest(
+    new Request('https://oscu.example/oscu/sales', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer valid-jwt', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ saveTrnsSalesReq: { tin: 'P051234567X', itemList: [] } }),
+    }),
+    { SUPABASE_URL: 'https://example.supabase.co', SUPABASE_ANON_KEY: 'anon-key', KRA_CMC_KEY: 'k' },
+    {},
+    async () => new Response(JSON.stringify({ id: 'owner-1', email: 'veronjuguna89@gmail.com' }), { status: 200 }),
+  );
+  assert.equal(unsetAllowlist.status, 503);
 
   const unauth = await handleOscuRequest(
     new Request('https://oscu.example/oscu/sales', { method: 'POST' }),
@@ -96,9 +110,22 @@ test('kra-oscu worker fails closed when unauthenticated, non-allowed owner, or m
     }),
     env,
     {},
-    async () => new Response(JSON.stringify({ id: 'owner-1', email: 'vero@example.com' }), { status: 200 }),
+    async () => new Response(JSON.stringify({ id: '911aab5c-2d62-4377-b665-e9f8d65e3e2e', email: 'veronjuguna89@gmail.com' }), { status: 200 }),
   );
   assert.equal(missingCmc.status, 503);
+
+  // Developer monitoring account (Ondere) is blocked from live production KRA but allowed in Sandbox
+  const devLiveBlocked = await handleOscuRequest(
+    new Request('https://oscu.example/oscu/sales', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer valid-jwt', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sandbox: false, saveTrnsSalesReq: { tin: 'P051234567X', itemList: [] } }),
+    }),
+    { ...env, KRA_CMC_KEY: 'secret-cmc-key' },
+    {},
+    async () => new Response(JSON.stringify({ id: '25300b62-0945-4c37-8740-ff3302ff631e', email: 'onderegerald@gmail.com' }), { status: 200 }),
+  );
+  assert.equal(devLiveBlocked.status, 403);
 });
 
 test('kra-oscu worker allocates atomic D1 sequence, calls /saveTrnsSalesOsdc, supports /oscu/credit-note and /oscu/items/sync', async () => {
@@ -109,12 +136,13 @@ test('kra-oscu worker allocates atomic D1 sequence, calls /saveTrnsSalesOsdc, su
     SUPABASE_URL: 'https://example.supabase.co',
     SUPABASE_ANON_KEY: 'anon-key',
     KRA_CMC_KEY: 'secret-cmc-key',
+    ALLOWED_OWNER_EMAILS: 'veronjuguna89@gmail.com,onderegerald@gmail.com',
   };
 
   const calls = [];
   const fakeFetch = async (url, init = {}) => {
     if (String(url).endsWith('/auth/v1/user')) {
-      return new Response(JSON.stringify({ id: 'owner-1', email: 'vero@example.com' }), { status: 200 });
+      return new Response(JSON.stringify({ id: '911aab5c-2d62-4377-b665-e9f8d65e3e2e', email: 'veronjuguna89@gmail.com' }), { status: 200 });
     }
     const payload = init.body ? JSON.parse(init.body) : {};
     calls.push({ url: String(url), payload });

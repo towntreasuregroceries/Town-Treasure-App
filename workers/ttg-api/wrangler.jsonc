@@ -26,6 +26,8 @@
   ],
   "vars": {
     "SUPABASE_URL": "https://hufxsjfmgjeyfdidsvcq.supabase.co",
-    "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1ZnhzamZtZ2pleWZkaWRzdmNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM2OTc4NTcsImV4cCI6MjEwOTI3Mzg1N30.AERGUhCqait59P0JhA-Ph1F-Kz2pzjfdqYyxMXRSfJY"
+    "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh1ZnhzamZtZ2pleWZkaWRzdmNxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM2OTc4NTcsImV4cCI6MjEwOTI3Mzg1N30.AERGUhCqait59P0JhA-Ph1F-Kz2pzjfdqYyxMXRSfJY",
+    "ALLOWED_OWNER_IDS": "911aab5c-2d62-4377-b665-e9f8d65e3e2e,25300b62-0945-4c37-8740-ff3302ff631e",
+    "ALLOWED_OWNER_EMAILS": "veronjuguna89@gmail.com,onderegerald@gmail.com"
   }
 }

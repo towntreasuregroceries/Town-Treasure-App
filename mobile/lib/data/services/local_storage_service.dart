@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:cryptography/cryptography.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path/path.dart' as p;
@@ -102,8 +103,9 @@ class FlutterSecureKeyStore implements SecureKeyStore {
   }
 }
 
-/// Offline persistence layer using `flutter_secure_storage` for credentials/keys
-/// and `sqflite` for large encrypted-vault collections and clerk staging queues.
+/// Offline persistence layer using Android Keystore (`SecureKvStore`) for
+/// credentials/keys and transparent AES-256-GCM encryption over `sqflite`
+/// (`ttg_vault_cache.db`) for large vault collections and clerk staging queues.
 class LocalStorageService {
   LocalStorageService({
     SecureKeyStore? secureStore,
@@ -111,12 +113,17 @@ class LocalStorageService {
   }) : _secureStore = secureStore ?? FlutterSecureKeyStore();
 
   static const String keyE2eKey = 'ttg_e2e_key';
+  static const String keyLocalDbKey = 'ttg_local_db_key_v1';
   static const String keySaltVersion = 'ttg_salt_version';
   static const String keyUserId = 'ttg_user_id';
   static const String keyUserEmail = 'ttg_user_email';
   static const String keyBiometricEnabled = 'ttg_biometric_enabled';
   static const String keyLastPage = 'ttg_last_page';
   static const String keySavedPrinter = 'ttg_saved_printer';
+
+  static const String encryptedRowPrefix = 'enc:v1:';
+  static const int _ivLength = 12;
+  static const int _macLength = 16;
 
   // Exact collection keys matching `data.js` and `supabase-config.js`.
   static const String keyRestaurants = 'ttg_restaurants';
@@ -167,9 +174,12 @@ class LocalStorageService {
 
   final SecureKeyStore _secureStore;
   final Future<Database> Function()? _databaseOpener;
+  final AesGcm _localAesGcm = AesGcm.with256bits();
   Database? _db;
   Future<Database>? _openingDb;
   Map<String, dynamic>? _cachedE2eKey;
+  SecretKey? _cachedLocalDbKey;
+  Future<SecretKey>? _loadingLocalDbKey;
 
   Future<Database> _getDb() async {
     final current = _db;
@@ -227,19 +237,140 @@ class LocalStorageService {
     }
   }
 
-  /// Ensures the `kv_store` table exists (helpful for injected test databases).
+  Future<SecretKey> _getOrCreateLocalDbKey() async {
+    final cached = _cachedLocalDbKey;
+    if (cached != null) return cached;
+    final inflight = _loadingLocalDbKey;
+    if (inflight != null) return inflight;
+
+    final future = _loadOrMintLocalDbKey();
+    _loadingLocalDbKey = future;
+    try {
+      final key = await future;
+      _cachedLocalDbKey = key;
+      return key;
+    } finally {
+      if (identical(_loadingLocalDbKey, future)) {
+        _loadingLocalDbKey = null;
+      }
+    }
+  }
+
+  Future<SecretKey> _loadOrMintLocalDbKey() async {
+    String? encoded;
+    try {
+      encoded = await _secureStore.read(keyLocalDbKey);
+    } catch (_) {
+      await Future<void>.delayed(const Duration(milliseconds: 80));
+      encoded = await _secureStore.read(keyLocalDbKey);
+    }
+    if (encoded != null && encoded.isNotEmpty) {
+      try {
+        final padded = encoded.padRight((encoded.length + 3) ~/ 4 * 4, '=');
+        final rawBytes = base64Url.decode(padded);
+        if (rawBytes.length == 32) {
+          return SecretKey(rawBytes);
+        }
+      } catch (_) {}
+    }
+
+    final freshKey = await _localAesGcm.newSecretKey();
+    final freshBytes = await freshKey.extractBytes();
+    final serialized = base64Url.encode(freshBytes).replaceAll('=', '');
+    await _secureStore.write(keyLocalDbKey, serialized);
+    return SecretKey(freshBytes);
+  }
+
+  Future<String> _encryptSqlValue(String plainText) async {
+    final secretKey = await _getOrCreateLocalDbKey();
+    final nonce = _localAesGcm.newNonce();
+    final box = await _localAesGcm.encrypt(
+      utf8.encode(plainText),
+      secretKey: secretKey,
+      nonce: nonce,
+    );
+    final macBytes = box.mac.bytes;
+    final combined = Uint8List(_ivLength + box.cipherText.length + _macLength);
+    combined.setRange(0, _ivLength, nonce);
+    combined.setRange(_ivLength, _ivLength + box.cipherText.length, box.cipherText);
+    combined.setRange(_ivLength + box.cipherText.length, combined.length, macBytes);
+    return '$encryptedRowPrefix${base64Encode(combined)}';
+  }
+
+  Future<String?> _decryptSqlValue(String storedValue) async {
+    if (!storedValue.startsWith(encryptedRowPrefix)) {
+      return storedValue;
+    }
+    final b64 = storedValue.substring(encryptedRowPrefix.length);
+    try {
+      final bytes = base64Decode(b64);
+      if (bytes.length < _ivLength + _macLength) return null;
+      final secretKey = await _getOrCreateLocalDbKey();
+      final nonce = bytes.sublist(0, _ivLength);
+      final cipherText = bytes.sublist(_ivLength, bytes.length - _macLength);
+      final mac = Mac(bytes.sublist(bytes.length - _macLength));
+      final plainBytes = await _localAesGcm.decrypt(
+        SecretBox(cipherText, nonce: nonce, mac: mac),
+        secretKey: secretKey,
+      );
+      return utf8.decode(plainBytes);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Ensures `kv_store` exists and seamlessly migrates any legacy plaintext
+  /// cache rows to AES-256-GCM ciphertext without interrupting the user.
   Future<void> init() async {
-    final db = await _getDb();
-    await db.execute('''
-      CREATE TABLE IF NOT EXISTS kv_store (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL,
-        updated_at INTEGER NOT NULL
-      )
-    ''');
+    await _runWithDb((db) async {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS kv_store (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      ''');
+      final legacyRows = await db.query(
+        'kv_store',
+        columns: ['key', 'value', 'updated_at'],
+        where: 'value NOT LIKE ?',
+        whereArgs: ['$encryptedRowPrefix%'],
+      );
+      if (legacyRows.isEmpty) return;
+
+      final batch = db.batch();
+      for (final row in legacyRows) {
+        final k = row['key']?.toString();
+        final v = row['value']?.toString();
+        if (k == null || v == null) continue;
+        final enc = await _encryptSqlValue(v);
+        batch.update(
+          'kv_store',
+          {
+            'value': enc,
+            'updated_at': row['updated_at'] ?? DateTime.now().millisecondsSinceEpoch,
+          },
+          where: 'key = ?',
+          whereArgs: [k],
+        );
+      }
+      await batch.commit(noResult: true);
+    });
   }
 
   // --- Secure Key Store ---
+
+  /// Evicts cached key material from Dart RAM when Biometric App Lock locks
+  /// the session in the background. Keys reload seamlessly from Android
+  /// Keystore once unlocked — never prompting for a password.
+  void evictInMemoryKeys() {
+    _cachedE2eKey?.clear();
+    _cachedE2eKey = null;
+    _cachedLocalDbKey = null;
+  }
+
+  bool get hasCachedInMemoryKeys =>
+      _cachedE2eKey != null || _cachedLocalDbKey != null;
 
   Future<Map<String, dynamic>?> getE2eKey() async {
     final cached = _cachedE2eKey;
@@ -273,6 +404,7 @@ class LocalStorageService {
   }
 
   Future<void> clearE2eKey() async {
+    _cachedE2eKey?.clear();
     _cachedE2eKey = null;
     await _secureStore.delete(keyE2eKey);
   }
@@ -306,15 +438,16 @@ class LocalStorageService {
       _secureStore.write(keyLastPage, page);
 
   Future<void> clearAuthMetadata() async {
-    _cachedE2eKey = null;
+    evictInMemoryKeys();
     await _secureStore.delete(keyUserId);
     await _secureStore.delete(keyUserEmail);
     await _secureStore.delete(keyE2eKey);
     await _secureStore.delete(keySaltVersion);
     await _secureStore.delete(keyLastPage);
+    await _secureStore.delete(keyLocalDbKey);
   }
 
-  // --- SQLite Key-Value Store ---
+  // --- Encrypted SQLite Key-Value Store ---
 
   Future<String?> getRaw(String key) async {
     return _runWithDb((db) async {
@@ -326,17 +459,34 @@ class LocalStorageService {
         limit: 1,
       );
       if (rows.isEmpty) return null;
-      return rows.first['value']?.toString();
+      final stored = rows.first['value']?.toString();
+      if (stored == null) return null;
+      if (!stored.startsWith(encryptedRowPrefix)) {
+        // Transparent on-the-fly upgrade if a legacy plaintext row was read before init().
+        final encrypted = await _encryptSqlValue(stored);
+        await db.update(
+          'kv_store',
+          {
+            'value': encrypted,
+            'updated_at': DateTime.now().millisecondsSinceEpoch,
+          },
+          where: 'key = ?',
+          whereArgs: [key],
+        );
+        return stored;
+      }
+      return _decryptSqlValue(stored);
     });
   }
 
   Future<void> setRaw(String key, String value) async {
+    final encrypted = await _encryptSqlValue(value);
     await _runWithDb((db) async {
       await db.insert(
         'kv_store',
         {
           'key': key,
-          'value': value,
+          'value': encrypted,
           'updated_at': DateTime.now().millisecondsSinceEpoch,
         },
         conflictAlgorithm: ConflictAlgorithm.replace,

@@ -1,22 +1,82 @@
 const MAX_INVITE_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 const IDLE_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_VAULT_HISTORY = 100;
+const MAX_JSON_BODY_BYTES = 25 * 1024 * 1024; // 25 MiB cap across /clerk, /vault/cas, /staged
+const CLERK_HOURLY_SUBMISSION_CAP = 30;
+const DEFAULT_ALLOWED_ORIGIN = 'https://towntreasuregroceries.github.io';
 
-function corsHeaders(extra = {}) {
+function resolveAllowedOrigin(request) {
+  const origin = request?.headers?.get('Origin')?.trim() || '';
+  if (!origin) return DEFAULT_ALLOWED_ORIGIN;
+  if (
+    origin === DEFAULT_ALLOWED_ORIGIN ||
+    /^http:\/\/(?:localhost|127\.0\.0\.1)(?::\d+)?$/i.test(origin)
+  ) {
+    return origin;
+  }
+  return DEFAULT_ALLOWED_ORIGIN;
+}
+
+function corsHeaders(request = null, extra = {}) {
   return {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'authorization, content-type, x-migration-secret',
+    'Access-Control-Allow-Origin': resolveAllowedOrigin(request),
+    'Access-Control-Allow-Headers': 'authorization, content-type',
     'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Vary': 'Origin',
     'Cache-Control': 'no-store',
     ...extra,
   };
 }
 
-function jsonResponse(status, body) {
+function jsonResponse(status, body, request = null) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: corsHeaders({ 'Content-Type': 'application/json; charset=utf-8' }),
+    headers: corsHeaders(request, { 'Content-Type': 'application/json; charset=utf-8' }),
   });
+}
+
+async function readBoundedBytes(stream, maxBytes) {
+  if (!stream) return new Uint8Array(0);
+  const reader = stream.getReader();
+  const chunks = [];
+  let total = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel('Payload exceeds limit').catch(() => {});
+      return null;
+    }
+    chunks.push(value);
+  }
+
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return out;
+}
+
+async function readBoundedJson(request, maxBytes = MAX_JSON_BODY_BYTES, tooLargeMsg = 'Request payload is too large.') {
+  const declaredLen = Number(request.headers.get('Content-Length') || '0');
+  if (Number.isFinite(declaredLen) && declaredLen > maxBytes) {
+    return { error: jsonResponse(413, { error: tooLargeMsg }, request) };
+  }
+  const bytes = await readBoundedBytes(request.body, maxBytes);
+  if (bytes === null) {
+    return { error: jsonResponse(413, { error: tooLargeMsg }, request) };
+  }
+  try {
+    const text = new TextDecoder().decode(bytes);
+    return { data: JSON.parse(text) };
+  } catch (_) {
+    return { error: jsonResponse(400, { error: 'Invalid JSON request body.' }, request) };
+  }
 }
 
 async function sha256Hex(text) {
@@ -50,13 +110,13 @@ async function authenticateSupabaseUser(request, env, fetchImpl = fetch) {
   const match = /^Bearer\s+(.+)$/i.exec(auth.trim());
   const token = match ? match[1].trim() : '';
   if (!token) {
-    return { error: jsonResponse(401, { error: 'Missing Bearer session token.' }) };
+    return { error: jsonResponse(401, { error: 'Missing Bearer session token.' }, request) };
   }
 
   const supabaseUrl = (env.SUPABASE_URL || '').replace(/\/+$/, '');
   const anonKey = (env.SUPABASE_ANON_KEY || '').trim();
   if (!supabaseUrl || !anonKey) {
-    return { error: jsonResponse(500, { error: 'Auth configuration missing.' }) };
+    return { error: jsonResponse(500, { error: 'Auth configuration missing.' }, request) };
   }
 
   let res;
@@ -66,23 +126,43 @@ async function authenticateSupabaseUser(request, env, fetchImpl = fetch) {
       headers: { Authorization: `Bearer ${token}`, apikey: anonKey },
     });
   } catch (_) {
-    return { error: jsonResponse(502, { error: 'Could not verify user session.' }) };
+    return { error: jsonResponse(502, { error: 'Could not verify user session.' }, request) };
   }
   if (!res.ok) {
-    return { error: jsonResponse(401, { error: 'Session expired. Please sign in again.' }) };
+    return { error: jsonResponse(401, { error: 'Session expired. Please sign in again.' }, request) };
   }
   const user = await res.json();
   const userId = typeof user?.id === 'string' ? user.id.trim() : '';
-  if (!userId) {
-    return { error: jsonResponse(401, { error: 'Invalid user session.' }) };
+  if (!userId || !/^[A-Za-z0-9_-]{3,64}$/.test(userId)) {
+    return { error: jsonResponse(401, { error: 'Invalid user session.' }, request) };
   }
+
+  const userEmail = typeof user.email === 'string' ? user.email.toLowerCase().trim() : '';
+  const allowedIds = (env.ALLOWED_OWNER_IDS || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  const allowedEmails = (env.ALLOWED_OWNER_EMAILS || '')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (
+    (allowedIds.length > 0 && !allowedIds.includes(userId)) ||
+    (allowedEmails.length > 0 && !allowedEmails.includes(userEmail))
+  ) {
+    return {
+      error: jsonResponse(403, { error: 'This account is not authorized to access Town Treasure owner data.' }, request),
+    };
+  }
+
   const fullName = cleanText(
     user.user_metadata?.full_name ?? user.user_metadata?.name ?? '',
     120,
   );
   return {
     userId,
-    email: typeof user.email === 'string' ? user.email.toLowerCase().trim() : null,
+    email: userEmail || null,
     fullName,
   };
 }
@@ -149,6 +229,25 @@ function normalizeDocketInput(docket) {
   };
 }
 
+function parseStoredPhotoKeys(photoKeysJson) {
+  try {
+    const parsed = typeof photoKeysJson === 'string' ? JSON.parse(photoKeysJson) : photoKeysJson;
+    if (Array.isArray(parsed)) return parsed.filter(k => typeof k === 'string' && k.length > 0);
+  } catch (_) {}
+  return [];
+}
+
+async function deleteOrphanedPhotosFromR2(env, oldPhotoKeysJson, retainedKeys = []) {
+  const oldKeys = parseStoredPhotoKeys(oldPhotoKeysJson);
+  if (!oldKeys.length) return;
+  const keepSet = new Set(retainedKeys);
+  for (const key of oldKeys) {
+    if (!keepSet.has(key)) {
+      await env.STORAGE.delete(key).catch(() => {});
+    }
+  }
+}
+
 async function storePhotosToR2(env, ownerId, docketId, photos) {
   const keys = [];
   for (let i = 0; i < photos.length; i++) {
@@ -162,11 +261,7 @@ async function storePhotosToR2(env, ownerId, docketId, photos) {
 }
 
 async function hydratePhotosFromR2(env, photoKeysJson) {
-  let keys = [];
-  try {
-    const parsed = typeof photoKeysJson === 'string' ? JSON.parse(photoKeysJson) : photoKeysJson;
-    if (Array.isArray(parsed)) keys = parsed.filter(k => typeof k === 'string' && k.length > 0);
-  } catch (_) {}
+  const keys = parseStoredPhotoKeys(photoKeysJson);
   const photos = [];
   for (const key of keys) {
     const obj = await env.STORAGE.get(key);
@@ -212,7 +307,7 @@ function rowToStagedDto(row, hydratedPhotos = null) {
 }
 
 function sanitizeForClerk(row) {
-  const { total_buy: _tb, ...rest } = row;
+  const { total_buy: _tb, target_user_email: _te, ...rest } = row;
   if (Array.isArray(rest.items_json)) {
     rest.items_json = rest.items_json.map(item => {
       if (!item || typeof item !== 'object') return item;
@@ -221,6 +316,50 @@ function sanitizeForClerk(row) {
     });
   }
   return rest;
+}
+
+async function checkClerkHourlyRateLimit(env, ownerUserId, inviteId, nowMs = Date.now()) {
+  const hourBucket = new Date(nowMs).toISOString().slice(0, 13);
+  const oneHourAgoIso = new Date(nowMs - 60 * 60 * 1000).toISOString();
+
+  const bucketRow = await env.DB.prepare(
+    'SELECT submissions FROM clerk_rate_limits WHERE invite_id = ? AND hour_bucket = ?',
+  )
+    .bind(inviteId, hourBucket)
+    .first();
+  const bucketCount = Number(bucketRow?.submissions ?? 0);
+  if (bucketCount >= CLERK_HOURLY_SUBMISSION_CAP) {
+    return { allowed: false, hourBucket };
+  }
+
+  const liveCountRow = await env.DB.prepare(
+    'SELECT COUNT(*) AS cnt FROM staged_invoices WHERE owner_user_id = ? AND submitted_by_invite_id = ? AND updated_at >= ?',
+  )
+    .bind(ownerUserId, inviteId, oneHourAgoIso)
+    .first();
+  if (Number(liveCountRow?.cnt ?? 0) >= CLERK_HOURLY_SUBMISSION_CAP) {
+    return { allowed: false, hourBucket };
+  }
+
+  return { allowed: true, hourBucket };
+}
+
+async function recordClerkSubmissionRateCount(env, inviteId, hourBucket, nowMs = Date.now()) {
+  const nowIso = new Date(nowMs).toISOString();
+  const cutoffBucket = new Date(nowMs - 24 * 60 * 60 * 1000).toISOString().slice(0, 13);
+  await env.DB.prepare(
+    `INSERT INTO clerk_rate_limits (invite_id, hour_bucket, submissions, updated_at)
+     VALUES (?, ?, 1, ?)
+     ON CONFLICT(invite_id, hour_bucket) DO UPDATE SET
+       submissions = submissions + 1,
+       updated_at = excluded.updated_at`,
+  )
+    .bind(inviteId, hourBucket, nowIso)
+    .run();
+  await env.DB.prepare('DELETE FROM clerk_rate_limits WHERE hour_bucket < ?')
+    .bind(cutoffBucket)
+    .run()
+    .catch(() => {});
 }
 
 async function resolveClerkInvite(env, token) {
@@ -288,9 +427,9 @@ async function resolveClerkInvite(env, token) {
   };
 }
 
-async function handleVaultCas(env, userId, expectedRevision, data) {
+async function handleVaultCas(request, env, userId, expectedRevision, data) {
   if (!Number.isInteger(expectedRevision) || expectedRevision < 0 || typeof data !== 'string' || !data) {
-    return jsonResponse(400, { error: 'Invalid vault revision or encrypted payload.' });
+    return jsonResponse(400, { error: 'Invalid vault revision or encrypted payload.' }, request);
   }
 
   const nowIso = new Date().toISOString();
@@ -309,10 +448,10 @@ async function handleVaultCas(env, userId, expectedRevision, data) {
       .bind(userId)
       .first();
     if (hist && hist.max_rev !== null && hist.max_rev !== undefined) {
-      return jsonResponse(200, { saved: false, revision: Number(hist.max_rev) });
+      return jsonResponse(200, { saved: false, revision: Number(hist.max_rev) }, request);
     }
     if (expectedRevision !== 0) {
-      return jsonResponse(200, { saved: false, revision: 0 });
+      return jsonResponse(200, { saved: false, revision: 0 }, request);
     }
 
     const r2Key = `vault/${userId}/rev-1.enc`;
@@ -327,18 +466,18 @@ async function handleVaultCas(env, userId, expectedRevision, data) {
       .run();
 
     if ((ins.meta?.changes ?? 0) === 1) {
-      return jsonResponse(200, { saved: true, revision: 1 });
+      return jsonResponse(200, { saved: true, revision: 1 }, request);
     }
     await env.STORAGE.delete(r2Key).catch(() => {});
     const winner = await env.DB.prepare('SELECT revision FROM vault_meta WHERE user_id = ?')
       .bind(userId)
       .first();
-    return jsonResponse(200, { saved: false, revision: Number(winner?.revision ?? 0) });
+    return jsonResponse(200, { saved: false, revision: Number(winner?.revision ?? 0) }, request);
   }
 
   const currentRev = Number(current.revision);
   if (currentRev !== expectedRevision) {
-    return jsonResponse(200, { saved: false, revision: currentRev });
+    return jsonResponse(200, { saved: false, revision: currentRev }, request);
   }
 
   const nextRev = currentRev + 1;
@@ -359,7 +498,7 @@ async function handleVaultCas(env, userId, expectedRevision, data) {
     const winner = await env.DB.prepare('SELECT revision FROM vault_meta WHERE user_id = ?')
       .bind(userId)
       .first();
-    return jsonResponse(200, { saved: false, revision: Number(winner?.revision ?? currentRev) });
+    return jsonResponse(200, { saved: false, revision: Number(winner?.revision ?? currentRev) }, request);
   }
 
   await env.DB.prepare(
@@ -384,149 +523,7 @@ async function handleVaultCas(env, userId, expectedRevision, data) {
     }
   }
 
-  return jsonResponse(200, { saved: true, revision: nextRev });
-}
-
-async function handleAdminSeed(request, env) {
-  const secret = (env.MIGRATION_SECRET || '').trim();
-  if (!secret) {
-    return jsonResponse(404, { error: 'Not found.' });
-  }
-  const provided = (request.headers.get('X-Migration-Secret') || '').trim();
-  if (!provided || provided !== secret) {
-    return jsonResponse(403, { error: 'Forbidden.' });
-  }
-
-  const body = await request.json();
-  const type = body?.type;
-  const rows = Array.isArray(body?.rows) ? body.rows : [];
-  let processed = 0;
-
-  if (type === 'vault') {
-    for (const r of rows) {
-      const rev = Number(r.revision ?? 0);
-      const r2Key = `vault/${r.user_id}/rev-${rev}.enc`;
-      const hash = await sha256Hex(r.data || '');
-      await env.STORAGE.put(r2Key, r.data || '', {
-        httpMetadata: { contentType: 'text/plain; charset=utf-8', cacheControl: 'no-store' },
-        customMetadata: { userId: r.user_id, revision: String(rev), sha256: hash },
-      });
-      await env.DB.prepare(
-        `INSERT INTO vault_meta (user_id, revision, r2_key, sha256, updated_at)
-         VALUES (?, ?, ?, ?, ?)
-         ON CONFLICT(user_id) DO UPDATE SET
-           revision = excluded.revision,
-           r2_key = excluded.r2_key,
-           sha256 = excluded.sha256,
-           updated_at = excluded.updated_at`,
-      )
-        .bind(r.user_id, rev, r2Key, hash, r.updated_at || new Date().toISOString())
-        .run();
-      processed++;
-    }
-    return jsonResponse(200, { ok: true, processed });
-  }
-
-  if (type === 'vault_history') {
-    for (const r of rows) {
-      const rev = Number(r.revision ?? 0);
-      const r2Key = `vault/${r.user_id}/rev-${rev}.enc`;
-      await env.STORAGE.put(r2Key, r.data || '', {
-        httpMetadata: { contentType: 'text/plain; charset=utf-8', cacheControl: 'no-store' },
-      });
-      await env.DB.prepare(
-        'INSERT INTO vault_history (user_id, revision, r2_key, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, revision) DO NOTHING',
-      )
-        .bind(r.user_id, rev, r2Key, r.created_at || new Date().toISOString())
-        .run();
-      processed++;
-    }
-    return jsonResponse(200, { ok: true, processed });
-  }
-
-  if (type === 'clerk_invites') {
-    for (const r of rows) {
-      await env.DB.prepare(
-        `INSERT INTO clerk_invites (id, owner_user_id, token_hash, owner_email, owner_name, expires_at, revoked_at, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           revoked_at = excluded.revoked_at,
-           expires_at = excluded.expires_at`,
-      )
-        .bind(
-          r.id,
-          r.owner_user_id,
-          r.token_hash,
-          r.owner_email ?? null,
-          r.owner_name ?? 'Account owner',
-          r.expires_at,
-          r.revoked_at ?? null,
-          r.created_at || new Date().toISOString(),
-        )
-        .run();
-      processed++;
-    }
-    return jsonResponse(200, { ok: true, processed });
-  }
-
-  if (type === 'staged_invoices') {
-    for (const r of rows) {
-      const rawPhotos = Array.isArray(r.receipt_photos)
-        ? r.receipt_photos
-        : (typeof r.receipt_photos === 'string' && r.receipt_photos.startsWith('[')
-            ? JSON.parse(r.receipt_photos)
-            : []);
-      const photos = rawPhotos.length > 0
-        ? rawPhotos.filter(p => typeof p === 'string' && p.length > 0)
-        : (typeof r.receipt_photo === 'string' && r.receipt_photo.length > 0 ? [r.receipt_photo] : []);
-      const photoKeys = await storePhotosToR2(env, r.owner_user_id, r.id, photos);
-      const itemsJson = typeof r.items_json === 'string'
-        ? r.items_json
-        : JSON.stringify(Array.isArray(r.items_json) ? r.items_json : []);
-
-      await env.DB.prepare(
-        `INSERT INTO staged_invoices (
-           id, owner_user_id, submitted_by_invite_id, submission_key, clerk_name,
-           restaurant_name, invoice_date, items_json, delivery_cost, other_cost,
-           total_sell, total_buy, photo_keys_json, notes, status, rejection_reason,
-           target_user_id, target_user_email, target_user_name, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           status = excluded.status,
-           rejection_reason = excluded.rejection_reason,
-           photo_keys_json = excluded.photo_keys_json,
-           updated_at = excluded.updated_at`,
-      )
-        .bind(
-          r.id,
-          r.owner_user_id,
-          r.submitted_by_invite_id ?? null,
-          r.submission_key ?? null,
-          r.clerk_name ?? 'Clerk',
-          r.restaurant_name ?? 'General Wholesale',
-          String(r.invoice_date || '').slice(0, 10),
-          itemsJson,
-          Number(r.delivery_cost ?? 0),
-          Number(r.other_cost ?? 0),
-          Number(r.total_sell ?? 0),
-          Number(r.total_buy ?? 0),
-          JSON.stringify(photoKeys),
-          r.notes ?? '',
-          r.status ?? 'pending',
-          r.rejection_reason ?? '',
-          r.target_user_id ?? r.owner_user_id,
-          r.target_user_email ?? null,
-          r.target_user_name ?? null,
-          r.created_at || new Date().toISOString(),
-          r.updated_at || r.created_at || new Date().toISOString(),
-        )
-        .run();
-      processed++;
-    }
-    return jsonResponse(200, { ok: true, processed });
-  }
-
-  return jsonResponse(400, { error: 'Unsupported seed type.' });
+  return jsonResponse(200, { saved: true, revision: nextRev }, request);
 }
 
 export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
@@ -534,35 +531,40 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
   const path = url.pathname.replace(/\/+$/, '') || '/';
 
   if (request.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: corsHeaders() });
+    return new Response(null, { status: 204, headers: corsHeaders(request) });
   }
 
   if (request.method === 'GET' && path === '/health') {
-    return jsonResponse(200, {
-      ok: true,
-      service: 'ttg-api',
-      hasDb: Boolean(env.DB),
-      hasStorage: Boolean(env.STORAGE),
-    });
+    return jsonResponse(
+      200,
+      {
+        ok: true,
+        service: 'ttg-api',
+        hasDb: Boolean(env.DB),
+        hasStorage: Boolean(env.STORAGE),
+      },
+      request,
+    );
   }
 
   if (!env.DB || !env.STORAGE) {
-    return jsonResponse(500, { error: 'Cloudflare D1/R2 bindings are missing.' });
+    return jsonResponse(500, { error: 'Cloudflare D1/R2 bindings are missing.' }, request);
   }
 
-  if (request.method === 'POST' && path === '/admin/seed') {
-    return handleAdminSeed(request, env);
+  if (path === '/admin/seed') {
+    return jsonResponse(404, { error: 'Not found.' }, request);
   }
 
   // --- Clerk API (unauthenticated invite-token routes + authenticated create_invite) ---
   if (request.method === 'POST' && path === '/clerk') {
-    try {
-      const rawBody = await request.text();
-      if (rawBody.length > 25_000_000) {
-        return jsonResponse(413, { error: 'Docket upload is too large.' });
-      }
-      const body = JSON.parse(rawBody);
+    const parsed = await readBoundedJson(request, MAX_JSON_BODY_BYTES, 'Docket upload is too large.');
+    if (parsed.error) return parsed.error;
+    const body = parsed.data;
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return jsonResponse(400, { error: 'Clerk request body must be a JSON object.' }, request);
+    }
 
+    try {
       if (body.action === 'create_invite') {
         const auth = await authenticateSupabaseUser(request, env, fetchImpl);
         if (auth.error) return auth.error;
@@ -587,26 +589,30 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
           .bind(nowIso, auth.userId, inviteId)
           .run();
 
-        return jsonResponse(200, {
-          token,
-          invite: {
-            id: inviteId,
-            owner_user_id: auth.userId,
-            owner_email: auth.email,
-            owner_name: ownerName,
-            expires_at: expiresAt,
-            last_activity_at: nowIso,
-            idle_expires_at: idleExpiresAt,
-            effective_expires_at: idleExpiresAt,
-            max_lifetime_days: 30,
-            idle_timeout_days: 7,
+        return jsonResponse(
+          200,
+          {
+            token,
+            invite: {
+              id: inviteId,
+              owner_user_id: auth.userId,
+              owner_email: auth.email,
+              owner_name: ownerName,
+              expires_at: expiresAt,
+              last_activity_at: nowIso,
+              idle_expires_at: idleExpiresAt,
+              effective_expires_at: idleExpiresAt,
+              max_lifetime_days: 30,
+              idle_timeout_days: 7,
+            },
           },
-        });
+          request,
+        );
       }
 
       const resolution = await resolveClerkInvite(env, body.invite_token);
       if (!resolution.ok) {
-        return jsonResponse(401, { error: resolution.error });
+        return jsonResponse(401, { error: resolution.error }, request);
       }
       const invite = resolution.invite;
 
@@ -614,7 +620,7 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
         let rowsRes;
         if (body.submission_id !== undefined) {
           const id = cleanText(body.submission_id, 160, true);
-          if (!id) return jsonResponse(400, { error: 'A valid docket ID is required.' });
+          if (!id) return jsonResponse(400, { error: 'A valid docket ID is required.' }, request);
           rowsRes = await env.DB.prepare(
             'SELECT * FROM staged_invoices WHERE owner_user_id = ? AND submitted_by_invite_id = ? AND id = ? ORDER BY created_at DESC LIMIT 100',
           )
@@ -634,48 +640,50 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
           const photos = includePhotos ? await hydratePhotosFromR2(env, row.photo_keys_json) : null;
           submissions.push(sanitizeForClerk(rowToStagedDto(row, photos)));
         }
-        return jsonResponse(200, {
-          owner: { name: invite.owner_name, email: invite.owner_email },
-          invite: {
-            expires_at: invite.expires_at,
-            last_activity_at: invite.last_activity_at,
-            idle_expires_at: invite.idle_expires_at,
-            effective_expires_at: invite.effective_expires_at,
-            max_lifetime_days: 30,
-            idle_timeout_days: 7,
+        return jsonResponse(
+          200,
+          {
+            // Expose display name only; never expose owner's private login email to clerk links.
+            owner: { name: invite.owner_name },
+            invite: {
+              expires_at: invite.expires_at,
+              last_activity_at: invite.last_activity_at,
+              idle_expires_at: invite.idle_expires_at,
+              effective_expires_at: invite.effective_expires_at,
+              max_lifetime_days: 30,
+              idle_timeout_days: 7,
+            },
+            submissions,
           },
-          submissions,
-        });
+          request,
+        );
       }
 
       if (body.action === 'delete') {
         const id = cleanText(body.id, 160, true);
-        if (!id) return jsonResponse(400, { error: 'Docket ID is required.' });
+        if (!id) return jsonResponse(400, { error: 'Docket ID is required.' }, request);
         const existing = await env.DB.prepare(
           "SELECT id, photo_keys_json FROM staged_invoices WHERE id = ? AND owner_user_id = ? AND submitted_by_invite_id = ? AND status IN ('pending', 'rejected')",
         )
           .bind(id, invite.owner_user_id, invite.id)
           .first();
         if (!existing) {
-          return jsonResponse(409, { error: 'Only a pending or returned docket from this invite can be deleted.' });
+          return jsonResponse(409, { error: 'Only a pending or returned docket from this invite can be deleted.' }, request);
         }
         await env.DB.prepare('DELETE FROM staged_invoices WHERE id = ?').bind(id).run();
-        try {
-          const keys = JSON.parse(existing.photo_keys_json || '[]');
-          for (const k of keys) await env.STORAGE.delete(k).catch(() => {});
-        } catch (_) {}
-        return jsonResponse(200, { deleted: true });
+        await deleteOrphanedPhotosFromR2(env, existing.photo_keys_json, []);
+        return jsonResponse(200, { deleted: true }, request);
       }
 
       if (body.action !== 'submit') {
-        return jsonResponse(400, { error: 'Unsupported clerk action.' });
+        return jsonResponse(400, { error: 'Unsupported clerk action.' }, request);
       }
       if (!body.docket || typeof body.docket !== 'object' || Array.isArray(body.docket)) {
-        return jsonResponse(400, { error: 'Docket data is required.' });
+        return jsonResponse(400, { error: 'Docket data is required.' }, request);
       }
       const submissionKey = cleanText(body.submission_key, 80, true);
       if (!submissionKey || !/^[A-Za-z0-9_-]{16,80}$/.test(submissionKey)) {
-        return jsonResponse(400, { error: 'A valid submission retry key is required.' });
+        return jsonResponse(400, { error: 'A valid submission retry key is required.' }, request);
       }
 
       const fields = normalizeDocketInput(body.docket);
@@ -688,37 +696,45 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
         .first();
       if (prior) {
         const photos = await hydratePhotosFromR2(env, prior.photo_keys_json);
-        return jsonResponse(200, {
-          submission: sanitizeForClerk(rowToStagedDto(prior, photos)),
-          replayed: true,
-        });
+        return jsonResponse(
+          200,
+          {
+            submission: sanitizeForClerk(rowToStagedDto(prior, photos)),
+            replayed: true,
+          },
+          request,
+        );
       }
 
-      // Per-invite hourly burst limit (30/hr)
-      const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      const countRow = await env.DB.prepare(
-        'SELECT COUNT(*) AS cnt FROM staged_invoices WHERE owner_user_id = ? AND submitted_by_invite_id = ? AND updated_at >= ?',
-      )
-        .bind(invite.owner_user_id, invite.id, oneHourAgo)
-        .first();
-      if (Number(countRow?.cnt ?? 0) >= 30) {
-        return jsonResponse(429, {
-          error: 'Hourly submission limit reached for this clerk link. Try again later.',
-        });
+      // Persistent per-invite hourly burst limit (30/hr, immune to submit+delete loops)
+      const nowMs = Date.now();
+      const rateCheck = await checkClerkHourlyRateLimit(env, invite.owner_user_id, invite.id, nowMs);
+      if (!rateCheck.allowed) {
+        return jsonResponse(
+          429,
+          {
+            error: 'Hourly submission limit reached for this clerk link. Try again later.',
+          },
+          request,
+        );
       }
 
-      const nowIso = new Date().toISOString();
+      const nowIso = new Date(nowMs).toISOString();
       const requestedId = cleanText(body.docket.id, 160);
       if (requestedId) {
         const returned = await env.DB.prepare(
-          'SELECT id, status FROM staged_invoices WHERE id = ? AND owner_user_id = ? AND submitted_by_invite_id = ?',
+          'SELECT id, status, photo_keys_json FROM staged_invoices WHERE id = ? AND owner_user_id = ? AND submitted_by_invite_id = ?',
         )
           .bind(requestedId, invite.owner_user_id, invite.id)
           .first();
         if (!returned || returned.status !== 'rejected') {
-          return jsonResponse(409, {
-            error: 'Only a returned docket from this invite can be corrected.',
-          });
+          return jsonResponse(
+            409,
+            {
+              error: 'Only a returned docket from this invite can be corrected.',
+            },
+            request,
+          );
         }
         const photoKeys = await storePhotosToR2(env, invite.owner_user_id, requestedId, fields.photos);
         const upd = await env.DB.prepare(
@@ -748,17 +764,27 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
           )
           .run();
         if ((upd.meta?.changes ?? 0) !== 1) {
-          return jsonResponse(409, {
-            error: 'This docket has already changed. Refresh the clerk history and try again.',
-          });
+          return jsonResponse(
+            409,
+            {
+              error: 'This docket has already changed. Refresh the clerk history and try again.',
+            },
+            request,
+          );
         }
+        await deleteOrphanedPhotosFromR2(env, returned.photo_keys_json, photoKeys);
+        await recordClerkSubmissionRateCount(env, invite.id, rateCheck.hourBucket, nowMs);
         const updatedRow = await env.DB.prepare('SELECT * FROM staged_invoices WHERE id = ?')
           .bind(requestedId)
           .first();
-        return jsonResponse(200, {
-          submission: sanitizeForClerk(rowToStagedDto(updatedRow, fields.photos)),
-          replayed: false,
-        });
+        return jsonResponse(
+          200,
+          {
+            submission: sanitizeForClerk(rowToStagedDto(updatedRow, fields.photos)),
+            replayed: false,
+          },
+          request,
+        );
       }
 
       const newId = `stg_${crypto.randomUUID()}`;
@@ -801,26 +827,40 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
           .bind(invite.owner_user_id, invite.id, submissionKey)
           .first();
         if (replay) {
+          await deleteOrphanedPhotosFromR2(env, JSON.stringify(photoKeys), []);
           const photos = await hydratePhotosFromR2(env, replay.photo_keys_json);
-          return jsonResponse(200, {
-            submission: sanitizeForClerk(rowToStagedDto(replay, photos)),
-            replayed: true,
-          });
+          return jsonResponse(
+            200,
+            {
+              submission: sanitizeForClerk(rowToStagedDto(replay, photos)),
+              replayed: true,
+            },
+            request,
+          );
         }
         throw err;
       }
 
+      await recordClerkSubmissionRateCount(env, invite.id, rateCheck.hourBucket, nowMs);
       const createdRow = await env.DB.prepare('SELECT * FROM staged_invoices WHERE id = ?')
         .bind(newId)
         .first();
-      return jsonResponse(200, {
-        submission: sanitizeForClerk(rowToStagedDto(createdRow, fields.photos)),
-        replayed: false,
-      });
+      return jsonResponse(
+        200,
+        {
+          submission: sanitizeForClerk(rowToStagedDto(createdRow, fields.photos)),
+          replayed: false,
+        },
+        request,
+      );
     } catch (error) {
-      return jsonResponse(400, {
-        error: error instanceof Error ? error.message : 'Clerk request failed.',
-      });
+      return jsonResponse(
+        400,
+        {
+          error: error instanceof Error ? error.message : 'Clerk request failed.',
+        },
+        request,
+      );
     }
   }
 
@@ -834,29 +874,35 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
     const meta = await env.DB.prepare('SELECT revision FROM vault_meta WHERE user_id = ?')
       .bind(userId)
       .first();
-    if (!meta) return jsonResponse(200, { exists: false, revision: null });
-    return jsonResponse(200, { exists: true, revision: Number(meta.revision) });
+    if (!meta) return jsonResponse(200, { exists: false, revision: null }, request);
+    return jsonResponse(200, { exists: true, revision: Number(meta.revision) }, request);
   }
 
   if (request.method === 'GET' && path === '/vault') {
     const meta = await env.DB.prepare('SELECT revision, r2_key FROM vault_meta WHERE user_id = ?')
       .bind(userId)
       .first();
-    if (!meta) return jsonResponse(200, { exists: false, revision: 0, data: null });
+    if (!meta) return jsonResponse(200, { exists: false, revision: 0, data: null }, request);
     const obj = await env.STORAGE.get(meta.r2_key);
     const data = obj ? await obj.text() : null;
-    return jsonResponse(200, {
-      exists: true,
-      revision: Number(meta.revision),
-      data,
-    });
+    return jsonResponse(
+      200,
+      {
+        exists: true,
+        revision: Number(meta.revision),
+        data,
+      },
+      request,
+    );
   }
 
   if (request.method === 'POST' && path === '/vault/cas') {
-    const body = await request.json();
+    const parsed = await readBoundedJson(request, MAX_JSON_BODY_BYTES, 'Encrypted vault snapshot exceeds 25 MiB limit.');
+    if (parsed.error) return parsed.error;
+    const body = parsed.data;
     const expectedRevision = Number(body?.expectedRevision);
     const data = body?.data;
-    return handleVaultCas(env, userId, expectedRevision, data);
+    return handleVaultCas(request, env, userId, expectedRevision, data);
   }
 
   // Owner Staged Invoices endpoints
@@ -870,9 +916,13 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
     )
       .bind(userId)
       .all();
-    return jsonResponse(200, {
-      rows: (rows.results || []).map(r => rowToStagedDto(r, null)),
-    });
+    return jsonResponse(
+      200,
+      {
+        rows: (rows.results || []).map(r => rowToStagedDto(r, null)),
+      },
+      request,
+    );
   }
 
   if (request.method === 'GET' && path === '/staged/pending') {
@@ -881,7 +931,7 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
     )
       .bind(userId)
       .all();
-    return jsonResponse(200, { rows: rows.results || [] });
+    return jsonResponse(200, { rows: rows.results || [] }, request);
   }
 
   if (path.startsWith('/staged/')) {
@@ -890,7 +940,9 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
     const stagedId = decodeURIComponent(parts[0] || '');
     const subAction = parts[1] || '';
 
-    if (!stagedId) return jsonResponse(400, { error: 'Missing docket ID.' });
+    if (!stagedId || stagedId.length > 160) {
+      return jsonResponse(400, { error: 'Invalid docket ID.' }, request);
+    }
 
     if (request.method === 'GET' && !subAction) {
       const row = await env.DB.prepare(
@@ -898,33 +950,41 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
       )
         .bind(userId, stagedId)
         .first();
-      if (!row) return jsonResponse(200, { row: null });
+      if (!row) return jsonResponse(200, { row: null }, request);
       const photos = await hydratePhotosFromR2(env, row.photo_keys_json);
-      return jsonResponse(200, { row: rowToStagedDto(row, photos) });
+      return jsonResponse(200, { row: rowToStagedDto(row, photos) }, request);
     }
 
     if (request.method === 'PUT' && !subAction) {
-      const rec = await request.json();
+      const parsed = await readBoundedJson(request, MAX_JSON_BODY_BYTES, 'Staged docket payload exceeds 25 MiB limit.');
+      if (parsed.error) return parsed.error;
+      const rec = parsed.data || {};
       const nowIso = new Date().toISOString();
+
+      // Strict tenant isolation guard before writing R2 or D1 (CRIT-1 fix)
+      const existing = await env.DB.prepare(
+        'SELECT owner_user_id, photo_keys_json, created_at FROM staged_invoices WHERE id = ?',
+      )
+        .bind(stagedId)
+        .first();
+      if (existing && existing.owner_user_id !== userId) {
+        return jsonResponse(403, { error: 'Forbidden: docket belongs to another account.' }, request);
+      }
+
       const rawPhotos = Array.isArray(rec.receipt_photos) ? rec.receipt_photos : [];
       const photos = rawPhotos.length
         ? rawPhotos.filter(p => typeof p === 'string' && p.length > 0)
         : (typeof rec.receipt_photo === 'string' && rec.receipt_photo.length > 0
             ? [rec.receipt_photo]
             : []);
-      const existing = await env.DB.prepare(
-        'SELECT photo_keys_json, created_at FROM staged_invoices WHERE id = ? AND owner_user_id = ?',
-      )
-        .bind(stagedId, userId)
-        .first();
       const photoKeys = photos.length
         ? await storePhotosToR2(env, userId, stagedId, photos)
-        : JSON.parse(existing?.photo_keys_json || '[]');
+        : parseStoredPhotoKeys(existing?.photo_keys_json);
       const itemsJson = typeof rec.items_json === 'string'
         ? rec.items_json
         : JSON.stringify(Array.isArray(rec.items_json) ? rec.items_json : []);
 
-      await env.DB.prepare(
+      const upsertRes = await env.DB.prepare(
         `INSERT INTO staged_invoices (
            id, owner_user_id, submitted_by_invite_id, submission_key, clerk_name,
            restaurant_name, invoice_date, items_json, delivery_cost, other_cost,
@@ -944,7 +1004,8 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
            notes = excluded.notes,
            status = excluded.status,
            rejection_reason = excluded.rejection_reason,
-           updated_at = excluded.updated_at`,
+           updated_at = excluded.updated_at
+         WHERE staged_invoices.owner_user_id = excluded.owner_user_id`,
       )
         .bind(
           stagedId,
@@ -970,11 +1031,23 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
           rec.updated_at ?? nowIso,
         )
         .run();
-      return jsonResponse(200, { ok: true, id: stagedId });
+
+      if ((upsertRes.meta?.changes ?? 0) === 0) {
+        if (photos.length) {
+          await deleteOrphanedPhotosFromR2(env, JSON.stringify(photoKeys), []);
+        }
+        return jsonResponse(403, { error: 'Forbidden: docket belongs to another account.' }, request);
+      }
+      if (photos.length && existing?.photo_keys_json) {
+        await deleteOrphanedPhotosFromR2(env, existing.photo_keys_json, photoKeys);
+      }
+      return jsonResponse(200, { ok: true, id: stagedId }, request);
     }
 
     if (request.method === 'PATCH' && subAction === 'status') {
-      const payload = await request.json();
+      const parsed = await readBoundedJson(request, 2 * 1024 * 1024);
+      if (parsed.error) return parsed.error;
+      const payload = parsed.data || {};
       const nowIso = new Date().toISOString();
       const sets = ['status = ?', 'updated_at = ?'];
       const vals = [String(payload.status || 'approved'), String(payload.updated_at || nowIso)];
@@ -1005,18 +1078,20 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
       )
         .bind(...vals)
         .run();
-      return jsonResponse(200, { updated: (res.meta?.changes ?? 0) > 0 });
+      return jsonResponse(200, { updated: (res.meta?.changes ?? 0) > 0 }, request);
     }
 
     if (request.method === 'POST' && subAction === 'reject') {
-      const payload = await request.json();
+      const parsed = await readBoundedJson(request, 512 * 1024);
+      if (parsed.error) return parsed.error;
+      const payload = parsed.data || {};
       const reason = String(payload?.reason ?? '');
       const res = await env.DB.prepare(
         "UPDATE staged_invoices SET status = 'rejected', rejection_reason = ?, updated_at = ? WHERE id = ? AND owner_user_id = ? AND status = 'pending'",
       )
         .bind(reason, new Date().toISOString(), stagedId, userId)
         .run();
-      return jsonResponse(200, { updated: (res.meta?.changes ?? 0) > 0 });
+      return jsonResponse(200, { updated: (res.meta?.changes ?? 0) > 0 }, request);
     }
 
     if (request.method === 'DELETE' && !subAction) {
@@ -1026,7 +1101,7 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
         .bind(stagedId, userId)
         .first();
       if (!existing) {
-        return jsonResponse(200, { deleted: false });
+        return jsonResponse(200, { deleted: false }, request);
       }
       const res = await env.DB.prepare(
         "DELETE FROM staged_invoices WHERE id = ? AND owner_user_id = ? AND status != 'approved'",
@@ -1034,16 +1109,13 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
         .bind(stagedId, userId)
         .run();
       if ((res.meta?.changes ?? 0) > 0) {
-        try {
-          const keys = JSON.parse(existing.photo_keys_json || '[]');
-          for (const k of keys) await env.STORAGE.delete(k).catch(() => {});
-        } catch (_) {}
+        await deleteOrphanedPhotosFromR2(env, existing.photo_keys_json, []);
       }
-      return jsonResponse(200, { deleted: (res.meta?.changes ?? 0) > 0 });
+      return jsonResponse(200, { deleted: (res.meta?.changes ?? 0) > 0 }, request);
     }
   }
 
-  return jsonResponse(404, { error: 'Route not found.' });
+  return jsonResponse(404, { error: 'Route not found.' }, request);
 }
 
 export default {
