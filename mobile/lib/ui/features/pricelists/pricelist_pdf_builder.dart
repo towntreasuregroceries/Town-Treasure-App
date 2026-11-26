@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -7,6 +6,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../../../domain/models/models.dart';
+import '../../core/stamp_signature_helper.dart';
 import 'pricelists_view_model.dart';
 
 /// Builds watermarked A4 PDFs for Price Lists matching `downloadPriceListPDF` in `pricelist.js`.
@@ -26,8 +26,10 @@ class PriceListPdfBuilder {
     DateTime? generatedDate,
   }) async {
     final logoBytes = await _loadAsset('assets/logo.png');
-    final stampBytes = await _loadAsset('assets/stamp.png');
-    final signatureBytes = _decodeDataUri(settings.signature);
+    final stampRaw = await _loadAsset('assets/stamp.png');
+    final stampBytes = StampSignatureHelper.prepareStampPng(stampRaw);
+    final signatureBytes =
+        StampSignatureHelper.prepareSignaturePng(settings.signature);
     final dateText = PriceListsViewModel.formatDate(
       (generatedDate ?? DateTime.now()).toIso8601String().substring(0, 10),
     );
@@ -312,60 +314,90 @@ class PriceListPdfBuilder {
           ],
         ),
         pw.Container(
-          width: 175,
-          padding: const pw.EdgeInsets.all(8),
+          width: 195,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: pw.BoxDecoration(
             border: pw.Border.all(color: _slateDark, width: 2),
             borderRadius: const pw.BorderRadius.all(pw.Radius.circular(8)),
           ),
           child: pw.Column(
+            mainAxisSize: pw.MainAxisSize.min,
             children: [
               if (stampBytes != null)
                 pw.Image(
                   pw.MemoryImage(stampBytes),
-                  height: 30,
+                  height: 44,
+                  width: 152,
                   fit: pw.BoxFit.contain,
                 )
               else
                 pw.Text(
                   'TOWN TREASURE GROCERIES',
                   style: pw.TextStyle(
-                    fontSize: 7.5,
+                    fontSize: 8.5,
                     fontWeight: pw.FontWeight.bold,
                   ),
                 ),
-              pw.SizedBox(height: 4),
-              pw.Text(
-                'APPROVED PRICING',
-                style: pw.TextStyle(
-                  fontSize: 10,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.black,
+              pw.SizedBox(height: 5),
+              pw.Container(
+                padding:
+                    const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                decoration: const pw.BoxDecoration(
+                  border: pw.Border.symmetric(
+                    horizontal: pw.BorderSide(color: _slateDark, width: 0.7),
+                  ),
+                ),
+                child: pw.Text(
+                  'APPROVED PRICING',
+                  style: pw.TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.black,
+                    letterSpacing: 0.9,
+                  ),
                 ),
               ),
-              pw.SizedBox(height: 2),
+              pw.SizedBox(height: 3),
               pw.Text(
                 'DATE: $dateText',
-                style: const pw.TextStyle(
-                  fontSize: 7,
-                  color: PdfColor.fromInt(0xFFDC2626),
+                style: pw.TextStyle(
+                  font: pw.Font.courierBold(),
+                  fontSize: 8,
+                  color: const PdfColor.fromInt(0xFFDC2626),
                 ),
               ),
-              pw.SizedBox(height: 4),
-              if (signatureBytes != null)
+              pw.SizedBox(height: 6),
+              if (signatureBytes != null) ...[
                 pw.Image(
                   pw.MemoryImage(signatureBytes),
-                  height: 34,
+                  height: 42,
+                  width: 155,
                   fit: pw.BoxFit.contain,
-                )
-              else ...[
-                pw.SizedBox(height: 16),
-                pw.Divider(color: PdfColors.black, thickness: 0.6),
-                pw.Text(
-                  'Authorized Signature',
-                  style: const pw.TextStyle(fontSize: 6.5),
                 ),
-              ],
+                pw.SizedBox(height: 2),
+              ] else
+                pw.SizedBox(height: 22),
+              pw.Container(
+                width: 140,
+                decoration: const pw.BoxDecoration(
+                  border: pw.Border(
+                    bottom: pw.BorderSide(
+                      color: PdfColor.fromInt(0xFF475569),
+                      width: 0.7,
+                    ),
+                  ),
+                ),
+              ),
+              pw.SizedBox(height: 3),
+              pw.Text(
+                'AUTHORIZED SIGNATORY',
+                style: pw.TextStyle(
+                  fontSize: 6.5,
+                  fontWeight: pw.FontWeight.bold,
+                  color: _textMuted,
+                  letterSpacing: 0.6,
+                ),
+              ),
             ],
           ),
         ),
@@ -395,18 +427,6 @@ class PriceListPdfBuilder {
     try {
       final data = await rootBundle.load(path);
       return data.buffer.asUint8List();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  static Uint8List? _decodeDataUri(String? uri) {
-    if (uri == null || uri.trim().isEmpty) return null;
-    final trimmed = uri.trim();
-    final commaIdx = trimmed.indexOf(',');
-    if (commaIdx < 0) return null;
-    try {
-      return base64Decode(trimmed.substring(commaIdx + 1));
     } catch (_) {
       return null;
     }

@@ -9,6 +9,7 @@ import '../../../data/services/ocr_consensus_service.dart';
 import '../../../data/services/personal_vault_service.dart';
 import '../../../data/services/print_service.dart';
 import '../../../domain/models/models.dart';
+import '../../core/stamp_signature_helper.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/user_friendly_error.dart';
 import '../../core/widgets/app_print_helper.dart';
@@ -25,7 +26,7 @@ class WordRichTextController extends TextEditingController {
   WordRichTextController({super.text});
 
   static final RegExp _inlineMarkers = RegExp(
-    r'(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|__(.+?)__|\*(.+?)\*)',
+    r'(_{3,}|\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|__(?!_)([^\n]+?)(?<!_)__(?!_)|\*(.+?)\*)',
     dotAll: true,
   );
 
@@ -54,7 +55,10 @@ class WordRichTextController extends TextEditingController {
         );
       }
 
-      if (m.group(2) != null) {
+      final full = m.group(0) ?? '';
+      if (full.startsWith('___')) {
+        children.add(TextSpan(style: style, text: full));
+      } else if (m.group(2) != null) {
         final inner = m.group(2)!;
         children.add(TextSpan(style: markerStyle, text: '***'));
         children.add(
@@ -1669,6 +1673,10 @@ class _BrandedDocumentEditorScreenState
                       fontSize: 12.5,
                     ),
                   'callout' => b.copyWith(kind: 'callout', fontSize: 10.5),
+                  'signatory' => b.copyWith(
+                      kind: 'signatory',
+                      text: b.isLegacySignatoryParagraph ? '' : b.text,
+                    ),
                   _ => b.copyWith(
                       kind: 'paragraph',
                       bold: false,
@@ -1683,6 +1691,10 @@ class _BrandedDocumentEditorScreenState
               PopupMenuItem(value: 'heading2', child: Text('Heading 2')),
               PopupMenuItem(value: 'heading3', child: Text('Heading 3')),
               PopupMenuItem(value: 'callout', child: Text('Callout Box')),
+              PopupMenuItem(
+                value: 'signatory',
+                child: Text('Signatory & Stamp Grid'),
+              ),
             ],
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1699,6 +1711,7 @@ class _BrandedDocumentEditorScreenState
                       'heading2' => 'Heading 2',
                       'heading3' => 'Heading 3',
                       'callout' => 'Callout',
+                      'signatory' => 'Signatory',
                       'bullet' => 'Bullets',
                       'numbered' => 'Numbered',
                       _ => 'Body',
@@ -2006,6 +2019,20 @@ class _BrandedDocumentEditorScreenState
             ),
             icon: const Icon(Icons.info_outline, size: 16),
             label: const Text('Callout Box'),
+          ),
+          const SizedBox(width: 6),
+          OutlinedButton.icon(
+            key: const Key('btn_insert_signatory'),
+            style:
+                OutlinedButton.styleFrom(visualDensity: VisualDensity.compact),
+            onPressed: () => _insertBlock(
+              BrandedDocBlock(
+                id: AppHelpers.genId(),
+                kind: 'signatory',
+              ),
+            ),
+            icon: const Icon(Icons.fact_check_outlined, size: 16),
+            label: const Text('Signatory Grid'),
           ),
           const SizedBox(width: 6),
           OutlinedButton.icon(
@@ -2574,60 +2601,109 @@ class _BrandedDocumentEditorScreenState
                 // Live Stamp & Signature Preview Footer
                 if (_doc.showStamp || _doc.showSignature) ...[
                   const Divider(height: 28),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: Container(
-                      width: 190,
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        border: Border.all(
-                          color: const Color(0xFF313A43),
-                          width: 1.8,
-                        ),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (_doc.showStamp) ...[
-                            Image.asset(
-                              'assets/stamp.png',
-                              height: 30,
-                              fit: BoxFit.contain,
-                              errorBuilder: (_, _, _) => const Text(
-                                'TOWN TREASURE LIMITED',
-                                style: TextStyle(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
+                  Builder(
+                    builder: (context) {
+                      final liveSigBytes =
+                          StampSignatureHelper.prepareSignaturePng(
+                        widget.vault.settings.signature,
+                      );
+                      return Align(
+                        alignment: Alignment.centerRight,
+                        child: Container(
+                          width: 210,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            border: Border.all(
+                              color: const Color(0xFF313A43),
+                              width: 1.9,
+                            ),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_doc.showStamp) ...[
+                                Image.asset(
+                                  'assets/stamp.png',
+                                  height: 50,
+                                  fit: BoxFit.contain,
+                                  errorBuilder: (_, _, _) => const Text(
+                                    'TOWN TREASURE LIMITED',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
                                 ),
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              _doc.stampCaption,
-                              style: const TextStyle(
-                                fontSize: 10.5,
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.6,
-                              ),
-                            ),
-                          ],
-                          if (_doc.showSignature) ...[
-                            const SizedBox(height: 4),
-                            Text(
-                              widget.vault.settings.signature?.isNotEmpty == true
-                                  ? '✓ Saved Signature Attached'
-                                  : 'Authorized Signature Line',
-                              style: const TextStyle(
-                                fontSize: 10,
-                                color: AppTheme.forestGreen,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
+                                const SizedBox(height: 4),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                    vertical: 2,
+                                  ),
+                                  decoration: const BoxDecoration(
+                                    border: Border.symmetric(
+                                      horizontal: BorderSide(
+                                        color: Color(0xFF313A43),
+                                        width: 0.8,
+                                      ),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    _doc.stampCaption,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: 0.8,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                              if (_doc.showSignature) ...[
+                                const SizedBox(height: 6),
+                                if (liveSigBytes != null)
+                                  Image.memory(
+                                    liveSigBytes,
+                                    height: 44,
+                                    fit: BoxFit.contain,
+                                  )
+                                else
+                                  const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 8),
+                                    child: Text(
+                                      'Authorized Signature Line',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: AppTheme.forestGreen,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                const SizedBox(height: 3),
+                                Container(
+                                  width: 145,
+                                  height: 1,
+                                  color: AppTheme.borderSubtle,
+                                ),
+                                const SizedBox(height: 3),
+                                const Text(
+                                  'AUTHORIZED SIGNATORY',
+                                  style: TextStyle(
+                                    fontSize: 8.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                    color: AppTheme.slateMuted,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ],
               ],
@@ -2717,7 +2793,9 @@ class _BrandedDocumentEditorScreenState
                         )
                       : block.isTable
                           ? _buildInteractiveTableWidget(block)
-                          : _buildBlockTextField(block),
+                          : block.isSignatory
+                              ? _buildInteractiveSignatoryWidget(block)
+                              : _buildBlockTextField(block),
                 ),
                 PopupMenuButton<String>(
                   tooltip: 'Block Actions',
@@ -2868,6 +2946,195 @@ class _BrandedDocumentEditorScreenState
         _doc = _doc.copyWith(blocks: nextBlocks);
         _scheduleAutoSave();
       },
+    );
+  }
+
+  Widget _buildInteractiveSignatoryWidget(BrandedDocBlock block) {
+    final dispatchHint =
+        block.isLegacySignatoryParagraph ? '' : block.text.trim();
+
+    Widget previewLine(String label, {String value = ''}) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.slateMuted,
+              ),
+            ),
+            Container(
+              width: double.infinity,
+              height: 22,
+              alignment: Alignment.bottomLeft,
+              padding: const EdgeInsets.only(bottom: 2),
+              decoration: const BoxDecoration(
+                border: Border(
+                  bottom: BorderSide(color: Color(0xFF475569), width: 1),
+                ),
+              ),
+              child: value.isNotEmpty
+                  ? Text(
+                      value,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.slateInk,
+                      ),
+                    )
+                  : null,
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Container(
+      key: Key('signatory_block_${block.id}'),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF94A3B8)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(7)),
+              border: Border(
+                bottom: BorderSide(color: Color(0xFFCBD5E1)),
+              ),
+            ),
+            child: const Row(
+              children: [
+                Icon(
+                  Icons.fact_check_outlined,
+                  size: 15,
+                  color: AppTheme.forestGreen,
+                ),
+                SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'DISPATCH & RECEIVING SIGNATORY GRID',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.4,
+                      color: AppTheme.slateInk,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(10),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final stacked = constraints.maxWidth < 430;
+                final dispatchedCol = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '1. DISPATCHED BY',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.forestGreen,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    previewLine('Full Name:'),
+                    previewLine('Dispatcher Signature:'),
+                    previewLine('Dispatch Time / Vehicle:', value: dispatchHint),
+                  ],
+                );
+                final receivedCol = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '2. RECEIVED BY',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.forestGreen,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    previewLine('Full Name & Designation:'),
+                    previewLine('Receiver Signature:'),
+                    previewLine('Arrival Date & Time:'),
+                  ],
+                );
+                final stampCol = Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      '3. CLIENT STAMP',
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.forestGreen,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      height: stacked ? 68 : 112,
+                      width: double.infinity,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFAFAFA),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                      ),
+                      child: const Text(
+                        'Official Receiving\nStamp & Date',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: AppTheme.slateMuted,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+
+                if (stacked) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      dispatchedCol,
+                      const Divider(height: 16),
+                      receivedCol,
+                      const SizedBox(height: 6),
+                      stampCol,
+                    ],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 38, child: dispatchedCol),
+                    const SizedBox(width: 10),
+                    Expanded(flex: 38, child: receivedCol),
+                    const SizedBox(width: 10),
+                    Expanded(flex: 26, child: stampCol),
+                  ],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
     );
   }
 

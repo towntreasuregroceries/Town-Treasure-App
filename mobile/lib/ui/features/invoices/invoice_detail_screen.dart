@@ -879,8 +879,11 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                           Align(
                             alignment: Alignment.centerRight,
                             child: Container(
-                              width: 195,
-                              padding: const EdgeInsets.all(10),
+                              width: 210,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 12,
+                                vertical: 10,
+                              ),
                               decoration: BoxDecoration(
                                 border: Border.all(
                                   color: AppTheme.slateDark,
@@ -892,7 +895,7 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                                 children: [
                                   Image.asset(
                                     'assets/stamp.png',
-                                    height: 36,
+                                    height: 52,
                                     fit: BoxFit.contain,
                                     errorBuilder: (_, _, _) => const Text(
                                       'TOWN TREASURE GROCERIES',
@@ -910,32 +913,52 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                                     style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w900,
-                                      letterSpacing: 0.8,
+                                      letterSpacing: 0.9,
                                     ),
                                   ),
                                   Text(
                                     'DATE: ${InvoiceFormatters.formatDisplayDate(InvoiceFormatters.todayIso())}',
                                     style: const TextStyle(
                                       fontSize: 10,
+                                      fontWeight: FontWeight.w700,
                                       fontFamily: 'monospace',
                                       color: AppTheme.danger,
                                     ),
                                   ),
-                                  const SizedBox(height: 4),
-                                  if (signatureBytes != null)
+                                  const SizedBox(height: 6),
+                                  if (signatureBytes != null) ...[
                                     Image.memory(
                                       signatureBytes,
-                                      height: 36,
+                                      height: 46,
                                       fit: BoxFit.contain,
-                                    )
-                                  else
-                                    const Text(
-                                      'No saved signature',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        color: AppTheme.slateMuted,
+                                    ),
+                                    const SizedBox(height: 2),
+                                  ] else
+                                    const Padding(
+                                      padding: EdgeInsets.symmetric(vertical: 8),
+                                      child: Text(
+                                        'No saved signature',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: AppTheme.slateMuted,
+                                        ),
                                       ),
                                     ),
+                                  Container(
+                                    width: 150,
+                                    height: 1,
+                                    color: AppTheme.borderSubtle,
+                                  ),
+                                  const SizedBox(height: 3),
+                                  const Text(
+                                    'AUTHORIZED SIGNATORY',
+                                    style: TextStyle(
+                                      fontSize: 8.5,
+                                      fontWeight: FontWeight.w700,
+                                      letterSpacing: 0.5,
+                                      color: AppTheme.slateMuted,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),

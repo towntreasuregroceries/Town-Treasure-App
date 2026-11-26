@@ -1,8 +1,8 @@
 {
-  "version": "1.2.7",
-  "buildNumber": 2021,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.7/TownTreasureGroceries.apk",
-  "sha256": "61cc3b288a122fc0111b4d0affdb50d069536ac4543b1ee67a85e26315644daa",
-  "releaseNotes": "v1.2.7 (Official Release Parity): Smart OCR Delivery Note Studio, 1-tap Invoice-to-Delivery-Note conversion, LPO price hydration, and optional KRA PIN toggles across all documents.",
+  "version": "1.2.8",
+  "buildNumber": 2022,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.8/TownTreasureGroceries.apk",
+  "sha256": "0e01852ffe1c5c323b9b06ccdee40b9f467e067986a6e17ae2e42b1bfa69a183",
+  "releaseNotes": "v1.2.8 (Official Release Parity): Redesigned Delivery Note Signatory & Client Stamp Verification Grid (auto-upgrades existing Delivery Notes) + crisp tight-cropped Official Stamp & Signature across all documents.",
   "mandatory": false
 }

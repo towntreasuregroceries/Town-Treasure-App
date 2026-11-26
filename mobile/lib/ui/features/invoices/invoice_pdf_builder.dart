@@ -1,8 +1,6 @@
-import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -11,6 +9,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
+import '../../core/stamp_signature_helper.dart';
 import 'invoice_formatters.dart';
 
 /// Builds crisp A4 PDFs matching `generateInvoicePDF` in `views.js` and handles
@@ -74,14 +73,13 @@ class InvoicePdfBuilder {
 
     final logoBytes = logoBytesOverride ?? await _loadAssetBytes('assets/logo.png');
     final stampRaw = stampBytesOverride ?? await _loadAssetBytes('assets/stamp.png');
-    final stampGrayscale =
-        (stampRaw != null && stampRaw.isNotEmpty) ? _toGrayscalePng(stampRaw) : null;
+    final stampPrepared = StampSignatureHelper.prepareStampPng(stampRaw);
     final signatureBytes = decodeSignatureDataUrl(settings.signature);
 
     final logoImage =
         (logoBytes != null && logoBytes.isNotEmpty) ? pw.MemoryImage(logoBytes) : null;
-    final stampImage = (stampGrayscale != null && stampGrayscale.isNotEmpty)
-        ? pw.MemoryImage(stampGrayscale)
+    final stampImage = (stampPrepared != null && stampPrepared.isNotEmpty)
+        ? pw.MemoryImage(stampPrepared)
         : null;
     final sigImage = (signatureBytes != null && signatureBytes.isNotEmpty)
         ? pw.MemoryImage(signatureBytes)
@@ -1064,11 +1062,11 @@ class InvoicePdfBuilder {
           ],
         ),
         pw.Container(
-          width: 185,
-          padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          width: 200,
+          padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           decoration: pw.BoxDecoration(
-            border: pw.Border.all(color: _slateDark, width: 2.2),
-            borderRadius: pw.BorderRadius.circular(10),
+            border: pw.Border.all(color: _slateDark, width: 2.0),
+            borderRadius: pw.BorderRadius.circular(8),
           ),
           child: pw.Column(
             mainAxisSize: pw.MainAxisSize.min,
@@ -1076,8 +1074,8 @@ class InvoicePdfBuilder {
               if (stampImage != null)
                 pw.Image(
                   stampImage,
-                  height: 34,
-                  width: 135,
+                  height: 46,
+                  width: 156,
                   fit: pw.BoxFit.contain,
                 )
               else
@@ -1085,57 +1083,71 @@ class InvoicePdfBuilder {
                   'TOWN TREASURE GROCERIES',
                   textAlign: pw.TextAlign.center,
                   style: pw.TextStyle(
-                    fontSize: 8,
+                    fontSize: 8.5,
                     fontWeight: pw.FontWeight.bold,
                     color: PdfColors.black,
                   ),
                 ),
-              pw.SizedBox(height: 4),
-              pw.Text(
-                invoice.isPaid ? 'PAID & PROCESSED' : 'AUTHORIZED',
-                style: pw.TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.black,
-                  letterSpacing: 0.8,
+              pw.SizedBox(height: 5),
+              pw.Container(
+                padding:
+                    const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                decoration: const pw.BoxDecoration(
+                  border: pw.Border.symmetric(
+                    horizontal: pw.BorderSide(color: _slateDark, width: 0.7),
+                  ),
+                ),
+                child: pw.Text(
+                  invoice.isPaid ? 'PAID & PROCESSED' : 'AUTHORIZED',
+                  style: pw.TextStyle(
+                    fontSize: 11.0,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.black,
+                    letterSpacing: 1.0,
+                  ),
                 ),
               ),
-              pw.SizedBox(height: 2),
+              pw.SizedBox(height: 3),
               pw.Text(
                 'DATE: $stampDate',
                 style: pw.TextStyle(
-                  font: pw.Font.courier(),
-                  fontSize: 7.5,
+                  font: pw.Font.courierBold(),
+                  fontSize: 8.2,
                   color: _stampRed,
                 ),
               ),
-              pw.SizedBox(height: 4),
-              if (sigImage != null)
+              pw.SizedBox(height: 6),
+              if (sigImage != null) ...[
                 pw.Image(
                   sigImage,
-                  height: 40,
-                  width: 150,
+                  height: 44,
+                  width: 160,
                   fit: pw.BoxFit.contain,
-                )
-              else ...[
-                pw.SizedBox(height: 18),
-                pw.Container(
-                  width: 110,
-                  decoration: const pw.BoxDecoration(
-                    border: pw.Border(
-                      bottom: pw.BorderSide(color: PdfColors.black, width: 0.6),
+                ),
+                pw.SizedBox(height: 2),
+              ] else
+                pw.SizedBox(height: 24),
+              pw.Container(
+                width: 145,
+                decoration: const pw.BoxDecoration(
+                  border: pw.Border(
+                    bottom: pw.BorderSide(
+                      color: PdfColor.fromInt(0xFF475569),
+                      width: 0.7,
                     ),
                   ),
                 ),
-                pw.SizedBox(height: 2),
-                pw.Text(
-                  'Sign Here',
-                  style: const pw.TextStyle(
-                    fontSize: 6.5,
-                    color: PdfColors.black,
-                  ),
+              ),
+              pw.SizedBox(height: 3),
+              pw.Text(
+                'AUTHORIZED SIGNATORY',
+                style: pw.TextStyle(
+                  fontSize: 6.5,
+                  fontWeight: pw.FontWeight.bold,
+                  color: _textMuted,
+                  letterSpacing: 0.6,
                 ),
-              ],
+              ),
             ],
           ),
         ),
@@ -1269,18 +1281,7 @@ class InvoicePdfBuilder {
   }
 
   static Uint8List? decodeSignatureDataUrl(String? signature) {
-    if (signature == null || signature.trim().isEmpty) return null;
-    final trimmed = signature.trim();
-    final match = RegExp(
-      r'^data:image\/(?:png|jpe?g|webp|gif);base64,([A-Za-z0-9+/=]+)$',
-      caseSensitive: false,
-    ).firstMatch(trimmed);
-    if (match == null) return null;
-    try {
-      return base64Decode(match.group(1)!);
-    } catch (_) {
-      return null;
-    }
+    return StampSignatureHelper.prepareSignaturePng(signature);
   }
 
   static Future<Uint8List?> _loadAssetBytes(String assetPath) async {
@@ -1289,17 +1290,6 @@ class InvoicePdfBuilder {
       return data.buffer.asUint8List();
     } catch (_) {
       return null;
-    }
-  }
-
-  static Uint8List? _toGrayscalePng(Uint8List rawBytes) {
-    try {
-      final decoded = img.decodeImage(rawBytes);
-      if (decoded == null) return rawBytes;
-      final gray = img.grayscale(decoded);
-      return Uint8List.fromList(img.encodePng(gray));
-    } catch (_) {
-      return rawBytes;
     }
   }
 

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:pdf/pdf.dart';
 import 'package:provider/provider.dart';
 import 'package:town_treasure_groceries/data/repositories/vault_repository.dart';
@@ -11,6 +12,7 @@ import 'package:town_treasure_groceries/data/services/crypto_service.dart';
 import 'package:town_treasure_groceries/data/services/local_storage_service.dart';
 import 'package:town_treasure_groceries/data/services/ocr_consensus_service.dart';
 import 'package:town_treasure_groceries/domain/models/models.dart';
+import 'package:town_treasure_groceries/ui/core/stamp_signature_helper.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
 import 'package:town_treasure_groceries/ui/features/documents/branded_document_pdf_builder.dart';
 import 'package:town_treasure_groceries/ui/features/documents/document_ocr_converter.dart';
@@ -62,12 +64,22 @@ String _extractPdfTextStreams(Uint8List pdfBytes) {
   final rawLatin = latin1.decode(pdfBytes);
   final buf = StringBuffer(rawLatin);
   final streamRegex = RegExp(r'stream\r?\n([\s\S]*?)\r?\nendstream');
+  final tjArrayRegex = RegExp(r'\[((?:\([^\)]*\)|-?\d+(?:\.\d+)?|\s)+)\]\s*TJ');
+  final literalParenRegex = RegExp(r'\(([^\)]*)\)');
   for (final m in streamRegex.allMatches(rawLatin)) {
     final chunk = latin1.encode(m.group(1)!);
     try {
       final inflated = zlib.decode(chunk);
+      final decoded = latin1.decode(inflated, allowInvalid: true);
       buf.write('\n');
-      buf.write(latin1.decode(inflated, allowInvalid: true));
+      buf.write(decoded);
+      for (final tj in tjArrayRegex.allMatches(decoded)) {
+        final joined = literalParenRegex
+            .allMatches(tj.group(1)!)
+            .map((p) => p.group(1)!)
+            .join();
+        buf.write('\n$joined');
+      }
     } catch (_) {}
   }
   return buf.toString();
@@ -102,6 +114,88 @@ void main() {
 
       final unbolded = BrandedInlineParser.toggleSelectionMarker(bolded, '**');
       expect(unbolded.text, 'Total KES 15,000');
+
+      // Runs of 3+ underscores must stay verbatim and never underline adjacent labels
+      final fillInSpans = BrandedInlineParser.parse(
+        '**Dispatched By:** ________________________    **Received By (Name & Stamp):** ________________________\n**Receiver Signature:** ________________________    **Arrival Time:** _______________',
+      );
+      expect(
+        fillInSpans.any((s) => s.text == '________________________' && !s.underline),
+        isTrue,
+      );
+      expect(
+        fillInSpans
+            .where((s) => s.text.contains('Received By') || s.text.contains('Arrival Time'))
+            .every((s) => !s.underline),
+        isTrue,
+      );
+    });
+
+    test(
+        'Delivery Note signatory grid upgrades legacy underscore paragraphs and StampSignatureHelper tight-crops stamp & signature',
+        () async {
+      // 1. Legacy saved Delivery Note paragraph auto-upgrades to signatory grid in PDF
+      final legacyDn = BrandedDocument(
+        id: 'dn_legacy_weston',
+        title: 'Delivery Note - Weston Hotel',
+        documentType: 'DELIVERY NOTE',
+        referenceNumber: 'DN-TTG-C0XI',
+        date: '2026-10-30',
+        stampCaption: 'DISPATCHED',
+        blocks: const [
+          BrandedDocBlock(
+            id: 'b_legacy_sig',
+            kind: 'paragraph',
+            text:
+                '**Dispatched By:** ________________________    **Received By (Name & Stamp):** ________________________\n**Receiver Signature:** ________________________    **Arrival Time:** _______________',
+          ),
+        ],
+      );
+      expect(legacyDn.blocks.single.isLegacySignatoryParagraph, isTrue);
+      expect(legacyDn.blocks.single.isSignatory, isTrue);
+
+      final pdfBytes = await BrandedDocumentPdfBuilder.buildPdfBytes(
+        document: legacyDn,
+      );
+      final pdfText = _extractPdfTextStreams(pdfBytes);
+      expect(pdfText, contains('DISPATCH'));
+      expect(pdfText, contains('RECEIVING'));
+      expect(pdfText, contains('SIGNATORY'));
+      expect(pdfText, contains('Dispatcher'));
+      expect(pdfText, contains('Receiver'));
+      expect(pdfText, contains('Arrival'));
+      expect(pdfText, contains('Official'));
+      expect(pdfText, contains('AUTHORIZED'));
+
+      // 2. Padded 200x200 stamp PNG trims down tightly around central emblem
+      final rawStamp = img.Image(width: 200, height: 200, numChannels: 4);
+      for (var y = 70; y <= 130; y++) {
+        for (var x = 40; x <= 160; x++) {
+          rawStamp.setPixelRgba(x, y, 25, 75, 45, 255);
+        }
+      }
+      final trimmedStampBytes = StampSignatureHelper.prepareStampPng(
+        Uint8List.fromList(img.encodePng(rawStamp)),
+      )!;
+      final trimmedStamp = img.decodePng(trimmedStampBytes)!;
+      expect(trimmedStamp.width, lessThan(145));
+      expect(trimmedStamp.height, lessThan(85));
+
+      // 3. Signature with wide empty canvas + isolated corner noise speck crops tightly around ink
+      final rawSig = img.Image(width: 300, height: 220, numChannels: 4);
+      rawSig.setPixelRgba(5, 5, 10, 20, 120, 255); // isolated dust speck
+      for (var y = 100; y <= 118; y++) {
+        for (var x = 110; x <= 190; x++) {
+          rawSig.setPixelRgba(x, y, 10, 20, 120, 255);
+        }
+      }
+      final rawSigUri =
+          'data:image/png;base64,${base64Encode(img.encodePng(rawSig))}';
+      final enhancedSigBytes =
+          StampSignatureHelper.prepareSignaturePng(rawSigUri)!;
+      final enhancedSig = img.decodePng(enhancedSigBytes)!;
+      expect(enhancedSig.width, lessThan(115));
+      expect(enhancedSig.height, lessThan(50));
     });
 
     test('saves, deletes, and merges BrandedDocuments in VaultRepository',

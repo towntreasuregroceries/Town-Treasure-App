@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:image/image.dart' as img;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -9,8 +8,8 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
+import '../../core/stamp_signature_helper.dart';
 import '../invoices/invoice_formatters.dart';
-import '../invoices/invoice_pdf_builder.dart';
 
 /// Builds official Town Treasure Limited A4 / Letter PDFs for custom
 /// [BrandedDocument] records, sharing the exact corporate letterhead curve,
@@ -62,15 +61,14 @@ class BrandedDocumentPdfBuilder {
         logoBytesOverride ?? await _loadAssetBytes('assets/logo.png');
     final stampRaw =
         stampBytesOverride ?? await _loadAssetBytes('assets/stamp.png');
-    final stampGrayscale =
-        (stampRaw != null && stampRaw.isNotEmpty) ? _toGrayscalePng(stampRaw) : null;
-    final sigBytes = InvoicePdfBuilder.decodeSignatureDataUrl(settings.signature);
+    final stampPrepared = StampSignatureHelper.prepareStampPng(stampRaw);
+    final sigBytes = StampSignatureHelper.prepareSignaturePng(settings.signature);
 
     final logoImage = (logoBytes != null && logoBytes.isNotEmpty)
         ? pw.MemoryImage(logoBytes)
         : null;
-    final stampImage = (stampGrayscale != null && stampGrayscale.isNotEmpty)
-        ? pw.MemoryImage(stampGrayscale)
+    final stampImage = (stampPrepared != null && stampPrepared.isNotEmpty)
+        ? pw.MemoryImage(stampPrepared)
         : null;
     final sigImage =
         (sigBytes != null && sigBytes.isNotEmpty) ? pw.MemoryImage(sigBytes) : null;
@@ -593,6 +591,16 @@ class BrandedDocumentPdfBuilder {
         continue;
       }
 
+      if (block.isSignatory) {
+        widgets.add(
+          pw.Padding(
+            padding: const pw.EdgeInsets.symmetric(vertical: 8),
+            child: _buildSignatoryGrid(block),
+          ),
+        );
+        continue;
+      }
+
       final leftIndent = block.indent.clamp(0, 4) * 18.0;
       final textAlign = _resolveTextAlign(block.align);
       final rich = _buildRichText(
@@ -855,6 +863,225 @@ class BrandedDocumentPdfBuilder {
     );
   }
 
+  static pw.Widget _buildSignatoryGrid(BrandedDocBlock block) {
+    final dispatchHint =
+        block.isLegacySignatoryParagraph ? '' : block.text.trim();
+    const borderCol = PdfColor.fromInt(0xFF94A3B8);
+    const dividerCol = PdfColor.fromInt(0xFFCBD5E1);
+    const lineCol = PdfColor.fromInt(0xFF334155);
+    const headerBg = PdfColor.fromInt(0xFFF1F5F9);
+    const labelCol = PdfColor.fromInt(0xFF475569);
+
+    pw.Widget buildWritingField({
+      required String label,
+      required double writingHeight,
+      String prefill = '',
+    }) {
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(
+            label,
+            style: pw.TextStyle(
+              fontSize: 7.8,
+              fontWeight: pw.FontWeight.bold,
+              color: labelCol,
+            ),
+          ),
+          pw.Container(
+            width: double.infinity,
+            height: writingHeight,
+            alignment: pw.Alignment.bottomLeft,
+            padding: const pw.EdgeInsets.only(bottom: 3),
+            decoration: const pw.BoxDecoration(
+              border: pw.Border(
+                bottom: pw.BorderSide(color: lineCol, width: 0.8),
+              ),
+            ),
+            child: prefill.isNotEmpty
+                ? pw.Text(
+                    _sanitizeType1Text(prefill),
+                    maxLines: 1,
+                    style: pw.TextStyle(
+                      fontSize: 9.0,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _textDark,
+                    ),
+                  )
+                : null,
+          ),
+        ],
+      );
+    }
+
+    return pw.Container(
+      width: double.infinity,
+      decoration: pw.BoxDecoration(
+        color: PdfColors.white,
+        borderRadius: pw.BorderRadius.circular(6),
+        border: pw.Border.all(color: borderCol, width: 0.9),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          pw.Container(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: const pw.BoxDecoration(
+              color: headerBg,
+              borderRadius: pw.BorderRadius.vertical(
+                top: pw.Radius.circular(5.2),
+              ),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text(
+                  'DISPATCH & RECEIVING SIGNATORY',
+                  style: pw.TextStyle(
+                    fontSize: 8.5,
+                    fontWeight: pw.FontWeight.bold,
+                    color: _slateDark,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                pw.Text(
+                  'Complete in ink upon physical verification',
+                  style: pw.TextStyle(
+                    fontSize: 7.4,
+                    fontStyle: pw.FontStyle.italic,
+                    color: _textMuted,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          pw.Container(height: 0.8, color: dividerCol),
+          pw.Padding(
+            padding: const pw.EdgeInsets.fromLTRB(12, 10, 12, 12),
+            child: pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Expanded(
+                  flex: 38,
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        '1. DISPATCHED BY (SUPPLIER)',
+                        style: pw.TextStyle(
+                          fontSize: 7.8,
+                          fontWeight: pw.FontWeight.bold,
+                          color: _forestGreen,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                      pw.SizedBox(height: 7),
+                      buildWritingField(
+                        label: 'Full Name:',
+                        writingHeight: 24,
+                      ),
+                      pw.SizedBox(height: 9),
+                      buildWritingField(
+                        label: 'Dispatcher Signature:',
+                        writingHeight: 28,
+                      ),
+                      pw.SizedBox(height: 9),
+                      buildWritingField(
+                        label: 'Dispatch Time / Vehicle:',
+                        writingHeight: 20,
+                        prefill: dispatchHint,
+                      ),
+                    ],
+                  ),
+                ),
+                pw.Container(
+                  width: 0.8,
+                  height: 128,
+                  margin: const pw.EdgeInsets.symmetric(horizontal: 10),
+                  color: dividerCol,
+                ),
+                pw.Expanded(
+                  flex: 38,
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        '2. RECEIVED BY (CLIENT)',
+                        style: pw.TextStyle(
+                          fontSize: 7.8,
+                          fontWeight: pw.FontWeight.bold,
+                          color: _forestGreen,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                      pw.SizedBox(height: 7),
+                      buildWritingField(
+                        label: 'Full Name & Designation:',
+                        writingHeight: 24,
+                      ),
+                      pw.SizedBox(height: 9),
+                      buildWritingField(
+                        label: 'Receiver Signature:',
+                        writingHeight: 28,
+                      ),
+                      pw.SizedBox(height: 9),
+                      buildWritingField(
+                        label: 'Arrival Date & Time:',
+                        writingHeight: 20,
+                      ),
+                    ],
+                  ),
+                ),
+                pw.SizedBox(width: 10),
+                pw.Expanded(
+                  flex: 26,
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        '3. CLIENT STAMP',
+                        style: pw.TextStyle(
+                          fontSize: 7.8,
+                          fontWeight: pw.FontWeight.bold,
+                          color: _forestGreen,
+                          letterSpacing: 0.4,
+                        ),
+                      ),
+                      pw.SizedBox(height: 7),
+                      pw.Container(
+                        width: double.infinity,
+                        height: 118,
+                        padding: const pw.EdgeInsets.all(6),
+                        alignment: pw.Alignment.bottomCenter,
+                        decoration: pw.BoxDecoration(
+                          color: const PdfColor.fromInt(0xFFFAFAFA),
+                          borderRadius: pw.BorderRadius.circular(5),
+                          border: pw.Border.all(
+                            color: borderCol,
+                            width: 0.8,
+                            style: pw.BorderStyle.dashed,
+                          ),
+                        ),
+                        child: pw.Text(
+                          'Official Receiving\nStamp & Date',
+                          textAlign: pw.TextAlign.center,
+                          style: const pw.TextStyle(
+                            fontSize: 6.8,
+                            color: PdfColor.fromInt(0xFF94A3B8),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   static pw.Widget _buildAuthorizationFooter({
     required BrandedDocument document,
     required String displayDate,
@@ -905,11 +1132,12 @@ class BrandedDocumentPdfBuilder {
           pw.SizedBox.shrink(),
         if (showRightBox)
           pw.Container(
-            width: 185,
-            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            width: 200,
+            padding:
+                const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: pw.BoxDecoration(
               border: pw.Border.all(color: _slateDark, width: 2.0),
-              borderRadius: pw.BorderRadius.circular(10),
+              borderRadius: pw.BorderRadius.circular(8),
             ),
             child: pw.Column(
               mainAxisSize: pw.MainAxisSize.min,
@@ -918,8 +1146,8 @@ class BrandedDocumentPdfBuilder {
                   if (stampImage != null)
                     pw.Image(
                       stampImage,
-                      height: 34,
-                      width: 135,
+                      height: 46,
+                      width: 156,
                       fit: pw.BoxFit.contain,
                     )
                   else
@@ -927,62 +1155,78 @@ class BrandedDocumentPdfBuilder {
                       'TOWN TREASURE LIMITED',
                       textAlign: pw.TextAlign.center,
                       style: pw.TextStyle(
-                        fontSize: 8,
+                        fontSize: 8.5,
                         fontWeight: pw.FontWeight.bold,
                         color: PdfColors.black,
                       ),
                     ),
-                  pw.SizedBox(height: 4),
-                  pw.Text(
-                    document.stampCaption.trim().isNotEmpty
-                        ? document.stampCaption.trim().toUpperCase()
-                        : 'AUTHORIZED',
-                    style: pw.TextStyle(
-                      fontSize: 10.5,
-                      fontWeight: pw.FontWeight.bold,
-                      color: PdfColors.black,
-                      letterSpacing: 0.7,
+                  pw.SizedBox(height: 5),
+                  pw.Container(
+                    padding: const pw.EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 2.5,
+                    ),
+                    decoration: const pw.BoxDecoration(
+                      border: pw.Border.symmetric(
+                        horizontal:
+                            pw.BorderSide(color: _slateDark, width: 0.7),
+                      ),
+                    ),
+                    child: pw.Text(
+                      document.stampCaption.trim().isNotEmpty
+                          ? document.stampCaption.trim().toUpperCase()
+                          : 'AUTHORIZED',
+                      style: pw.TextStyle(
+                        fontSize: 10.8,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.black,
+                        letterSpacing: 1.0,
+                      ),
                     ),
                   ),
-                  pw.SizedBox(height: 2),
+                  pw.SizedBox(height: 3),
                   pw.Text(
                     'DATE: $displayDate',
                     style: pw.TextStyle(
-                      font: pw.Font.courier(),
-                      fontSize: 7.5,
+                      font: pw.Font.courierBold(),
+                      fontSize: 8.2,
                       color: _stampRed,
                     ),
                   ),
                 ],
                 if (document.showSignature) ...[
-                  pw.SizedBox(height: 4),
-                  if (sigImage != null)
+                  pw.SizedBox(height: 6),
+                  if (sigImage != null) ...[
                     pw.Image(
                       sigImage,
-                      height: 38,
-                      width: 145,
+                      height: 44,
+                      width: 160,
                       fit: pw.BoxFit.contain,
-                    )
-                  else ...[
-                    pw.SizedBox(height: 16),
-                    pw.Container(
-                      width: 110,
-                      decoration: const pw.BoxDecoration(
-                        border: pw.Border(
-                          bottom:
-                              pw.BorderSide(color: PdfColors.black, width: 0.6),
+                    ),
+                    pw.SizedBox(height: 2),
+                  ] else
+                    pw.SizedBox(height: 24),
+                  pw.Container(
+                    width: 145,
+                    decoration: const pw.BoxDecoration(
+                      border: pw.Border(
+                        bottom: pw.BorderSide(
+                          color: PdfColor.fromInt(0xFF475569),
+                          width: 0.7,
                         ),
                       ),
                     ),
-                    pw.SizedBox(height: 2),
-                    pw.Text(
-                      'Authorized Signature',
-                      style: const pw.TextStyle(
-                        fontSize: 6.5,
-                        color: PdfColors.black,
-                      ),
+                  ),
+                  pw.SizedBox(height: 3),
+                  pw.Text(
+                    'AUTHORIZED SIGNATORY',
+                    style: pw.TextStyle(
+                      fontSize: 6.5,
+                      fontWeight: pw.FontWeight.bold,
+                      color: _textMuted,
+                      letterSpacing: 0.6,
                     ),
-                  ],
+                  ),
                 ],
               ],
             ),
@@ -1027,17 +1271,6 @@ class BrandedDocumentPdfBuilder {
       return data.buffer.asUint8List();
     } catch (_) {
       return null;
-    }
-  }
-
-  static Uint8List? _toGrayscalePng(Uint8List rawBytes) {
-    try {
-      final decoded = img.decodeImage(rawBytes);
-      if (decoded == null) return rawBytes;
-      final gray = img.grayscale(decoded);
-      return Uint8List.fromList(img.encodePng(gray));
-    } catch (_) {
-      return rawBytes;
     }
   }
 }

@@ -510,11 +510,8 @@ class DocumentOcrConverter {
       blocks.add(
         BrandedDocBlock(
           id: AppHelpers.genId(),
-          kind: 'paragraph',
-          text:
-              '**Dispatched By:** ________________________    **Received By (Name & Stamp):** ________________________\n**Receiver Signature:** ________________________    **Arrival Time:** _______________',
-          fontSize: 10.2,
-          lineSpacing: 1.7,
+          kind: 'signatory',
+          text: cleanDispatch,
         ),
       );
       return blocks;

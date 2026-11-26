@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -9,6 +8,7 @@ import '../../../data/repositories/vault_repository.dart';
 import '../../../data/services/print_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
+import '../../core/stamp_signature_helper.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/user_friendly_error.dart';
 import '../../core/widgets/app_print_helper.dart';
@@ -398,14 +398,7 @@ class _PriceListPreviewScreenState extends State<PriceListPreviewScreen> {
   }
 
   Uint8List? _decodeSignature(String? raw) {
-    if (raw == null || raw.trim().isEmpty) return null;
-    final comma = raw.indexOf(',');
-    if (comma < 0) return null;
-    try {
-      return Uint8List.fromList(base64Decode(raw.substring(comma + 1)));
-    } catch (_) {
-      return null;
-    }
+    return StampSignatureHelper.prepareSignaturePng(raw);
   }
 }
 

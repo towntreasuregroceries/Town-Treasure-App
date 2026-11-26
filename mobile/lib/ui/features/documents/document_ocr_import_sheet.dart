@@ -1087,7 +1087,9 @@ class _DocumentOcrImportSheetState extends State<DocumentOcrImportSheet>
                       child: Text(
                         b.isTable
                             ? '[Table: ${b.tableRows.length} rows]'
-                            : '[${b.kind}] ${b.text}',
+                            : b.isSignatory
+                                ? '[Signatory & Receiving Verification Grid]'
+                                : '[${b.kind}] ${b.text}',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(

@@ -32,7 +32,7 @@ class BrandedInlineParser {
   BrandedInlineParser._();
 
   static final RegExp _tokenPattern = RegExp(
-    r'(\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|__(.+?)__|\*(.+?)\*)',
+    r'(_{3,}|\*\*\*(.+?)\*\*\*|\*\*(.+?)\*\*|__(?!_)([^\n]+?)(?<!_)__(?!_)|\*(.+?)\*)',
     dotAll: true,
   );
 
@@ -67,7 +67,19 @@ class BrandedInlineParser {
         );
       }
 
-      if (match.group(2) != null) {
+      final full = match.group(0) ?? '';
+      if (full.startsWith('___')) {
+        // Preserve fill-in blank lines (3+ underscores) verbatim without
+        // collapsing them or bleeding underline formatting into adjacent text.
+        spans.add(
+          BrandedInlineSpan(
+            text: full,
+            bold: baseBold,
+            italic: baseItalic,
+            underline: baseUnderline,
+          ),
+        );
+      } else if (match.group(2) != null) {
         spans.addAll(
           parse(
             match.group(2)!,
@@ -214,6 +226,23 @@ class BrandedDocBlock {
   bool get isDivider => kind == 'divider';
   bool get isHeading =>
       kind == 'heading1' || kind == 'heading2' || kind == 'heading3';
+
+  /// Detects legacy Delivery Note plain-text underscore signatory paragraphs so
+  /// existing saved Delivery Notes in the vault automatically upgrade to the
+  /// spacious Signatory Verification Grid.
+  bool get isLegacySignatoryParagraph {
+    if (kind != 'paragraph') return false;
+    final lower = text.toLowerCase();
+    if (!RegExp(r'_{4,}').hasMatch(lower)) return false;
+    final hasDispatchAndReceive =
+        lower.contains('dispatched by') && lower.contains('received by');
+    final hasReceiveAndSignTime = lower.contains('received by') &&
+        (lower.contains('signature') || lower.contains('name & sign')) &&
+        lower.contains('time');
+    return hasDispatchAndReceive || hasReceiveAndSignTime;
+  }
+
+  bool get isSignatory => kind == 'signatory' || isLegacySignatoryParagraph;
 
   factory BrandedDocBlock.fromJson(Map<String, dynamic> json) {
     final rawRows = json['tableRows'];
@@ -579,10 +608,14 @@ class BrandedDocument {
             ),
             BrandedDocBlock(
               id: AppHelpers.genId(),
-              kind: 'paragraph',
+              kind: 'callout',
               text:
-                  '**Received By (Name & Sign):** ___________________________    **Time:** ____________',
-              fontSize: 10.5,
+                  '**Receiving Confirmation:** Goods inspected for freshness, grade, and weight upon arrival. Any transit discrepancy must be noted at the time of offloading.',
+              fontSize: 9.8,
+            ),
+            BrandedDocBlock(
+              id: AppHelpers.genId(),
+              kind: 'signatory',
             ),
           ],
           createdAt: nowIso,
