@@ -305,9 +305,12 @@ class DocumentOcrConverter {
     final resolvedName = matchedRestaurant?.name.trim().isNotEmpty == true
         ? matchedRestaurant!.name.trim()
         : recipientName.trim();
-    final resolvedContact = matchedRestaurant?.contact.trim() ?? '';
-    final resolvedAddress = matchedRestaurant?.address.trim() ?? '';
-    final resolvedPhone = matchedRestaurant?.phone.trim() ?? '';
+    final resolvedContact =
+        Restaurant.sanitizeContact(matchedRestaurant?.contact);
+    final resolvedAddress =
+        Restaurant.sanitizeClientAddress(matchedRestaurant?.address);
+    final resolvedPhone =
+        Restaurant.sanitizeClientPhone(matchedRestaurant?.phone);
     final resolvedPin =
         Restaurant.normalizeKraPin(matchedRestaurant?.kraPin);
 
@@ -651,18 +654,16 @@ class DocumentOcrConverter {
       referenceNumber: ref,
       date: ocrResult.date,
       recipientName: matched?.name ?? ocrResult.recipientName,
-      recipientContact:
-          matched?.contact.isNotEmpty == true
-              ? matched!.contact
-              : ocrResult.recipientContact,
+      recipientContact: Restaurant.sanitizeContact(matched?.contact).isNotEmpty
+          ? Restaurant.sanitizeContact(matched!.contact)
+          : Restaurant.sanitizeContact(ocrResult.recipientContact),
       recipientAddress:
-          matched?.address.isNotEmpty == true
-              ? matched!.address
-              : ocrResult.recipientAddress,
-      recipientPhone:
-          matched?.phone.isNotEmpty == true
-              ? matched!.phone
-              : ocrResult.recipientPhone,
+          Restaurant.sanitizeClientAddress(matched?.address).isNotEmpty
+              ? Restaurant.sanitizeClientAddress(matched!.address)
+              : Restaurant.sanitizeClientAddress(ocrResult.recipientAddress),
+      recipientPhone: Restaurant.sanitizeClientPhone(matched?.phone).isNotEmpty
+          ? Restaurant.sanitizeClientPhone(matched!.phone)
+          : Restaurant.sanitizeClientPhone(ocrResult.recipientPhone),
       recipientKraPin: matched?.kraPin.isNotEmpty == true
           ? matched!.kraPin
           : ocrResult.recipientKraPin,

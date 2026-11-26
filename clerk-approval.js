@@ -583,7 +583,7 @@ async function executeClerkApproval() {
         }
         const now = new Date().toISOString();
         const newRestaurant = {
-          id: genId(), name: restName, aliases: [], contact: 'Added from clerk approval',
+          id: genId(), name: restName, aliases: [], contact: '',
           phone: '', address: '', createdAt: now, updatedAt: now
         };
         DB.restaurants = [...(DB.restaurants || []), newRestaurant];

@@ -63,10 +63,12 @@ class PriceListPdfBuilder {
               pw.SizedBox(height: 14),
             ],
             pw.SizedBox(height: 18),
-            _buildOfficialStampRow(
-              stampBytes: stampBytes,
-              signatureBytes: signatureBytes,
-              dateText: dateText,
+            pw.Inseparable(
+              child: _buildOfficialStampRow(
+                stampBytes: stampBytes,
+                signatureBytes: signatureBytes,
+                dateText: dateText,
+              ),
             ),
           ];
           return widgets;

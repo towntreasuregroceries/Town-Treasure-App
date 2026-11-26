@@ -1040,18 +1040,18 @@ class OcrConsensusService {
           (parsed['recipientName'] ?? parsed['recipient_name'] ?? '')
               .toString()
               .trim(),
-      recipientContact:
-          (parsed['recipientContact'] ?? parsed['recipient_contact'] ?? '')
-              .toString()
-              .trim(),
-      recipientAddress:
-          (parsed['recipientAddress'] ?? parsed['recipient_address'] ?? '')
-              .toString()
-              .trim(),
-      recipientPhone:
-          (parsed['recipientPhone'] ?? parsed['recipient_phone'] ?? '')
-              .toString()
-              .trim(),
+      recipientContact: Restaurant.sanitizeContact(
+        (parsed['recipientContact'] ?? parsed['recipient_contact'] ?? '')
+            .toString(),
+      ),
+      recipientAddress: Restaurant.sanitizeClientAddress(
+        (parsed['recipientAddress'] ?? parsed['recipient_address'] ?? '')
+            .toString(),
+      ),
+      recipientPhone: Restaurant.sanitizeClientPhone(
+        (parsed['recipientPhone'] ?? parsed['recipient_phone'] ?? '')
+            .toString(),
+      ),
       recipientKraPin: Restaurant.normalizeKraPin(
         (parsed['recipientKraPin'] ?? parsed['recipient_kra_pin'] ?? '')
             .toString(),
@@ -1804,7 +1804,7 @@ Analyze this document (${isMultiPage ? '${imgList.length} pages — combine all 
 
 RULES:
 1. Identify "documentType" as one of: "DELIVERY NOTE", "QUOTATION", "PROPOSAL", "OFFICIAL LETTER", "MEMORANDUM", "NOTICE", "CONTRACT", or "OFFICIAL DOCUMENT".
-2. Extract metadata if visible: "title", "referenceNumber" (Invoice #, LPO #, Ref #), "date" (YYYY-MM-DD), "recipientName", "recipientContact", "recipientAddress", "recipientPhone", "recipientKraPin", and "subject" (RE: line).
+2. Extract metadata if visible: "title", "referenceNumber" (Invoice #, LPO #, Ref #), "date" (YYYY-MM-DD), "recipientName", "recipientContact", "recipientAddress", "recipientPhone", "recipientKraPin", and "subject" (RE: line). NEVER copy Town Treasure Limited's own supplier details (0708567696, thetowntreasure25@gmail.com, or Town Treasure's seller KRA PIN) into recipient* fields.
 3. Reconstruct the body into ordered "blocks":
    - {"kind": "heading1" | "heading2" | "heading3", "text": "Heading text", "bold": true}
    - {"kind": "paragraph", "text": "Paragraph text using **bold** or *italic* where emphasized"}

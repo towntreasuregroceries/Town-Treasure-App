@@ -198,6 +198,103 @@ void main() {
       expect(enhancedSig.height, lessThan(50));
     });
 
+    test(
+        'scrubs internal clerk metadata & own supplier phone across schemas and keeps 32-item Delivery Note closing pack unbroken',
+        () async {
+      // 1. Restaurant.fromJson & WhatsApp helpers scrub internal clerk provenance & own phone
+      final restFromVault = Restaurant.fromJson({
+        'id': 'r_elysian',
+        'name': 'Elysian Resort',
+        'contact': 'Added from clerk approval',
+        'phone': '0708567696',
+        'address': 'PX62+Q44, Eastern Bypass',
+      });
+      expect(restFromVault.contact, isEmpty);
+
+      const sampleInv = Invoice(
+        id: 'inv_6182',
+        number: 'TTG-6182',
+        restaurantId: 'r_elysian',
+        restaurantName: 'Elysian Resort',
+        date: '2026-11-07',
+        totalSell: 45000,
+        notes:
+            '[Supplementary Dispatch #2] Gate B kitchen [Submitted by Clerk: Peter]',
+      );
+      expect(
+        Invoice.sanitizeExternalNotes(sampleInv.notes),
+        'Gate B kitchen',
+      );
+
+      final waSummary = InvoicePdfBuilder.buildWhatsAppSummaryText(
+        invoice: sampleInv,
+        restaurant: restFromVault,
+      );
+      expect(waSummary, startsWith('Hello Elysian Resort,'));
+      expect(waSummary, isNot(contains('clerk')));
+      expect(InvoicePdfBuilder.normalizeKenyaPhone('0708567696'), isEmpty);
+      expect(
+        ReportsViewModel.normalizeKenyanWhatsAppPhone('+254 708 567 696'),
+        isEmpty,
+      );
+      expect(
+        ReportsViewModel.buildStatementWhatsAppText(
+          restFromVault,
+          'November 2026',
+        ),
+        startsWith('Hello Elysian Resort,'),
+      );
+
+      // 2. Existing saved BrandedDocument with leaked contact + 32 items renders 3 clean pages
+      final items32 = List<SelectableDocItem>.generate(
+        32,
+        (i) => SelectableDocItem(
+          id: 'item_$i',
+          desc: 'Fresh Produce Item ${i + 1}',
+          orderedQty: 10,
+          dispatchedQty: 10,
+          unit: 'Kgs',
+          sellPrice: 0,
+        ),
+      );
+      final blocks32 = DocumentOcrConverter.buildBlocksForItems(
+        mode: DocSmartConversionMode.deliveryNote,
+        activeItems: items32,
+        sourceReference: 'TTG-6182',
+      );
+      final savedDocJson = {
+        'id': 'dn_elysian',
+        'title': 'Delivery Note - Elysian Resort',
+        'documentType': 'DELIVERY NOTE',
+        'referenceNumber': 'DN-TTG-6182',
+        'date': '2026-11-07',
+        'recipientName': 'Elysian Resort',
+        'recipientContact': 'Added from clerk approval',
+        'recipientAddress': 'PX62+Q44, Eastern Bypass',
+        'recipientPhone': '0708567696',
+        'subject': 'GOODS DISPATCHED (ORDER / REF: TTG-6182)',
+        'showKraPin': false,
+        'stampCaption': 'DISPATCHED',
+        'blocks': blocks32.map((b) => b.toJson()).toList(),
+      };
+
+      final reloadedDoc = BrandedDocument.fromJson(savedDocJson);
+      expect(reloadedDoc.recipientContact, isEmpty);
+      expect(reloadedDoc.recipientPhone, isEmpty);
+
+      final pdf32Bytes = await BrandedDocumentPdfBuilder.buildPdfBytes(
+        document: reloadedDoc.copyWith(
+          footerNote: 'Town Treasure Limited | Hospitality Supply | Nairobi',
+        ),
+      );
+      final pdf32Text = _extractPdfTextStreams(pdf32Bytes);
+      expect(pdf32Text, isNot(contains('clerk')));
+      expect(pdf32Text, isNot(contains('0708567696')));
+      expect(pdf32Text, contains('/Count 3'));
+      expect(pdf32Text, contains('DISPATCHED'));
+      expect(pdf32Text, contains('Official'));
+    });
+
     test('saves, deletes, and merges BrandedDocuments in VaultRepository',
         () async {
       final vault = VaultRepository(

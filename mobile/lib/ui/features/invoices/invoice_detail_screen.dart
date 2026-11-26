@@ -689,19 +689,27 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                                       ),
                                     ],
                                     if (rest != null &&
-                                        rest.address.isNotEmpty) ...[
+                                        Restaurant.sanitizeClientAddress(
+                                          rest.address,
+                                        ).isNotEmpty) ...[
                                       const SizedBox(height: 2),
                                       Text(
-                                        rest.address,
+                                        Restaurant.sanitizeClientAddress(
+                                          rest.address,
+                                        ),
                                         textAlign: TextAlign.right,
                                         style: const TextStyle(fontSize: 12),
                                       ),
                                     ],
                                     if (rest != null &&
-                                        rest.phone.isNotEmpty) ...[
+                                        Restaurant.sanitizeClientPhone(
+                                          rest.phone,
+                                        ).isNotEmpty) ...[
                                       const SizedBox(height: 2),
                                       Text(
-                                        rest.phone,
+                                        Restaurant.sanitizeClientPhone(
+                                          rest.phone,
+                                        ),
                                         textAlign: TextAlign.right,
                                         style: const TextStyle(fontSize: 12),
                                       ),

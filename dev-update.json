@@ -1,8 +1,8 @@
 {
-  "version": "1.2.8",
-  "buildNumber": 2022,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.8/TownTreasureGroceries.apk",
-  "sha256": "0e01852ffe1c5c323b9b06ccdee40b9f467e067986a6e17ae2e42b1bfa69a183",
-  "releaseNotes": "v1.2.8 (Official Release Parity): Redesigned Delivery Note Signatory & Client Stamp Verification Grid (auto-upgrades existing Delivery Notes) + crisp tight-cropped Official Stamp & Signature across all documents.",
+  "version": "1.2.9",
+  "buildNumber": 2023,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.9/TownTreasureGroceries.apk",
+  "sha256": "158b6768b1012c724f9dd490dc036f9df6935781d468be53a00d51c5a5a443cb",
+  "releaseNotes": "v1.2.9 (Official Release Parity): Sanitized client recipient metadata across all schemas (scrubs internal clerk notes & self-phone echoes) + smart multi-page PDF arrangement (repeating table headers & unbroken confirmation/signatory/stamp packs).",
   "mandatory": false
 }

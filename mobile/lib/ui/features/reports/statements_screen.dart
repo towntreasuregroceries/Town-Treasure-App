@@ -447,9 +447,13 @@ class _StatementPreviewCard extends StatelessWidget {
                           statement.restaurant.name,
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
-                        if (statement.restaurant.phone.isNotEmpty)
+                        if (Restaurant.sanitizeClientPhone(
+                          statement.restaurant.phone,
+                        ).isNotEmpty)
                           Text(
-                            statement.restaurant.phone,
+                            Restaurant.sanitizeClientPhone(
+                              statement.restaurant.phone,
+                            ),
                             style: const TextStyle(fontSize: 12),
                           ),
                       ],

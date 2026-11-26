@@ -118,21 +118,15 @@ class BrandedDocumentPdfBuilder {
           ),
           if (document.subject.trim().isNotEmpty) ...[
             pw.SizedBox(height: 14),
-            _buildSubjectBar(document),
+            pw.Inseparable(child: _buildSubjectBar(document)),
           ],
           pw.SizedBox(height: 16),
-          ..._buildContentBlocks(document),
-          if (document.showQrCode ||
-              document.showStamp ||
-              document.showSignature) ...[
-            pw.SizedBox(height: 24),
-            _buildAuthorizationFooter(
-              document: document,
-              displayDate: displayDate,
-              stampImage: stampImage,
-              sigImage: sigImage,
-            ),
-          ],
+          ..._buildSmartBodyAndClosing(
+            document: document,
+            displayDate: displayDate,
+            stampImage: stampImage,
+            sigImage: sigImage,
+          ),
         ],
       ),
     );
@@ -406,12 +400,24 @@ class BrandedDocumentPdfBuilder {
     required BrandedDocument document,
     required String sellerPin,
   }) {
+    final cleanRecipientName = document.recipientName.trim();
+    final cleanContact = Restaurant.sanitizeContact(document.recipientContact);
+    final cleanAddress =
+        Restaurant.sanitizeClientAddress(document.recipientAddress);
+    final cleanPhone = Restaurant.sanitizeClientPhone(document.recipientPhone);
+    final rawRecipPin = Restaurant.normalizeKraPin(document.recipientKraPin);
+    final cleanRecipPin = (document.showKraPin &&
+            rawRecipPin.isNotEmpty &&
+            rawRecipPin != sellerPin)
+        ? rawRecipPin
+        : '';
+
     final hasRecipient = document.showRecipientCard &&
-        (document.recipientName.trim().isNotEmpty ||
-            document.recipientContact.trim().isNotEmpty ||
-            document.recipientAddress.trim().isNotEmpty ||
-            document.recipientPhone.trim().isNotEmpty ||
-            document.recipientKraPin.trim().isNotEmpty);
+        (cleanRecipientName.isNotEmpty ||
+            cleanContact.isNotEmpty ||
+            cleanAddress.isNotEmpty ||
+            cleanPhone.isNotEmpty ||
+            cleanRecipPin.isNotEmpty);
 
     final fromCol = pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -455,81 +461,87 @@ class BrandedDocumentPdfBuilder {
     );
 
     if (!hasRecipient) {
-      return pw.Container(
-        padding: const pw.EdgeInsets.all(10),
+      return pw.Inseparable(
+        child: pw.Container(
+          padding: const pw.EdgeInsets.all(10),
+          decoration: pw.BoxDecoration(
+            color: _altRowBg,
+            borderRadius: pw.BorderRadius.circular(6),
+            border: pw.Border.all(color: const PdfColor.fromInt(0xFFE2E8F0)),
+          ),
+          child: fromCol,
+        ),
+      );
+    }
+
+    return pw.Inseparable(
+      child: pw.Container(
+        padding: const pw.EdgeInsets.all(12),
         decoration: pw.BoxDecoration(
           color: _altRowBg,
           borderRadius: pw.BorderRadius.circular(6),
           border: pw.Border.all(color: const PdfColor.fromInt(0xFFE2E8F0)),
         ),
-        child: fromCol,
-      );
-    }
-
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(12),
-      decoration: pw.BoxDecoration(
-        color: _altRowBg,
-        borderRadius: pw.BorderRadius.circular(6),
-        border: pw.Border.all(color: const PdfColor.fromInt(0xFFE2E8F0)),
-      ),
-      child: pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Expanded(child: fromCol),
-          pw.SizedBox(width: 18),
-          pw.Expanded(
-            child: pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.Text(
-                  'TO / RECIPIENT',
-                  style: pw.TextStyle(
-                    fontSize: 8,
-                    fontWeight: pw.FontWeight.bold,
-                    color: _leafGreen,
-                    letterSpacing: 0.8,
-                  ),
-                ),
-                pw.SizedBox(height: 3),
-                if (document.recipientName.trim().isNotEmpty)
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Expanded(child: fromCol),
+            pw.SizedBox(width: 18),
+            pw.Expanded(
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
                   pw.Text(
-                    document.recipientName.trim(),
+                    'TO / RECIPIENT',
                     style: pw.TextStyle(
-                      fontSize: 10.5,
+                      fontSize: 8,
                       fontWeight: pw.FontWeight.bold,
-                      color: _slateDark,
+                      color: _leafGreen,
+                      letterSpacing: 0.8,
                     ),
                   ),
-                if (document.recipientContact.trim().isNotEmpty)
-                  pw.Text(
-                    'Attn: ${document.recipientContact.trim()}',
-                    style: const pw.TextStyle(fontSize: 8.8, color: _textMuted),
-                  ),
-                if (document.recipientAddress.trim().isNotEmpty)
-                  pw.Text(
-                    document.recipientAddress.trim(),
-                    style: const pw.TextStyle(fontSize: 8.8, color: _textMuted),
-                  ),
-                if (document.recipientPhone.trim().isNotEmpty)
-                  pw.Text(
-                    'Tel: ${document.recipientPhone.trim()}',
-                    style: const pw.TextStyle(fontSize: 8.8, color: _textMuted),
-                  ),
-                if (document.showKraPin &&
-                    document.recipientKraPin.trim().isNotEmpty)
-                  pw.Text(
-                    'KRA PIN: ${document.recipientKraPin.trim().toUpperCase()}',
-                    style: pw.TextStyle(
-                      fontSize: 8.5,
-                      fontWeight: pw.FontWeight.bold,
-                      color: _textDark,
+                  pw.SizedBox(height: 3),
+                  if (cleanRecipientName.isNotEmpty)
+                    pw.Text(
+                      cleanRecipientName,
+                      style: pw.TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: pw.FontWeight.bold,
+                        color: _slateDark,
+                      ),
                     ),
-                  ),
-              ],
+                  if (cleanContact.isNotEmpty)
+                    pw.Text(
+                      'Attn: $cleanContact',
+                      style:
+                          const pw.TextStyle(fontSize: 8.8, color: _textMuted),
+                    ),
+                  if (cleanAddress.isNotEmpty)
+                    pw.Text(
+                      cleanAddress,
+                      style:
+                          const pw.TextStyle(fontSize: 8.8, color: _textMuted),
+                    ),
+                  if (cleanPhone.isNotEmpty)
+                    pw.Text(
+                      'Tel: $cleanPhone',
+                      style:
+                          const pw.TextStyle(fontSize: 8.8, color: _textMuted),
+                    ),
+                  if (cleanRecipPin.isNotEmpty)
+                    pw.Text(
+                      'KRA PIN: $cleanRecipPin',
+                      style: pw.TextStyle(
+                        fontSize: 8.5,
+                        fontWeight: pw.FontWeight.bold,
+                        color: _textDark,
+                      ),
+                    ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -555,139 +567,256 @@ class BrandedDocumentPdfBuilder {
     );
   }
 
-  static List<pw.Widget> _buildContentBlocks(BrandedDocument document) {
-    final widgets = <pw.Widget>[];
-    var numberedCounter = 0;
+  /// Builds body blocks with smart multi-page arrangement:
+  /// - Every `callout` and `signatory` block is `pw.Inseparable` (never sliced across pages).
+  /// - Headings stay attached to an immediately following short paragraph/callout.
+  /// - Trailing confirmation callout/sign-off + Signatory Grid + Authorization Stamp/QR
+  ///   footer are grouped into one cohesive `pw.Inseparable` Closing Verification Pack
+  ///   so if an item table fills a page, the confirmation notice, signatory lines,
+  ///   and official stamp move cleanly together onto the next page.
+  static List<pw.Widget> _buildSmartBodyAndClosing({
+    required BrandedDocument document,
+    required String displayDate,
+    required pw.MemoryImage? stampImage,
+    required pw.MemoryImage? sigImage,
+  }) {
+    final blocks = document.blocks;
+    final hasAuthFooter = document.showQrCode ||
+        document.showStamp ||
+        document.showSignature;
 
-    for (final block in document.blocks) {
-      if (block.kind == 'numbered') {
-        numberedCounter++;
+    var tailStartIdx = blocks.length;
+    if (blocks.isNotEmpty) {
+      if (blocks.last.isSignatory) {
+        tailStartIdx = blocks.length - 1;
+        if (tailStartIdx > 0) {
+          final prev = blocks[tailStartIdx - 1];
+          if (!prev.isTable &&
+              !prev.isDivider &&
+              !prev.isSignatory &&
+              (prev.kind == 'callout' || prev.kind == 'paragraph') &&
+              prev.text.trim().length <= 320) {
+            tailStartIdx -= 1;
+          }
+        }
+      } else if (hasAuthFooter && blocks.length >= 2) {
+        final last = blocks.last;
+        if (!last.isTable &&
+            !last.isDivider &&
+            (last.kind == 'callout' || last.kind == 'paragraph') &&
+            last.text.trim().length <= 280) {
+          tailStartIdx = blocks.length - 1;
+        }
+      }
+    }
+
+    // Precompute numbered-list indices across all blocks.
+    final numberedIndices = List<int>.filled(blocks.length, 0);
+    var counter = 0;
+    for (var i = 0; i < blocks.length; i++) {
+      if (blocks[i].kind == 'numbered') {
+        counter++;
+        numberedIndices[i] = counter;
       } else {
-        numberedCounter = 0;
+        counter = 0;
       }
+    }
 
-      if (block.isDivider) {
-        widgets.add(
-          pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 8),
-            child: pw.Divider(
-              color: const PdfColor.fromInt(0xFFCBD5E1),
-              thickness: 0.9,
-            ),
-          ),
-        );
-        continue;
-      }
-
-      if (block.isTable) {
-        if (block.tableRows.isNotEmpty) {
-          widgets.add(
-            pw.Padding(
-              padding: const pw.EdgeInsets.symmetric(vertical: 8),
-              child: _buildStyledTable(block, document.defaultFontFamily),
+    final bodyWidgets = <pw.Widget>[];
+    var idx = 0;
+    while (idx < tailStartIdx) {
+      final block = blocks[idx];
+      // Keep headings attached to an immediately following short block so a
+      // section heading is never orphaned at the bottom of a page.
+      if (block.isHeading && idx + 1 < tailStartIdx) {
+        final next = blocks[idx + 1];
+        if (!next.isTable &&
+            !next.isDivider &&
+            next.text.trim().length <= 280) {
+          final hWidget = _buildSingleBlockWidget(
+            block,
+            document: document,
+            numberedCounter: numberedIndices[idx],
+          );
+          final nWidget = _buildSingleBlockWidget(
+            next,
+            document: document,
+            numberedCounter: numberedIndices[idx + 1],
+          );
+          bodyWidgets.add(
+            pw.Inseparable(
+              child: pw.Column(
+                mainAxisSize: pw.MainAxisSize.min,
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  ?hWidget,
+                  ?nWidget,
+                ],
+              ),
             ),
           );
+          idx += 2;
+          continue;
         }
-        continue;
       }
 
-      if (block.isSignatory) {
-        widgets.add(
-          pw.Padding(
-            padding: const pw.EdgeInsets.symmetric(vertical: 8),
-            child: _buildSignatoryGrid(block),
-          ),
-        );
-        continue;
-      }
-
-      final leftIndent = block.indent.clamp(0, 4) * 18.0;
-      final textAlign = _resolveTextAlign(block.align);
-      final rich = _buildRichText(
+      final rendered = _buildSingleBlockWidget(
         block,
-        fallbackFontFamily: document.defaultFontFamily,
-        textAlign: textAlign,
+        document: document,
+        numberedCounter: numberedIndices[idx],
       );
-
-      if (block.kind == 'callout') {
-        widgets.add(
-          pw.Padding(
-            padding: pw.EdgeInsets.fromLTRB(leftIndent, 6, 0, 8),
-            child: pw.Container(
-              width: double.infinity,
-              padding:
-                  const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: const pw.BoxDecoration(
-                color: _calloutBg,
-                border: pw.Border(
-                  left: pw.BorderSide(color: _leafGreen, width: 3.5),
-                ),
-              ),
-              child: rich,
-            ),
-          ),
-        );
-        continue;
+      if (rendered != null) {
+        bodyWidgets.add(rendered);
       }
+      idx++;
+    }
 
-      if (block.kind == 'bullet' || block.kind == 'numbered') {
-        widgets.add(
-          pw.Padding(
-            padding: pw.EdgeInsets.fromLTRB(leftIndent + 8, 2, 0, 5),
-            child: pw.Row(
-              crossAxisAlignment: pw.CrossAxisAlignment.start,
-              children: [
-                pw.SizedBox(
-                  width: 18,
-                  child: block.kind == 'bullet'
-                      ? pw.Padding(
-                          padding: pw.EdgeInsets.only(
-                            top: (block.fontSize * 0.42).clamp(3.0, 8.0),
-                          ),
-                          child: pw.Align(
-                            alignment: pw.Alignment.centerLeft,
-                            child: pw.Container(
-                              width: 5,
-                              height: 5,
-                              decoration: const pw.BoxDecoration(
-                                color: _leafGreen,
-                                shape: pw.BoxShape.circle,
-                              ),
-                            ),
-                          ),
-                        )
-                      : pw.Text(
-                          '$numberedCounter.',
-                          style: pw.TextStyle(
-                            fontSize: block.fontSize,
-                            fontWeight: pw.FontWeight.bold,
-                            color: _leafGreen,
-                          ),
-                        ),
-                ),
-                pw.Expanded(child: rich),
-              ],
-            ),
-          ),
-        );
-        continue;
-      }
-
-      final topSpacing = block.kind == 'heading1'
-          ? 10.0
-          : (block.kind == 'heading2' || block.kind == 'heading3' ? 7.0 : 2.0);
-      final bottomSpacing = block.isHeading ? 5.0 : 7.0;
-
-      widgets.add(
-        pw.Padding(
-          padding:
-              pw.EdgeInsets.fromLTRB(leftIndent, topSpacing, 0, bottomSpacing),
-          child: rich,
+    final closingChildren = <pw.Widget>[];
+    for (var t = tailStartIdx; t < blocks.length; t++) {
+      final w = _buildSingleBlockWidget(
+        blocks[t],
+        document: document,
+        numberedCounter: numberedIndices[t],
+      );
+      if (w != null) closingChildren.add(w);
+    }
+    if (hasAuthFooter) {
+      closingChildren.add(pw.SizedBox(height: closingChildren.isEmpty ? 20 : 16));
+      closingChildren.add(
+        _buildAuthorizationFooter(
+          document: document,
+          displayDate: displayDate,
+          stampImage: stampImage,
+          sigImage: sigImage,
         ),
       );
     }
 
-    return widgets;
+    if (closingChildren.isNotEmpty) {
+      bodyWidgets.add(
+        pw.Inseparable(
+          child: pw.Column(
+            mainAxisSize: pw.MainAxisSize.min,
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: closingChildren,
+          ),
+        ),
+      );
+    }
+
+    return bodyWidgets;
+  }
+
+  static pw.Widget? _buildSingleBlockWidget(
+    BrandedDocBlock block, {
+    required BrandedDocument document,
+    required int numberedCounter,
+  }) {
+    if (block.isDivider) {
+      return pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 8),
+        child: pw.Divider(
+          color: const PdfColor.fromInt(0xFFCBD5E1),
+          thickness: 0.9,
+        ),
+      );
+    }
+
+    if (block.isTable) {
+      if (block.tableRows.isEmpty) return null;
+      return pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 8),
+        child: _buildStyledTable(block, document.defaultFontFamily),
+      );
+    }
+
+    if (block.isSignatory) {
+      return pw.Inseparable(
+        child: pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(vertical: 8),
+          child: _buildSignatoryGrid(block),
+        ),
+      );
+    }
+
+    final leftIndent = block.indent.clamp(0, 4) * 18.0;
+    final textAlign = _resolveTextAlign(block.align);
+    final rich = _buildRichText(
+      block,
+      fallbackFontFamily: document.defaultFontFamily,
+      textAlign: textAlign,
+    );
+
+    if (block.kind == 'callout') {
+      return pw.Inseparable(
+        child: pw.Padding(
+          padding: pw.EdgeInsets.fromLTRB(leftIndent, 6, 0, 8),
+          child: pw.Container(
+            width: double.infinity,
+            padding:
+                const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: const pw.BoxDecoration(
+              color: _calloutBg,
+              border: pw.Border(
+                left: pw.BorderSide(color: _leafGreen, width: 3.5),
+              ),
+            ),
+            child: rich,
+          ),
+        ),
+      );
+    }
+
+    if (block.kind == 'bullet' || block.kind == 'numbered') {
+      return pw.Padding(
+        padding: pw.EdgeInsets.fromLTRB(leftIndent + 8, 2, 0, 5),
+        child: pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.SizedBox(
+              width: 18,
+              child: block.kind == 'bullet'
+                  ? pw.Padding(
+                      padding: pw.EdgeInsets.only(
+                        top: (block.fontSize * 0.42).clamp(3.0, 8.0),
+                      ),
+                      child: pw.Align(
+                        alignment: pw.Alignment.centerLeft,
+                        child: pw.Container(
+                          width: 5,
+                          height: 5,
+                          decoration: const pw.BoxDecoration(
+                            color: _leafGreen,
+                            shape: pw.BoxShape.circle,
+                          ),
+                        ),
+                      ),
+                    )
+                  : pw.Text(
+                      '$numberedCounter.',
+                      style: pw.TextStyle(
+                        fontSize: block.fontSize,
+                        fontWeight: pw.FontWeight.bold,
+                        color: _leafGreen,
+                      ),
+                    ),
+            ),
+            pw.Expanded(child: rich),
+          ],
+        ),
+      );
+    }
+
+    final topSpacing = block.kind == 'heading1'
+        ? 10.0
+        : (block.kind == 'heading2' || block.kind == 'heading3' ? 7.0 : 2.0);
+    final bottomSpacing = block.isHeading ? 5.0 : 7.0;
+
+    return pw.Padding(
+      padding:
+          pw.EdgeInsets.fromLTRB(leftIndent, topSpacing, 0, bottomSpacing),
+      child: rich,
+    );
   }
 
   static pw.Widget _buildStyledTable(
@@ -713,6 +842,7 @@ class BrandedDocumentPdfBuilder {
 
       pdfRows.add(
         pw.TableRow(
+          repeat: isHeader,
           decoration: pw.BoxDecoration(
             color: isHeader
                 ? _leafGreen

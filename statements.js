@@ -654,8 +654,12 @@ function shareStatementWhatsApp() {
 
   let phone = rest.phone ? rest.phone.replace(/[^\d+]/g, '') : '';
   if (phone.startsWith('0')) phone = '254' + phone.slice(1);
+  if (phone.replace(/\D/g, '') === '254708567696') phone = '';
 
-  const text = `Hello ${rest.contact || rest.name},
+  const cleanContact = (rest.contact && !/clerk\s+approval|added\s+(?:from|via|by)\s+clerk|submitted\s+by\s+clerk|auto[\s-]?(?:created|added)/i.test(rest.contact))
+    ? rest.contact.trim()
+    : '';
+  const text = `Hello ${cleanContact || rest.name},
 
 Here is your account statement from Town Treasure Groceries for *${monthName}*.
 

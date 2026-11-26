@@ -264,9 +264,9 @@ class RestaurantsViewModel extends ChangeNotifier {
       kraPin: kraPin,
       etimsCadence: etimsCadence,
       aliases: finalAliases,
-      contact: contact.trim(),
-      phone: phone.trim(),
-      address: address.trim(),
+      contact: Restaurant.sanitizeContact(contact),
+      phone: Restaurant.sanitizeClientPhone(phone),
+      address: Restaurant.sanitizeClientAddress(address),
       createdAt: createdAt,
       updatedAt: now,
     );

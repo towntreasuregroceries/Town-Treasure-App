@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'app_helpers.dart';
+import 'restaurant.dart';
 
 enum BrandedDocTemplate {
   blank,
@@ -643,9 +644,13 @@ class BrandedDocument {
       referenceNumber: (json['referenceNumber'] ?? '').toString(),
       date: AppHelpers.normalizeAppDate(json['date']),
       recipientName: (json['recipientName'] ?? '').toString(),
-      recipientContact: (json['recipientContact'] ?? '').toString(),
-      recipientAddress: (json['recipientAddress'] ?? '').toString(),
-      recipientPhone: (json['recipientPhone'] ?? '').toString(),
+      recipientContact:
+          Restaurant.sanitizeContact(json['recipientContact']?.toString()),
+      recipientAddress: Restaurant.sanitizeClientAddress(
+        json['recipientAddress']?.toString(),
+      ),
+      recipientPhone:
+          Restaurant.sanitizeClientPhone(json['recipientPhone']?.toString()),
       recipientKraPin: (json['recipientKraPin'] ?? '').toString(),
       subject: (json['subject'] ?? '').toString(),
       blocks: parsedBlocks,

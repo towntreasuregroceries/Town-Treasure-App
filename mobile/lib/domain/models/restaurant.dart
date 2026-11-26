@@ -84,6 +84,59 @@ class Restaurant {
   static final RegExp _genericWordsPattern = RegExp(
     r'\b(the|hotel|hotels|restaurant|restaurants|suites|resort|club|inn|lodge|limited|ltd)\b',
   );
+  static final RegExp _internalContactPlaceholderPattern = RegExp(
+    r'^(?:added\s+(?:from|via|by)\s+clerk(?:\s+approval)?|from\s+clerk(?:\s+approval)?|clerk\s+approval|submitted\s+by\s+clerk.*|auto[\s\-]?(?:created|added).*|created\s+(?:from|via|by)\s+clerk.*|system\s+generated.*|generated\s+in\s+branded.*|imported\s+from.*|n/?a|none|null|undefined|-+)$',
+    caseSensitive: false,
+  );
+
+  /// Strips internal audit/schema placeholders (e.g. `"Added from clerk approval"`)
+  /// so internal workflow notes never appear as a client's contact name on PDFs,
+  /// WhatsApp greetings, or recipient cards.
+  static String sanitizeContact(String? raw) {
+    final trimmed = (raw ?? '').trim();
+    if (trimmed.isEmpty) return '';
+    if (_internalContactPlaceholderPattern.hasMatch(trimmed)) return '';
+    final lower = trimmed.toLowerCase();
+    if (lower.contains('clerk approval') ||
+        lower.contains('added via clerk') ||
+        lower.contains('added from clerk') ||
+        lower.contains('submitted by clerk')) {
+      return '';
+    }
+    return trimmed;
+  }
+
+  /// Returns `true` when [rawPhone] resolves to Town Treasure Limited's own
+  /// supplier phone (`0708 567 696` / `+254 708 567 696`).
+  static bool isOwnCompanyPhone(String? rawPhone) {
+    final digits = (rawPhone ?? '').replaceAll(RegExp(r'\D'), '');
+    if (digits.isEmpty) return false;
+    return digits == '0708567696' ||
+        digits == '254708567696' ||
+        digits == '708567696';
+  }
+
+  /// Sanitizes a client phone number for external display/WhatsApp routing,
+  /// suppressing Town Treasure's own supplier phone or placeholder tokens.
+  static String sanitizeClientPhone(String? rawPhone) {
+    final trimmed = (rawPhone ?? '').trim();
+    if (trimmed.isEmpty) return '';
+    if (isOwnCompanyPhone(trimmed)) return '';
+    if (RegExp(r'^(?:n/?a|none|null|undefined|-+)$', caseSensitive: false)
+        .hasMatch(trimmed)) {
+      return '';
+    }
+    return trimmed;
+  }
+
+  /// Sanitizes a client address for external display, removing internal placeholders.
+  static String sanitizeClientAddress(String? rawAddress) {
+    final trimmed = (rawAddress ?? '').trim();
+    if (trimmed.isEmpty) return '';
+    if (_internalContactPlaceholderPattern.hasMatch(trimmed)) return '';
+    if (trimmed.toLowerCase() == 'thetowntreasure25@gmail.com') return '';
+    return trimmed;
+  }
 
   /// Normalizes a KRA PIN by trimming, uppercasing, and stripping whitespace.
   static String normalizeKraPin(String? pin) {
@@ -354,9 +407,9 @@ class Restaurant {
       kraPin: normalizeKraPin(json['kraPin']?.toString()),
       etimsCadence: EtimsCadence.fromCode(json['etimsCadence']?.toString()),
       aliases: aliases,
-      contact: (json['contact'] ?? '').toString(),
+      contact: sanitizeContact(json['contact']?.toString()),
       phone: (json['phone'] ?? '').toString(),
-      address: (json['address'] ?? '').toString(),
+      address: sanitizeClientAddress(json['address']?.toString()),
       createdAt: json['createdAt']?.toString(),
       updatedAt: json['updatedAt']?.toString(),
     );

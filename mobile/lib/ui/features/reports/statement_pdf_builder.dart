@@ -67,18 +67,28 @@ class StatementPdfBuilder {
             pw.SizedBox(height: 20),
             _buildAddressRow(statement.restaurant, showKraPin: showKraPin),
             pw.SizedBox(height: 18),
-            _buildOpeningBalanceBanner(statement, firstMonthWord),
+            pw.Inseparable(
+              child: _buildOpeningBalanceBanner(statement, firstMonthWord),
+            ),
             pw.SizedBox(height: 18),
             _buildTransactionsTable(statement),
             pw.SizedBox(height: 22),
-            _buildTotalsAndAgeRow(statement),
-            pw.SizedBox(height: 22),
-            _buildOfficialStamp(
-              stampBytes: stampBytes,
-              signatureBytes: signatureBytes,
-              dateText: dateText,
-              monthName: statement.monthName,
-              monthlyEtims: monthlyEtims,
+            pw.Inseparable(
+              child: pw.Column(
+                mainAxisSize: pw.MainAxisSize.min,
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  _buildTotalsAndAgeRow(statement),
+                  pw.SizedBox(height: 22),
+                  _buildOfficialStamp(
+                    stampBytes: stampBytes,
+                    signatureBytes: signatureBytes,
+                    dateText: dateText,
+                    monthName: statement.monthName,
+                    monthlyEtims: monthlyEtims,
+                  ),
+                ],
+              ),
             ),
           ];
         },
@@ -276,14 +286,14 @@ class StatementPdfBuilder {
                 color: _textDark,
               ),
             ),
-            if (rest.address.trim().isNotEmpty)
+            if (Restaurant.sanitizeClientAddress(rest.address).isNotEmpty)
               pw.Text(
-                rest.address,
+                Restaurant.sanitizeClientAddress(rest.address),
                 style: const pw.TextStyle(fontSize: 9, color: _textMuted),
               ),
-            if (rest.phone.trim().isNotEmpty)
+            if (Restaurant.sanitizeClientPhone(rest.phone).isNotEmpty)
               pw.Text(
-                rest.phone,
+                Restaurant.sanitizeClientPhone(rest.phone),
                 style: const pw.TextStyle(fontSize: 9, color: _textMuted),
               ),
             if (showKraPin && Restaurant.isValidKraPin(rest.kraPin))

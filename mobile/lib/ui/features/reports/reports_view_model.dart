@@ -1586,7 +1586,9 @@ class ReportsViewModel extends ChangeNotifier {
   }
 
   static String normalizeKenyanWhatsAppPhone(String rawPhone) {
-    var phone = rawPhone.replaceAll(RegExp(r'[^\d+]'), '');
+    final safe = Restaurant.sanitizeClientPhone(rawPhone);
+    if (safe.isEmpty) return '';
+    var phone = safe.replaceAll(RegExp(r'[^\d+]'), '');
     if (phone.startsWith('0')) {
       phone = '254${phone.substring(1)}';
     }
@@ -1597,8 +1599,8 @@ class ReportsViewModel extends ChangeNotifier {
     Restaurant rest,
     String monthName,
   ) {
-    final addressee =
-        rest.contact.trim().isNotEmpty ? rest.contact.trim() : rest.name;
+    final cleanContact = Restaurant.sanitizeContact(rest.contact);
+    final addressee = cleanContact.isNotEmpty ? cleanContact : rest.name;
     return 'Hello $addressee,\n\n'
         'Here is your account statement from Town Treasure Groceries for *$monthName*.\n\n'
         'Please find the attached PDF statement showing all invoices and payments for the period.\n\n'

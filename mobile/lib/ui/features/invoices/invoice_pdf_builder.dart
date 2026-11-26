@@ -104,8 +104,8 @@ class InvoicePdfBuilder {
                   ? invoice.restaurantName
                   : 'Unknown');
       final kraPin = showKraPin ? Restaurant.normalizeKraPin(restaurant?.kraPin) : '';
-      final clientAddress = restaurant?.address.trim() ?? '';
-      final clientPhone = restaurant?.phone.trim() ?? '';
+      final clientAddress = Restaurant.sanitizeClientAddress(restaurant?.address);
+      final clientPhone = Restaurant.sanitizeClientPhone(restaurant?.phone);
 
       final taxSummary = KraTaxCalculator.computeInvoiceTaxSummary(
         invoice,
@@ -164,16 +164,24 @@ class InvoicePdfBuilder {
                   : KraTaxRate.exempt,
             ),
             pw.SizedBox(height: 20),
-            _buildTotalsBlock(
-              invoice.totalSell,
-              taxSummary: taxSummary,
-              isTaxInvoice: isTaxInvoice,
-            ),
-            pw.SizedBox(height: 28),
-            _buildBottomQrAndStamp(
-              invoice: invoice,
-              stampImage: stampImage,
-              sigImage: sigImage,
+            pw.Inseparable(
+              child: pw.Column(
+                mainAxisSize: pw.MainAxisSize.min,
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  _buildTotalsBlock(
+                    invoice.totalSell,
+                    taxSummary: taxSummary,
+                    isTaxInvoice: isTaxInvoice,
+                  ),
+                  pw.SizedBox(height: 24),
+                  _buildBottomQrAndStamp(
+                    invoice: invoice,
+                    stampImage: stampImage,
+                    sigImage: sigImage,
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -784,6 +792,7 @@ class InvoicePdfBuilder {
   }) {
     final rows = <pw.TableRow>[
       pw.TableRow(
+        repeat: true,
         decoration: const pw.BoxDecoration(color: _slateDark),
         children: [
           _headerCell('SL\nNO.', align: pw.TextAlign.center),
@@ -1212,9 +1221,8 @@ class InvoicePdfBuilder {
             : (invoice.restaurantName.trim().isNotEmpty
                 ? invoice.restaurantName
                 : 'Client');
-    final greetingName = restaurant?.contact.trim().isNotEmpty == true
-        ? restaurant!.contact.trim()
-        : clientName;
+    final cleanContact = Restaurant.sanitizeContact(restaurant?.contact);
+    final greetingName = cleanContact.isNotEmpty ? cleanContact : clientName;
     final dateStr = InvoiceFormatters.formatDisplayDate(invoice.date);
     final amountStr = InvoiceFormatters.formatMoney(invoice.totalSell);
 
@@ -1226,10 +1234,12 @@ class InvoicePdfBuilder {
         'Feel free to reach out for any queries. We appreciate your business!';
   }
 
-  /// Normalizes local Kenyan phone numbers (`07...` -> `2547...`) matching `views.js`.
+  /// Normalizes local Kenyan phone numbers (`07...` -> `2547...`) matching `views.js`,
+  /// suppressing Town Treasure's own supplier phone number if present on a client record.
   static String normalizeKenyaPhone(String? rawPhone) {
-    if (rawPhone == null) return '';
-    var phone = rawPhone.replaceAll(RegExp(r'[^\d+]'), '');
+    final safe = Restaurant.sanitizeClientPhone(rawPhone);
+    if (safe.isEmpty) return '';
+    var phone = safe.replaceAll(RegExp(r'[^\d+]'), '');
     if (phone.startsWith('+')) phone = phone.substring(1);
     if (phone.startsWith('0')) phone = '254${phone.substring(1)}';
     return phone;

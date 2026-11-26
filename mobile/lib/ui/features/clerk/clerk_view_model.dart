@@ -668,7 +668,7 @@ class ClerkViewModel extends ChangeNotifier {
       id: AppHelpers.genId(),
       name: restaurantName.trim(),
       aliases: const [],
-      contact: 'Added from clerk approval',
+      contact: '',
       createdAt: now,
       updatedAt: now,
     );

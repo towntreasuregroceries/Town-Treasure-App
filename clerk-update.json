@@ -1,8 +1,8 @@
 {
-  "version": "1.2.8",
-  "buildNumber": 2022,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.8/TownTreasureClerk.apk",
-  "sha256": "78b02a9155b16424502686c701f61869fad6d2892e345d8f365b03af0a89b536",
-  "releaseNotes": "v1.2.8: Enhanced stamp & signature processing and synced release parity with Owner App v1.2.8.",
+  "version": "1.2.9",
+  "buildNumber": 2023,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.9/TownTreasureClerk.apk",
+  "sha256": "59210c139e36ea3fdf297643e94a0b5acceaf1856a0e4c97d201e040e6114809",
+  "releaseNotes": "v1.2.9: Sanitized client metadata boundaries and synced release parity with Owner App v1.2.9.",
   "mandatory": false
 }

@@ -78,6 +78,23 @@ class Invoice {
       (etimsQrData ?? '').trim().isNotEmpty;
   bool get hasCreditNote => (etimsCreditNoteCuNo ?? '').trim().isNotEmpty;
 
+  /// Strips internal bracketed workflow tags (`[Submitted by Clerk: ...]`,
+  /// `[Target: ...]`, `[Supplementary Dispatch ...]`, Studio provenance) if
+  /// notes are ever formatted for external display.
+  static String sanitizeExternalNotes(String? raw) {
+    if (raw == null || raw.trim().isEmpty) return '';
+    return raw
+        .replaceAll(RegExp(r'\[Submitted by Clerk:[^\]]*\]', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\[Target:[^\]]*\]', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\[Supplementary Dispatch[^\]]*\]', caseSensitive: false), '')
+        .replaceAll(
+          RegExp(r'Generated in Branded Document Studio\s*\([^\)]*\)', caseSensitive: false),
+          '',
+        )
+        .replaceAll(RegExp(r'\s{2,}'), ' ')
+        .trim();
+  }
+
   factory Invoice.fromJson(Map<String, dynamic> json) {
     final rawItems = json['items'];
     final items = rawItems is List
