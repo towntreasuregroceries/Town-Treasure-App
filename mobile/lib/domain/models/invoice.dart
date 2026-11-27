@@ -36,6 +36,11 @@ class Invoice {
     this.etimsCreditNoteCuNo,
     this.etimsCreditNoteQrData,
     this.etimsCreditNoteAt,
+    this.clientPodStamp,
+    this.clientPodReceiver,
+    this.clientPodAt,
+    this.clientPodSha256,
+    this.clientPodDocId,
   });
 
   final String id;
@@ -70,6 +75,11 @@ class Invoice {
   final String? etimsCreditNoteCuNo;
   final String? etimsCreditNoteQrData;
   final String? etimsCreditNoteAt;
+  final String? clientPodStamp;
+  final String? clientPodReceiver;
+  final String? clientPodAt;
+  final String? clientPodSha256;
+  final String? clientPodDocId;
 
   bool get isDraft => status == 'draft';
   bool get isPaid => status == 'paid';
@@ -77,6 +87,7 @@ class Invoice {
       (cuInvoiceNumber ?? '').trim().isNotEmpty ||
       (etimsQrData ?? '').trim().isNotEmpty;
   bool get hasCreditNote => (etimsCreditNoteCuNo ?? '').trim().isNotEmpty;
+  bool get hasClientPodStamp => (clientPodStamp ?? '').trim().isNotEmpty;
 
   /// Strips internal bracketed workflow tags (`[Submitted by Clerk: ...]`,
   /// `[Target: ...]`, `[Supplementary Dispatch ...]`, Studio provenance) if
@@ -145,6 +156,11 @@ class Invoice {
       etimsCreditNoteCuNo: json['etimsCreditNoteCuNo']?.toString(),
       etimsCreditNoteQrData: json['etimsCreditNoteQrData']?.toString(),
       etimsCreditNoteAt: json['etimsCreditNoteAt']?.toString(),
+      clientPodStamp: json['clientPodStamp']?.toString(),
+      clientPodReceiver: json['clientPodReceiver']?.toString(),
+      clientPodAt: json['clientPodAt']?.toString(),
+      clientPodSha256: json['clientPodSha256']?.toString(),
+      clientPodDocId: json['clientPodDocId']?.toString(),
     );
   }
 
@@ -191,6 +207,16 @@ class Invoice {
         'etimsCreditNoteQrData': etimsCreditNoteQrData,
       if (etimsCreditNoteAt != null && etimsCreditNoteAt!.isNotEmpty)
         'etimsCreditNoteAt': etimsCreditNoteAt,
+      if (clientPodStamp != null && clientPodStamp!.isNotEmpty)
+        'clientPodStamp': clientPodStamp,
+      if (clientPodReceiver != null && clientPodReceiver!.isNotEmpty)
+        'clientPodReceiver': clientPodReceiver,
+      if (clientPodAt != null && clientPodAt!.isNotEmpty)
+        'clientPodAt': clientPodAt,
+      if (clientPodSha256 != null && clientPodSha256!.isNotEmpty)
+        'clientPodSha256': clientPodSha256,
+      if (clientPodDocId != null && clientPodDocId!.isNotEmpty)
+        'clientPodDocId': clientPodDocId,
     };
   }
 
@@ -231,6 +257,12 @@ class Invoice {
     String? etimsCreditNoteQrData,
     String? etimsCreditNoteAt,
     bool clearEtims = false,
+    String? clientPodStamp,
+    String? clientPodReceiver,
+    String? clientPodAt,
+    String? clientPodSha256,
+    String? clientPodDocId,
+    bool clearClientPod = false,
   }) {
     return Invoice(
       id: id ?? this.id,
@@ -273,6 +305,15 @@ class Invoice {
       etimsCreditNoteQrData:
           etimsCreditNoteQrData ?? this.etimsCreditNoteQrData,
       etimsCreditNoteAt: etimsCreditNoteAt ?? this.etimsCreditNoteAt,
+      clientPodStamp:
+          clearClientPod ? null : (clientPodStamp ?? this.clientPodStamp),
+      clientPodReceiver:
+          clearClientPod ? null : (clientPodReceiver ?? this.clientPodReceiver),
+      clientPodAt: clearClientPod ? null : (clientPodAt ?? this.clientPodAt),
+      clientPodSha256:
+          clearClientPod ? null : (clientPodSha256 ?? this.clientPodSha256),
+      clientPodDocId:
+          clearClientPod ? null : (clientPodDocId ?? this.clientPodDocId),
     );
   }
 }

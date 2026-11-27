@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:excel/excel.dart' as xls;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:intl/intl.dart';
@@ -10,6 +11,7 @@ import 'package:town_treasure_groceries/data/services/local_storage_service.dart
 import 'package:town_treasure_groceries/data/services/supabase_service.dart';
 import 'package:town_treasure_groceries/domain/models/models.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
+import 'package:town_treasure_groceries/ui/features/dashboard/excel_exporter.dart';
 import 'package:town_treasure_groceries/ui/features/expenses/expenses_hub_screen.dart';
 import 'package:town_treasure_groceries/ui/features/expenses/expenses_view_model.dart';
 import 'package:town_treasure_groceries/ui/features/pricelists/pricelist_editor_screen.dart';
@@ -701,6 +703,239 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Monthly Statements'), findsOneWidget);
       expect(find.text('Savanna Bistro'), findsWidgets);
+    });
+  });
+
+  group('v1.2.11 Company Expense Rename & Bifurcated Bank Loan Amortization', () {
+    test('Company Expense category labels preserve backward-compatible JSON keys',
+        () {
+      expect(ExpensesViewModel.getCategoryLabel('personal'), 'Company General');
+      expect(
+        ExpensesViewModel.getCategoryLabel('airtime'),
+        'Office Airtime & Data',
+      );
+      expect(
+        ExpensesViewModel.getCategoryLabel('food_personal'),
+        'Staff & Business Meals',
+      );
+      expect(
+        ExpensesViewModel.getCategoryLabel('personal_transport'),
+        'Local Errands & Transport',
+      );
+      expect(
+        ExpensesViewModel.getCategoryLabel('medical'),
+        'Staff Welfare / Medical',
+      );
+      expect(
+        ExpensesViewModel.getCategoryLabel('clothing'),
+        'Uniforms & Protective Gear',
+      );
+      expect(
+        ExpensesViewModel.getCategoryLabel('entertainment'),
+        'Client Hospitality',
+      );
+      expect(ExpensesViewModel.getCategoryLabel('savings'), 'Company Reserve');
+      expect(
+        ExpensesViewModel.getCategoryLabel('other_personal'),
+        'Other Company Expense',
+      );
+    });
+
+    test(
+        'CompanyLoan PMT, Flat, Newton-Raphson EIR solver, and prepayment interest savings',
+        () {
+      // Reducing balance 18% p.a., KES 600,000 over 12 months
+      final pmt = CompanyLoan.computeMonthlyInstallment(
+        principal: 600000,
+        annualRatePct: 18.0,
+        tenureMonths: 12,
+        mode: CompanyLoanMode.reducingBalance,
+      );
+      expect(pmt, closeTo(55007.99, 0.05));
+
+      // Newton-Raphson EIR without fees recovers exact 18.0% nominal p.a.
+      final eirNoFee = CompanyLoan.solveEffectiveAnnualRatePct(
+        principal: 600000,
+        monthlyInstallment: pmt,
+        tenureMonths: 12,
+        upfrontFees: 0,
+      );
+      expect(eirNoFee, closeTo(18.0, 0.02));
+
+      // Upfront bank/excise fee of KES 12,000 increases true Effective Interest Rate
+      final eirWithFee = CompanyLoan.solveEffectiveAnnualRatePct(
+        principal: 600000,
+        monthlyInstallment: pmt,
+        tenureMonths: 12,
+        upfrontFees: 12000,
+      );
+      expect(eirWithFee, greaterThan(21.0));
+
+      // Flat rate 12% p.a. on KES 120,000 over 12 months -> 10,000 + 1,200 = 11,200/mo
+      final flatInst = CompanyLoan.computeMonthlyInstallment(
+        principal: 120000,
+        annualRatePct: 12.0,
+        tenureMonths: 12,
+        mode: CompanyLoanMode.flatRate,
+      );
+      expect(flatInst, closeTo(11200.0, 0.01));
+
+      // Schedule closing balance converges to zero and lump-sum prepayment saves interest
+      final baseLoan = CompanyLoan(
+        id: 'loan_1',
+        lenderName: 'Equity Bank',
+        disbursementDate: '2026-11-01',
+        principal: 600000,
+        mode: CompanyLoanMode.reducingBalance,
+        annualRatePct: 18.0,
+        tenureMonths: 12,
+        monthlyInstallment: pmt,
+      );
+      final schedule = baseLoan.buildSchedule();
+      expect(schedule.length, 12);
+      expect(schedule.last.closingBalance, closeTo(0.0, 0.01));
+
+      // Paying KES 200,000 lump-sum in month 1 cuts future reducing-balance interest
+      final split = baseLoan.splitPaymentAmount(200000);
+      expect(split.interest, closeTo(9000.0, 0.01)); // 1.5% of 600,000
+      expect(split.principal, closeTo(191000.0, 0.01));
+
+      final afterPrepay = baseLoan.copyWith(
+        payments: [
+          CompanyLoanPayment(
+            id: 'p1',
+            date: '2026-11-05',
+            totalAmount: 200000,
+            principalComponent: split.principal,
+            interestComponent: split.interest,
+          ),
+        ],
+      );
+      expect(afterPrepay.remainingPrincipal, closeTo(409000.0, 0.01));
+      expect(afterPrepay.estimatedInterestSavedByPrepayment, greaterThan(15000));
+    });
+
+    test(
+        'Bank facility disbursement & installment bifurcate P&L Net Profit vs Cash Balance, exclude principal from VAT, and export Bank Facilities sheet',
+        () async {
+      final vault = await _createTestVault();
+      await vault.setInvoices([
+        const Invoice(
+          id: 'inv-nov',
+          number: 'TTG-3100',
+          restaurantId: 'r1',
+          restaurantName: 'Sankara Hotel',
+          date: '2026-11-10',
+          totalSell: 200000,
+          totalBuy: 120000,
+          profit: 80000,
+          status: 'paid',
+        ),
+      ], sync: false);
+
+      final expVm = ExpensesViewModel(
+        vault: vault,
+        now: DateTime(2026, 11, 20),
+      );
+      final repVm = ReportsViewModel(vault: vault);
+      addTearDown(expVm.dispose);
+      addTearDown(repVm.dispose);
+
+      // 1. Disburse KES 500,000 Equity SME loan @ 18% p.a. (12 mos) with KES 5,000 upfront fee
+      final loan = await expVm.addBankCapitalFacility(
+        lenderName: 'Equity Bank',
+        facilityName: 'SME Working Capital',
+        disbursementDate: '2026-11-01',
+        principal: 500000,
+        upfrontFees: 5000,
+        mode: CompanyLoanMode.reducingBalance,
+        annualRatePct: 18.0,
+        tenureMonths: 12,
+        debitDayOfMonth: 5,
+      );
+      expect(expVm.companyLoans.length, 1);
+      expect(expVm.hubSummary.totalCapital, 500000);
+      expect(expVm.hubSummary.activeBankDebt, 500000);
+
+      // 2. Record 1st monthly installment (~45,840: 7,500 interest + ~38,340 principal)
+      final inst = loan.monthlyInstallment;
+      final payment = await expVm.recordCompanyLoanInstallment(
+        loanId: loan.id,
+        amount: inst,
+        date: '2026-11-05',
+        notes: 'Auto-debit #1',
+      );
+      expect(payment, isNotNull);
+      expect(payment!.interestComponent, closeTo(7500.0, 0.01));
+      expect(payment.principalComponent, closeTo(inst - 7500.0, 0.02));
+
+      // 3. P&L Net Profit deducts ONLY finance costs (5,000 fee + 7,500 interest = 12,500), NEVER principal!
+      final pnl = repVm.buildMonthlyPnL('2026-11');
+      expect(pnl.grossProfit, 80000);
+      expect(pnl.totalExpenses, closeTo(12500.0, 0.01));
+      expect(pnl.netProfit, closeTo(67500.0, 0.01));
+
+      // 4. Cash Balance (hubSummary.netBalance) deducts BOTH finance costs AND principal repaid!
+      // Cash = 500,000 (loan in) + 200,000 (paid rev) - 5,000 (fee) - inst (full cash debit)
+      expect(
+        expVm.hubSummary.netBalance,
+        closeTo(500000 + 200000 - 5000 - inst, 0.05),
+      );
+      expect(
+        expVm.hubSummary.activeBankDebt,
+        closeTo(500000 - payment.principalComponent, 0.05),
+      );
+      expect(expVm.debtServiceCoverageRatio, greaterThan(1.5));
+
+      // 5. KRA VAT input ignores loan_principal outflows
+      final principalExpense =
+          vault.expenses.firstWhere((e) => e.type == 'loan_principal');
+      expect(principalExpense.isLoanPrincipal, isTrue);
+
+      // 6. Excel workbook exports dedicated Bank Facilities sheet
+      final xlsxBytes = ExcelExporter.buildWorkbookBytes(vault);
+      final decoded = xls.Excel.decodeBytes(xlsxBytes);
+      expect(decoded.tables.containsKey('Bank Facilities'), isTrue);
+      final bankRows = decoded.tables['Bank Facilities']!.rows;
+      expect(bankRows.length, greaterThanOrEqualTo(2));
+      expect(bankRows[1][0]?.value.toString(), '2026-11-01');
+      expect(bankRows[1][1]?.value.toString(), 'Equity Bank');
+
+      // 7. Deleting the payment reverses both principal & interest entries cleanly
+      await expVm.deleteCompanyLoanPayment(loan.id, payment.id);
+      expect(expVm.hubSummary.activeBankDebt, 500000);
+      expect(vault.expenses.any((e) => e.type == 'loan_principal'), isFalse);
+    });
+
+    testWidgets(
+        'ExpensesHubScreen displays Company Expense tab instead of Personal and opens Bank Loan Capital toggle',
+        (tester) async {
+      final vault = await _createTestVault();
+      await tester.pumpWidget(
+        ChangeNotifierProvider<VaultRepository>.value(
+          value: vault,
+          child: MaterialApp(
+            theme: AppTheme.light(),
+            home: const ExpensesHubScreen(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Scroll TabBar or verify Company Expense tab exists while standalone Personal tab is gone
+      expect(find.text('Company Expense'), findsWidgets);
+      expect(find.text('Personal'), findsNothing);
+
+      // Switch to Capital Input tab and open Inject Capital modal
+      await tester.tap(find.text('Capital Input'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(FloatingActionButton));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Bank / Credit Loan'), findsOneWidget);
+      await tester.tap(find.text('Bank / Credit Loan'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Lender'), findsWidgets);
     });
   });
 }

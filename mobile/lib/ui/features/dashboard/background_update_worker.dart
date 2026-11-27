@@ -222,6 +222,28 @@ class BackgroundAlertRunner {
           await storage.setRaw(_keyLastRecurringMonth, monthKey);
         }
       }
+
+      final dueLoans = vault.settings.companyLoans.where((loan) {
+        if (loan.isFullySettled || loan.isPaidForMonth(monthKey)) return false;
+        final alertFromDay = (loan.debitDayOfMonth - 3).clamp(1, 28);
+        return now.day >= alertFromDay;
+      }).toList();
+      if (dueLoans.isNotEmpty) {
+        const loanAlertKey = 'ttg_last_notified_bank_loan_month';
+        final lastLoanMonth = await storage.getRaw(loanAlertKey) ?? '';
+        if (lastLoanMonth != monthKey) {
+          final totalDue =
+              dueLoans.fold<double>(0, (sum, l) => sum + l.monthlyInstallment);
+          final names = dueLoans.map((l) => l.lenderName).toSet().join(', ');
+          await smartNotifier.showCategoryNotification(
+            category: NotificationCategory.recurringBills,
+            title: 'Bank Facility Installment Due ($monthKey)',
+            body:
+                '$names monthly deduction of KES ${moneyFmt.format(totalDue)} is approaching. Ensure operating account float is ready.',
+          );
+          await storage.setRaw(loanAlertKey, monthKey);
+        }
+      }
     }
 
     if (prefs.statementAlertsEnabled && now.day <= 5 && nonDrafts.isNotEmpty) {

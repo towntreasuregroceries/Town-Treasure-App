@@ -1025,6 +1025,10 @@ class ClerkViewModel extends ChangeNotifier {
     required double otherCost,
     required String notes,
     required List<String> receiptPhotos,
+    String? clientPodStamp,
+    String? clientPodReceiver,
+    String? clientPodAt,
+    String? clientPodSha256,
     bool bypassDuplicateCheck = false,
   }) async {
     if (!canSubmitWithToken) {
@@ -1082,6 +1086,10 @@ class ClerkViewModel extends ChangeNotifier {
       totalBuy: 0,
       receiptPhoto: receiptPhotos.isNotEmpty ? receiptPhotos.first : null,
       receiptPhotos: receiptPhotos,
+      clientPodStamp: clientPodStamp,
+      clientPodReceiver: clientPodReceiver,
+      clientPodAt: clientPodAt,
+      clientPodSha256: clientPodSha256,
       notes: notes.trim(),
     );
 

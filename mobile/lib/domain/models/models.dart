@@ -1,6 +1,7 @@
 export 'app_helpers.dart';
 export 'borrowing.dart';
 export 'branded_document.dart';
+export 'company_loan.dart';
 export 'expense.dart';
 export 'invoice.dart';
 export 'invoice_line_item.dart';

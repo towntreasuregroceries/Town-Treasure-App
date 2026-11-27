@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../../data/repositories/vault_repository.dart';
+import '../../../data/services/personal_vault_service.dart';
 import '../../../data/services/print_service.dart';
 import '../../../domain/models/models.dart';
+import '../../core/client_stamp_scanner_sheet.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/app_print_helper.dart';
 import '../../core/widgets/print_options_sheet.dart';
@@ -27,6 +29,7 @@ class InvoiceDetailScreen extends StatefulWidget {
     this.viewModel,
     this.onOpenScanner,
     this.onEdit,
+    this.stampImagePicker,
   });
 
   final String invoiceId;
@@ -34,6 +37,7 @@ class InvoiceDetailScreen extends StatefulWidget {
   final Future<List<InvoiceLineItem>?> Function(BuildContext context)?
       onOpenScanner;
   final void Function(Invoice invoice)? onEdit;
+  final StampImageBytesPicker? stampImagePicker;
 
   @override
   State<InvoiceDetailScreen> createState() => _InvoiceDetailScreenState();
@@ -202,6 +206,85 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
     } finally {
       if (mounted) setState(() => _pdfBusy = false);
     }
+  }
+
+  Future<void> _handleAbsorbClientStamp(
+    Invoice inv,
+    Restaurant? rest,
+    VaultRepository vault,
+  ) async {
+    final clientName = _vm.displayRestaurantName(inv);
+    final scan = await ClientStampScannerSheet.show(
+      context,
+      clientName: clientName,
+      orderReference: (inv.cuInvoiceNumber ?? '').trim().isNotEmpty
+          ? inv.cuInvoiceNumber!
+          : inv.number,
+      initialReceiverName: inv.clientPodReceiver ?? '',
+      imagePicker: widget.stampImagePicker,
+    );
+    if (scan == null || !mounted) return;
+
+    String? uploadedDocId;
+    try {
+      final pvService = context.read<PersonalVaultService?>();
+      if (pvService != null && scan.rawPhotoJpegBytes.isNotEmpty) {
+        final rawSafeId = inv.id
+            .replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_')
+            .padRight(6, 'x');
+        final docId =
+            'pod_${rawSafeId.substring(0, math.min(64, rawSafeId.length))}';
+        final workerUrl = vault.settings.personalDocsWorkerUrl;
+        final savedMeta = await pvService.encryptStoreAndUpload(
+          meta: PersonalDocument(
+            id: docId,
+            title: 'POD Evidence — ${inv.number} ($clientName)',
+            category: PersonalDocCategory.other,
+            mimeType: 'image/jpeg',
+            notes:
+                'Raw unedited client stamp & sign-off slip (${scan.rawPhotoSha256.substring(0, 12)})',
+          ),
+          plainBytes: scan.rawPhotoJpegBytes,
+          workerUrl: workerUrl.isNotEmpty
+              ? workerUrl
+              : PersonalVaultService.defaultWorkerUrl,
+        );
+        final nextDocs = List<PersonalDocument>.from(
+          vault.settings.allPersonalDocumentsRaw,
+        )..removeWhere((d) => d.id == savedMeta.id);
+        nextDocs.insert(0, savedMeta);
+        await vault.setSettings(
+          vault.settings.withPersonalDocuments(nextDocs),
+          sync: false,
+        );
+        uploadedDocId = savedMeta.id;
+      }
+    } catch (_) {
+      // Offline or unconfigured R2 docs vault never blocks local/vault stamp punching.
+    }
+
+    final res = await _vm.attachClientPodStamp(
+      invoiceId: inv.id,
+      stampDataUri: scan.stampDataUri,
+      receiverName: scan.receiverName,
+      capturedAtIso: scan.capturedAtIso,
+      rawPhotoSha256: scan.rawPhotoSha256,
+      podDocId: uploadedDocId,
+    );
+    if (!mounted) return;
+    final updatedInv = _vm.findInvoiceById(inv.id) ?? inv;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(res.message),
+        backgroundColor: AppTheme.forestGreen,
+        behavior: SnackBarBehavior.floating,
+        action: SnackBarAction(
+          label: 'Send WhatsApp',
+          textColor: Colors.white,
+          onPressed: () => _handleShareWhatsApp(updatedInv, rest),
+        ),
+      ),
+    );
   }
 
   Future<bool> _confirmFiscalizedAction(
@@ -515,6 +598,8 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
                     ),
                   ),
                 ),
+              if (!inv.isDraft)
+                _buildClientPodBannerCard(inv, rest, vault),
               Card(
                 clipBehavior: Clip.antiAlias,
                 child: Column(
@@ -1022,6 +1107,137 @@ class _InvoiceDetailScreenState extends State<InvoiceDetailScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _buildClientPodBannerCard(
+    Invoice inv,
+    Restaurant? rest,
+    VaultRepository vault,
+  ) {
+    final podBytes = InvoicePdfBuilder.decodeRawDataUrlBytes(inv.clientPodStamp);
+    if (podBytes == null || podBytes.isEmpty) {
+      return Card(
+        key: const Key('card_invoice_pod_awaiting'),
+        margin: const EdgeInsets.only(bottom: 12),
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppTheme.sageTint,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.approval_outlined,
+                  color: AppTheme.forestGreen,
+                ),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Paperless Delivery Stamp (POD)',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 13.5,
+                      ),
+                    ),
+                    Text(
+                      'Snap the client\'s stamped & signed slip to punch onto this invoice.',
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        color: AppTheme.slateMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.tonalIcon(
+                key: const Key('btn_invoice_absorb_client_stamp'),
+                onPressed: () => _handleAbsorbClientStamp(inv, rest, vault),
+                icon: const Icon(Icons.camera_alt_outlined, size: 17),
+                label: const Text('Stamp'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final receiver = (inv.clientPodReceiver ?? '').trim();
+    return Card(
+      key: const Key('card_invoice_pod_verified'),
+      margin: const EdgeInsets.only(bottom: 12),
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: AppTheme.leafGreen, width: 1.3),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.verified,
+                  color: AppTheme.forestGreen,
+                  size: 19,
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Order Verified & Client Stamped${receiver.isNotEmpty ? ' • $receiver' : ''}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 13,
+                      color: AppTheme.forestGreenDeep,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => _handleAbsorbClientStamp(inv, rest, vault),
+                  child: const Text('Re-scan'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Container(
+                  height: 64,
+                  width: 140,
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceSage.withValues(alpha: 0.4),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.borderSubtle),
+                  ),
+                  child: Image.memory(podBytes, fit: BoxFit.contain),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: FilledButton.icon(
+                    key: const Key('btn_invoice_whatsapp_stamped'),
+                    onPressed: _pdfBusy
+                        ? null
+                        : () => _handleShareWhatsApp(inv, rest),
+                    icon: const Icon(Icons.chat_outlined, size: 17),
+                    label: const Text('WhatsApp Stamped Copy'),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

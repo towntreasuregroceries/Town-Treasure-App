@@ -37,6 +37,7 @@ class Expense {
   final String? updatedAt;
 
   bool get isCapital => type == 'capital';
+  bool get isLoanPrincipal => type == 'loan_principal';
 
   factory Expense.fromJson(Map<String, dynamic> json) {
     final rawVat = json['inputVatAmount'];

@@ -684,6 +684,56 @@ class _ClerkReviewSheetState extends State<ClerkReviewSheet> {
                           ),
                         ),
                       const SizedBox(height: 12),
+                      if (docket.hasClientPod) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: AppTheme.leafGreen,
+                              width: 1.2,
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.verified,
+                                    color: AppTheme.forestGreen,
+                                    size: 17,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      'CLIENT POD STAMP ATTACHED${(docket.clientPodReceiver ?? '').isNotEmpty ? ' • ${docket.clientPodReceiver}' : ''}',
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                        color: AppTheme.forestGreenDeep,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if ((docket.clientPodStamp ?? '').isNotEmpty) ...[
+                                const SizedBox(height: 8),
+                                SizedBox(
+                                  height: 64,
+                                  child: DocketReceiptImage(
+                                    dataUrl: docket.clientPodStamp!,
+                                    fit: BoxFit.contain,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       Container(
                         width: double.infinity,
                         padding: const EdgeInsets.all(10),

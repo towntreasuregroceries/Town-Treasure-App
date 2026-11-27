@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
+import 'package:pdf/pdf.dart';
 import 'package:provider/provider.dart';
 import 'package:town_treasure_groceries/data/repositories/vault_repository.dart';
 import 'package:town_treasure_groceries/data/services/crypto_service.dart';
@@ -1272,6 +1275,144 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('live_duplicate_invoice_banner')), findsOneWidget);
+    });
+  });
+
+  group('v1.2.11 Paperless eTIMS Client Stamp Punching & Stamped PDF Generation',
+      () {
+    Uint8List buildCrimsonStampSlipJpeg() {
+      final canvas = img.Image(width: 240, height: 180);
+      for (var y = 0; y < canvas.height; y++) {
+        for (var x = 0; x < canvas.width; x++) {
+          canvas.setPixelRgb(x, y, 248, 247, 244);
+        }
+      }
+      for (var y = 40; y < 140; y++) {
+        for (var x = 45; x < 195; x++) {
+          final isBorder =
+              y < 48 || y > 132 || x < 53 || x > 187 || (y >= 86 && y <= 94);
+          if (isBorder) {
+            canvas.setPixelRgb(x, y, 196, 28, 38); // Crimson red hotel stamp
+          }
+        }
+      }
+      return Uint8List.fromList(img.encodeJpg(canvas, quality: 92));
+    }
+
+    testWidgets(
+        'InvoiceDetailScreen absorbs client stamp onto an already-fiscalized eTIMS invoice and builds stamped A4 + 80mm PDFs',
+        (tester) async {
+      final env = await _createTestVault();
+      final vault = env.vault;
+      await vault.setRestaurants([
+        const Restaurant(
+          id: 'r1',
+          name: 'Villa Rosa Kempinski',
+          kraPin: 'P051234567X',
+        ),
+      ]);
+      await vault.setInvoices([
+        const Invoice(
+          id: 'inv_etims_1',
+          number: 'TTG-9910',
+          restaurantId: 'r1',
+          restaurantName: 'Villa Rosa Kempinski',
+          date: '2026-11-27',
+          items: [
+            InvoiceLineItem(
+              desc: 'English Cucumbers',
+              qty: 20,
+              unit: 'kgs',
+              buyPrice: 60,
+              sellPrice: 110,
+              total: 2200,
+            ),
+          ],
+          totalSell: 2200,
+          totalBuy: 1200,
+          profit: 1000,
+          status: 'pending',
+          cuInvoiceNumber: '0040799990000012345',
+          etimsQrData:
+              'https://itax.kra.go.ke/KRA-Portal/invoiceChk.htm?actionCode=loadPage&invoiceNo=0040799990000012345',
+          etimsRcptSign: 'ABCD-1234-EFGH-5678',
+          etimsSubmittedAt: '2026-11-27T07:15:00Z',
+        ),
+      ]);
+
+      final fakeSlipJpeg = buildCrimsonStampSlipJpeg();
+
+      await tester.pumpWidget(
+        _wrapWithProviders(
+          vault,
+          InvoiceDetailScreen(
+            invoiceId: 'inv_etims_1',
+            stampImagePicker: (_) async => fakeSlipJpeg,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Pre-capture: shows eTIMS QR Issued card + Awaiting POD Stamp card
+      expect(find.text('eTIMS QR Issued'), findsOneWidget);
+      expect(find.byKey(const Key('card_invoice_pod_awaiting')), findsOneWidget);
+
+      // Tap Stamp -> opens ClientStampScannerSheet
+      await tester.tap(find.byKey(const Key('btn_invoice_absorb_client_stamp')));
+      await tester.pumpAndSettle();
+
+      await tester.enterText(
+        find.byKey(const Key('input_pod_receiver_name')),
+        'Chef Kamau',
+      );
+      await tester.tap(find.byKey(const Key('btn_capture_stamp_camera')));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Crimson Red Ink'), findsOneWidget);
+
+      await tester.ensureVisible(
+        find.byKey(const Key('btn_confirm_punch_client_stamp')),
+      );
+      await tester.tap(find.byKey(const Key('btn_confirm_punch_client_stamp')));
+      await tester.pumpAndSettle();
+
+      // Post-capture: Verified banner & WhatsApp Stamped Copy button appear, eTIMS fields untouched!
+      expect(find.byKey(const Key('card_invoice_pod_verified')), findsOneWidget);
+      expect(find.byKey(const Key('btn_invoice_whatsapp_stamped')), findsOneWidget);
+
+      final updated = vault.invoices.single;
+      expect(updated.isFiscalized, isTrue);
+      expect(updated.cuInvoiceNumber, '0040799990000012345');
+      expect(updated.hasClientPodStamp, isTrue);
+      expect(updated.clientPodReceiver, 'Chef Kamau');
+
+      // Verify both A4 and 80mm thermal PDFs build cleanly with punched client stamp + eTIMS QR
+      final tinyPng = base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+      );
+      final a4Bytes = await InvoicePdfBuilder.buildPdfBytes(
+        invoice: updated,
+        restaurant: vault.restaurants.single,
+        logoBytesOverride: tinyPng,
+        stampBytesOverride: tinyPng,
+      );
+      expect(String.fromCharCodes(a4Bytes.take(5)), '%PDF-');
+
+      final roll80Bytes = await InvoicePdfBuilder.buildPdfBytes(
+        invoice: updated,
+        restaurant: vault.restaurants.single,
+        pageFormat: PdfPageFormat.roll80,
+        logoBytesOverride: tinyPng,
+        stampBytesOverride: tinyPng,
+      );
+      expect(String.fromCharCodes(roll80Bytes.take(5)), '%PDF-');
+
+      final waText = InvoicePdfBuilder.buildWhatsAppSummaryText(
+        invoice: updated,
+        restaurant: vault.restaurants.single,
+      );
+      expect(waText, contains('0040799990000012345'));
+      expect(waText, contains('Chef Kamau'));
     });
   });
 }

@@ -45,6 +45,7 @@ function createFakeD1() {
   const clerkInvites = new Map(); // id -> row
   const stagedInvoices = new Map(); // id -> row
   const clerkRateLimits = new Map(); // `${invite_id}|${hour_bucket}` -> row
+  const stagedPodStamps = new Map(); // docket_id -> row
 
   function prepare(rawSql) {
     const sql = rawSql.replace(/\s+/g, ' ').trim();
@@ -174,6 +175,31 @@ function createFakeD1() {
           const r = stagedInvoices.get(a[0]);
           const ok = r && r.owner_user_id === a[1] && r.status !== 'approved';
           return { results: ok ? [{ id: r.id, photo_keys_json: r.photo_keys_json }] : [] };
+        }
+
+        // staged_pod_stamps
+        if (sql === 'SELECT pod_r2_key, receiver_name, captured_at, sha256 FROM staged_pod_stamps WHERE docket_id = ? AND owner_user_id = ?') {
+          const r = stagedPodStamps.get(a[0]);
+          return {
+            results: r && r.owner_user_id === a[1]
+              ? [{ pod_r2_key: r.pod_r2_key, receiver_name: r.receiver_name, captured_at: r.captured_at, sha256: r.sha256 }]
+              : [],
+          };
+        }
+        if (sql === 'SELECT docket_id, receiver_name, captured_at, sha256 FROM staged_pod_stamps WHERE owner_user_id = ?') {
+          const rows = [...stagedPodStamps.values()].filter((r) => r.owner_user_id === a[0]);
+          return {
+            results: rows.map((r) => ({
+              docket_id: r.docket_id,
+              receiver_name: r.receiver_name,
+              captured_at: r.captured_at,
+              sha256: r.sha256,
+            })),
+          };
+        }
+        if (sql === 'SELECT pod_r2_key FROM staged_pod_stamps WHERE docket_id = ? AND owner_user_id = ?') {
+          const r = stagedPodStamps.get(a[0]);
+          return { results: r && r.owner_user_id === a[1] ? [{ pod_r2_key: r.pod_r2_key }] : [] };
         }
 
         throw new Error(`Unhandled D1 ALL/FIRST query in test fake: ${sql}`);
@@ -362,6 +388,27 @@ function createFakeD1() {
           r.updated_at = a[1];
           return { meta: { changes: 1 } };
         }
+        if (sql.startsWith('INSERT INTO staged_pod_stamps')) {
+          const cur = stagedPodStamps.get(a[0]);
+          if (cur && cur.owner_user_id !== a[1]) return { meta: { changes: 0 } };
+          stagedPodStamps.set(a[0], {
+            docket_id: a[0],
+            owner_user_id: a[1],
+            pod_r2_key: a[2],
+            receiver_name: a[3],
+            captured_at: a[4],
+            sha256: a[5],
+          });
+          return { meta: { changes: 1 } };
+        }
+        if (sql === 'DELETE FROM staged_pod_stamps WHERE docket_id = ? AND owner_user_id = ?') {
+          const cur = stagedPodStamps.get(a[0]);
+          if (cur && cur.owner_user_id === a[1]) {
+            stagedPodStamps.delete(a[0]);
+            return { meta: { changes: 1 } };
+          }
+          return { meta: { changes: 0 } };
+        }
 
         throw new Error(`Unhandled D1 RUN query in test fake: ${sql}`);
       },
@@ -369,7 +416,7 @@ function createFakeD1() {
     return stmt;
   }
 
-  return { prepare, vaultMeta, vaultHistory, clerkInvites, stagedInvoices };
+  return { prepare, vaultMeta, vaultHistory, clerkInvites, stagedInvoices, stagedPodStamps };
 }
 
 function makeFakeAuthFetch(usersByToken) {
@@ -858,4 +905,106 @@ test('ttg-api security: blocks cross-tenant PUT /staged/:id, hides owner email o
     authFetch,
   );
   assert.equal(oversized.status, 413);
+});
+
+test('ttg-api POD stamp: clerk submits client_pod_stamp -> owner list shows metadata -> owner detail hydrates R2 stamp -> delete cleans R2 & D1', async () => {
+  const { handleApiRequest } = await loadTtgApiWorker();
+  const db = createFakeD1();
+  const storage = createFakeR2Bucket();
+  const env = {
+    DB: db,
+    STORAGE: storage,
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_ANON_KEY: 'anon',
+  };
+  const authFetch = makeFakeAuthFetch({
+    'jwt-vero': { id: 'owner-1', email: 'vero@example.com', user_metadata: { full_name: 'Veronicah' } },
+  });
+
+  const invRes = await handleApiRequest(
+    new Request('https://api.example/clerk', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer jwt-vero', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_invite' }),
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  const { token } = await invRes.json();
+
+  const samplePngDataUri = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const sampleSha = 'a'.repeat(64);
+  const subRes = await handleApiRequest(
+    new Request('https://api.example/clerk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        action: 'submit',
+        invite_token: token,
+        submission_key: 'sub_pod_stamp_000001',
+        docket: {
+          clerk_name: 'John Clerk',
+          restaurant_name: 'Sankara Nairobi',
+          invoice_date: '2026-11-27',
+          items_json: [{ desc: 'Avocados', qty: 12, unit: 'kgs', sellPrice: 150, buyPrice: 90 }],
+          client_pod_stamp: samplePngDataUri,
+          client_pod_receiver: 'Chef Musa',
+          client_pod_at: '2026-11-27T10:15:00.000Z',
+          client_pod_sha256: sampleSha,
+        },
+      }),
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  assert.equal(subRes.status, 200);
+  const subJson = await subRes.json();
+  const docketId = subJson.submission.id;
+  assert.equal(subJson.submission.client_pod_receiver, 'Chef Musa');
+  assert.equal(subJson.submission.client_pod_stamp, samplePngDataUri);
+  assert.equal(storage.store.has(`staged/owner-1/${docketId}/pod-stamp.txt`), true);
+
+  // Owner GET /staged returns lightweight POD metadata without transferring heavy R2 stamp bytes
+  const listRes = await handleApiRequest(
+    new Request('https://api.example/staged', {
+      headers: { Authorization: 'Bearer jwt-vero' },
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  const listJson = await listRes.json();
+  assert.equal(listJson.rows.length, 1);
+  assert.equal(listJson.rows[0].client_pod_receiver, 'Chef Musa');
+  assert.equal(listJson.rows[0].client_pod_sha256, sampleSha);
+  assert.equal(listJson.rows[0].client_pod_stamp, undefined);
+
+  // Owner GET /staged/:id hydrates full transparent PNG stamp from R2
+  const detailRes = await handleApiRequest(
+    new Request(`https://api.example/staged/${encodeURIComponent(docketId)}`, {
+      headers: { Authorization: 'Bearer jwt-vero' },
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  const detailJson = await detailRes.json();
+  assert.equal(detailJson.row.client_pod_stamp, samplePngDataUri);
+  assert.equal(detailJson.row.client_pod_receiver, 'Chef Musa');
+
+  // Deleting pending docket cleans up both R2 pod-stamp.txt and D1 staged_pod_stamps row
+  const delRes = await handleApiRequest(
+    new Request(`https://api.example/staged/${encodeURIComponent(docketId)}`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Bearer jwt-vero' },
+    }),
+    env,
+    {},
+    authFetch,
+  );
+  assert.deepEqual(await delRes.json(), { deleted: true });
+  assert.equal(storage.store.has(`staged/owner-1/${docketId}/pod-stamp.txt`), false);
+  assert.equal(db.stagedPodStamps.size, 0);
 });

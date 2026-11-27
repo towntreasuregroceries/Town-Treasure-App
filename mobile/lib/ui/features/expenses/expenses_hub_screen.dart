@@ -108,7 +108,7 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
       case 0:
         _openExpenseModal(defaultType: 'expense');
       case 1:
-        _openExpenseModal(defaultType: 'capital');
+        _openCapitalInjectionModal();
       case 2:
         _openStaffModal();
       case 3:
@@ -131,7 +131,7 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
       case 3:
         return 'Add Recurring';
       case 4:
-        return 'Add Personal';
+        return 'Add Company Expense';
       case 5:
         return 'Record Loan';
       default:
@@ -665,7 +665,7 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Text(
-                      'Add Personal Expense',
+                      'Add Company Expense',
                       style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
                             fontWeight: FontWeight.w700,
                           ),
@@ -675,7 +675,7 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
                       controller: descCtrl,
                       decoration: const InputDecoration(
                         labelText: 'Description',
-                        hintText: 'e.g. Lunch, Airtime, Transport',
+                        hintText: 'e.g. Office Airtime, Staff Meals, Errand Fare',
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -761,7 +761,7 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
                         );
                         if (ctx.mounted) Navigator.of(ctx).pop();
                       },
-                      child: const Text('Save Personal Expense'),
+                      child: const Text('Save Company Expense'),
                     ),
                   ],
                 ),
@@ -769,6 +769,674 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
             ),
           );
         },
+      ),
+    );
+  }
+
+  Future<void> _openCapitalInjectionModal() async {
+    var isBankFacility = false;
+    var loanMode = CompanyLoanMode.reducingBalance;
+    final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => ScopedTextControllers(
+        initialTexts: [
+          todayIso,
+          '',
+          '',
+          'Equity Bank',
+          'Working Capital Facility',
+          '18',
+          '12',
+          '',
+          '0',
+          '5',
+        ],
+        builder: (ctx, ctrls) {
+          final dateCtrl = ctrls[0];
+          final descCtrl = ctrls[1];
+          final amountCtrl = ctrls[2];
+          final lenderCtrl = ctrls[3];
+          final facilityCtrl = ctrls[4];
+          final rateCtrl = ctrls[5];
+          final tenureCtrl = ctrls[6];
+          final monthlyOverrideCtrl = ctrls[7];
+          final feeCtrl = ctrls[8];
+          final debitDayCtrl = ctrls[9];
+
+          return StatefulBuilder(
+            builder: (ctx, setModalState) {
+              final principal = double.tryParse(amountCtrl.text.trim()) ?? 0;
+              final rate = double.tryParse(rateCtrl.text.trim()) ?? 0;
+              final tenure = int.tryParse(tenureCtrl.text.trim()) ?? 12;
+              final upfrontFee = double.tryParse(feeCtrl.text.trim()) ?? 0;
+              final manualInst =
+                  double.tryParse(monthlyOverrideCtrl.text.trim()) ?? 0;
+
+              final previewInstallment = loanMode ==
+                      CompanyLoanMode.fixedInstallment
+                  ? manualInst
+                  : CompanyLoan.computeMonthlyInstallment(
+                      principal: principal,
+                      annualRatePct: rate,
+                      tenureMonths: tenure > 0 ? tenure : 1,
+                      mode: loanMode,
+                    );
+              final previewEir = CompanyLoan.solveEffectiveAnnualRatePct(
+                principal: principal,
+                monthlyInstallment: previewInstallment,
+                tenureMonths: tenure > 0 ? tenure : 1,
+                upfrontFees: upfrontFee,
+              );
+              final previewTotalInterest = math.max(
+                0.0,
+                (previewInstallment * (tenure > 0 ? tenure : 1)) -
+                    principal +
+                    upfrontFee,
+              );
+
+              return Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  18,
+                  20,
+                  math.max(
+                        MediaQuery.viewInsetsOf(ctx).bottom,
+                        MediaQuery.viewPaddingOf(ctx).bottom,
+                      ) +
+                      24,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Record Capital Injection',
+                        style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                      const SizedBox(height: 12),
+                      SegmentedButton<bool>(
+                        key: const Key('seg_capital_source_type'),
+                        segments: const [
+                          ButtonSegment<bool>(
+                            value: false,
+                            icon: Icon(Icons.savings_outlined, size: 17),
+                            label: Text('Owner Equity'),
+                          ),
+                          ButtonSegment<bool>(
+                            value: true,
+                            icon: Icon(Icons.account_balance_outlined, size: 17),
+                            label: Text('Bank / Credit Loan'),
+                          ),
+                        ],
+                        selected: {isBankFacility},
+                        onSelectionChanged: (sel) {
+                          if (sel.isNotEmpty) {
+                            setModalState(() => isBankFacility = sel.first);
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: dateCtrl,
+                              readOnly: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Date Disbursed',
+                                suffixIcon:
+                                    Icon(Icons.calendar_today, size: 18),
+                              ),
+                              onTap: () async {
+                                final picked = await showDatePicker(
+                                  context: ctx,
+                                  initialDate: DateTime.now(),
+                                  firstDate: DateTime(2020),
+                                  lastDate: DateTime(2035),
+                                );
+                                if (picked != null) {
+                                  dateCtrl.text = DateFormat('yyyy-MM-dd')
+                                      .format(picked);
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextField(
+                              key: const Key('input_capital_principal'),
+                              controller: amountCtrl,
+                              onChanged: (_) => setModalState(() {}),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                              decoration: InputDecoration(
+                                labelText: isBankFacility
+                                    ? 'Loan Principal (KES)'
+                                    : 'Capital Amount (KES)',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (!isBankFacility) ...[
+                        TextField(
+                          key: const Key('input_capital_equity_desc'),
+                          controller: descCtrl,
+                          decoration: const InputDecoration(
+                            labelText: 'Source / Description',
+                            hintText: 'e.g. Director working capital injection',
+                          ),
+                        ),
+                      ] else ...[
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                key: const Key('input_loan_lender_name'),
+                                controller: lenderCtrl,
+                                decoration: const InputDecoration(
+                                  labelText: 'Bank / Lender',
+                                  hintText: 'e.g. Equity Bank',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: TextField(
+                                controller: facilityCtrl,
+                                decoration: const InputDecoration(
+                                  labelText: 'Facility Type',
+                                  hintText: 'e.g. SME Working Capital',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<CompanyLoanMode>(
+                          key: const Key('dropdown_loan_mode'),
+                          initialValue: loanMode,
+                          decoration: const InputDecoration(
+                            labelText: 'Repayment Structure',
+                          ),
+                          items: CompanyLoanMode.values
+                              .map(
+                                (m) => DropdownMenuItem(
+                                  value: m,
+                                  child: Text(m.label),
+                                ),
+                              )
+                              .toList(),
+                          onChanged: (v) {
+                            if (v != null) setModalState(() => loanMode = v);
+                          },
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                key: const Key('input_loan_tenure_months'),
+                                controller: tenureCtrl,
+                                onChanged: (_) => setModalState(() {}),
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Tenure (Months)',
+                                  hintText: '12',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: loanMode ==
+                                      CompanyLoanMode.fixedInstallment
+                                  ? TextField(
+                                      key: const Key('input_loan_fixed_monthly'),
+                                      controller: monthlyOverrideCtrl,
+                                      onChanged: (_) => setModalState(() {}),
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                        decimal: true,
+                                      ),
+                                      decoration: const InputDecoration(
+                                        labelText: 'Monthly Payback (KES)',
+                                      ),
+                                    )
+                                  : TextField(
+                                      key: const Key('input_loan_annual_rate'),
+                                      controller: rateCtrl,
+                                      onChanged: (_) => setModalState(() {}),
+                                      keyboardType:
+                                          const TextInputType.numberWithOptions(
+                                        decimal: true,
+                                      ),
+                                      decoration: const InputDecoration(
+                                        labelText: 'Interest Rate (% p.a.)',
+                                      ),
+                                    ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                key: const Key('input_loan_upfront_fee'),
+                                controller: feeCtrl,
+                                onChanged: (_) => setModalState(() {}),
+                                keyboardType:
+                                    const TextInputType.numberWithOptions(
+                                  decimal: true,
+                                ),
+                                decoration: const InputDecoration(
+                                  labelText: 'Upfront Bank/Excise Fee (KES)',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: TextField(
+                                controller: debitDayCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: const InputDecoration(
+                                  labelText: 'Monthly Debit Day (1-28)',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (principal > 0 && previewInstallment > 0) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: AppTheme.sageTint,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: AppTheme.leafGreen),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Monthly Installment: KES ${ExpensesViewModel.formatMoney(previewInstallment)}',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    color: AppTheme.forestGreenDeep,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  'True Effective Rate (EIR): ${previewEir.toStringAsFixed(2)}% p.a.  •  Total Finance Cost: KES ${ExpensesViewModel.formatMoney(previewTotalInterest)}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: AppTheme.slateInk,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                const Text(
+                                  'Principal repayments reduce debt & cash without distorting Monthly P&L Net Profit; only interest is expensed.',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: AppTheme.slateMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                      const SizedBox(height: 18),
+                      FilledButton(
+                        key: const Key('btn_save_capital_injection'),
+                        onPressed: () async {
+                          if (principal <= 0) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(
+                                content: Text('Enter a valid amount > 0'),
+                              ),
+                            );
+                            return;
+                          }
+                          if (!isBankFacility) {
+                            final d = descCtrl.text.trim().isEmpty
+                                ? 'Owner Capital Injection'
+                                : descCtrl.text.trim();
+                            await _vm.addExpenseEntry(
+                              type: 'capital',
+                              date: dateCtrl.text,
+                              desc: d,
+                              category: 'capital',
+                              amount: principal,
+                            );
+                          } else {
+                            if (loanMode == CompanyLoanMode.fixedInstallment &&
+                                manualInst <= 0) {
+                              ScaffoldMessenger.of(ctx).showSnackBar(
+                                const SnackBar(
+                                  content:
+                                      Text('Enter the monthly payback amount'),
+                                ),
+                              );
+                              return;
+                            }
+                            await _vm.addBankCapitalFacility(
+                              lenderName: lenderCtrl.text,
+                              facilityName: facilityCtrl.text,
+                              disbursementDate: dateCtrl.text,
+                              principal: principal,
+                              upfrontFees: upfrontFee,
+                              mode: loanMode,
+                              annualRatePct: rate,
+                              tenureMonths: tenure > 0 ? tenure : 12,
+                              monthlyInstallmentOverride: manualInst > 0
+                                  ? manualInst
+                                  : null,
+                              debitDayOfMonth:
+                                  int.tryParse(debitDayCtrl.text.trim()) ?? 5,
+                            );
+                          }
+                          if (ctx.mounted) Navigator.of(ctx).pop();
+                        },
+                        child: Text(
+                          isBankFacility
+                              ? 'Disburse Bank Facility & Build Schedule'
+                              : 'Save Capital Injection',
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _openCompanyLoanInstallmentModal(CompanyLoan loan) async {
+    final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final defaultAmt = math
+        .min(
+          loan.monthlyInstallment,
+          loan.remainingPrincipal +
+              loan.splitPaymentAmount(loan.monthlyInstallment).interest,
+        )
+        .toStringAsFixed(2);
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => ScopedTextControllers(
+        initialTexts: [todayIso, defaultAmt, ''],
+        builder: (ctx, ctrls) {
+          final dateCtrl = ctrls[0];
+          final amtCtrl = ctrls[1];
+          final notesCtrl = ctrls[2];
+          return StatefulBuilder(
+            builder: (ctx, setModalState) {
+              final amt = double.tryParse(amtCtrl.text.trim()) ?? 0;
+              final split = loan.splitPaymentAmount(amt);
+              return Padding(
+                padding: EdgeInsets.fromLTRB(
+                  20,
+                  20,
+                  20,
+                  math.max(
+                        MediaQuery.viewInsetsOf(ctx).bottom,
+                        MediaQuery.viewPaddingOf(ctx).bottom,
+                      ) +
+                      24,
+                ),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text(
+                        'Record Installment — ${loan.lenderName}',
+                        style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Remaining Principal: KES ${ExpensesViewModel.formatMoney(loan.remainingPrincipal)}',
+                        style: const TextStyle(color: AppTheme.slateMuted),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: dateCtrl,
+                              readOnly: true,
+                              decoration: const InputDecoration(
+                                labelText: 'Payment Date',
+                                suffixIcon:
+                                    Icon(Icons.calendar_today, size: 18),
+                              ),
+                              onTap: () async {
+                                final picked = await showDatePicker(
+                                  context: ctx,
+                                  initialDate: DateTime.now(),
+                                  firstDate: DateTime(2020),
+                                  lastDate: DateTime(2035),
+                                );
+                                if (picked != null) {
+                                  dateCtrl.text = DateFormat('yyyy-MM-dd')
+                                      .format(picked);
+                                }
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: TextField(
+                              key: const Key('input_loan_installment_amount'),
+                              controller: amtCtrl,
+                              onChanged: (_) => setModalState(() {}),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                decimal: true,
+                              ),
+                              decoration: const InputDecoration(
+                                labelText: 'Total Paid (KES)',
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      if (amt > 0) ...[
+                        const SizedBox(height: 12),
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: AppTheme.surfaceSage,
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: AppTheme.borderSubtle),
+                          ),
+                          child: Text(
+                            'Auto-Split: Principal Reduction KES ${ExpensesViewModel.formatMoney(split.principal)}  +  Finance Interest Expense KES ${ExpensesViewModel.formatMoney(split.interest)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: AppTheme.slateInk,
+                            ),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 12),
+                      TextField(
+                        controller: notesCtrl,
+                        decoration: const InputDecoration(
+                          labelText: 'Bank Ref / Notes (Optional)',
+                          hintText: 'e.g. Standing order debit',
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      FilledButton(
+                        key: const Key('btn_confirm_loan_installment'),
+                        onPressed: () async {
+                          if (amt <= 0) return;
+                          await _vm.recordCompanyLoanInstallment(
+                            loanId: loan.id,
+                            amount: amt,
+                            date: dateCtrl.text,
+                            notes: notesCtrl.text,
+                          );
+                          if (ctx.mounted) Navigator.of(ctx).pop();
+                        },
+                        child: const Text('Save Bifurcated Installment'),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Future<void> _openCompanyLoanScheduleSheet(CompanyLoan loan) async {
+    final schedule = loan.buildSchedule();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: AppTheme.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => FractionallySizedBox(
+        heightFactor: 0.82,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                '${loan.lenderName} — Amortization & Payments',
+                style: Theme.of(ctx).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+              ),
+              Text(
+                '${loan.facilityName} • Effective Rate ${loan.effectiveAnnualRatePct.toStringAsFixed(2)}% p.a.',
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  color: AppTheme.slateMuted,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Expanded(
+                child: ListView(
+                  children: [
+                    if (loan.payments.isNotEmpty) ...[
+                      const Text(
+                        'Recorded Repayments',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.forestGreenDeep,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      for (final p in loan.payments.reversed)
+                        Card(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          child: ListTile(
+                            dense: true,
+                            title: Text(
+                              'KES ${ExpensesViewModel.formatMoney(p.totalAmount)} (${ExpensesViewModel.formatDate(p.date)})',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            subtitle: Text(
+                              'Principal: KES ${ExpensesViewModel.formatMoney(p.principalComponent)} • Interest: KES ${ExpensesViewModel.formatMoney(p.interestComponent)}',
+                            ),
+                            trailing: IconButton(
+                              icon: const Icon(
+                                Icons.delete_outline,
+                                color: AppTheme.danger,
+                                size: 19,
+                              ),
+                              onPressed: () async {
+                                final ok = await _confirmDelete(
+                                  'Delete Installment',
+                                  'Reverse this installment and its Principal/Interest ledger entries?',
+                                );
+                                if (ok) {
+                                  await _vm.deleteCompanyLoanPayment(
+                                    loan.id,
+                                    p.id,
+                                  );
+                                  if (ctx.mounted) Navigator.of(ctx).pop();
+                                }
+                              },
+                            ),
+                          ),
+                        ),
+                      const SizedBox(height: 14),
+                    ],
+                    const Text(
+                      'Contractual Amortization Schedule',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: AppTheme.slateInk,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    for (final row in schedule)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 5),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              '#${row.periodIndex} • ${ExpensesViewModel.formatDate(row.dueDateIso)}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'P: ${ExpensesViewModel.formatMoney(row.principal)} | I: ${ExpensesViewModel.formatMoney(row.interest)} | Bal: ${ExpensesViewModel.formatMoney(row.closingBalance)}',
+                              style: const TextStyle(
+                                fontSize: 11.5,
+                                color: AppTheme.slateMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1153,7 +1821,10 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
                 Tab(icon: Icon(Icons.savings_outlined), text: 'Capital Input'),
                 Tab(icon: Icon(Icons.groups_outlined), text: 'Monthly Salaries'),
                 Tab(icon: Icon(Icons.autorenew), text: 'Recurring'),
-                Tab(icon: Icon(Icons.person_outline), text: 'Personal'),
+                Tab(
+                  icon: Icon(Icons.business_center_outlined),
+                  text: 'Company Expense',
+                ),
                 Tab(
                   icon: Icon(Icons.account_balance_wallet_outlined),
                   text: "Boss's Account",
@@ -1176,7 +1847,7 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
                   controller: _tabController,
                   children: [
                     _buildExpenseListTab(_vm.businessExpenses, isCapital: false),
-                    _buildExpenseListTab(_vm.capitalEntries, isCapital: true),
+                    _buildCapitalInputTab(),
                     _buildSalariesTab(),
                     _buildRecurringTab(),
                     _buildPersonalTab(),
@@ -1188,6 +1859,281 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
           ),
         );
       },
+    );
+  }
+
+  Widget _buildCapitalInputTab() {
+    final facilities = _vm.companyLoans;
+    final capItems = _vm.capitalEntries;
+    final dscr = _vm.debtServiceCoverageRatio;
+
+    if (facilities.isEmpty && capItems.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text(
+            'No capital entries yet. Tap "+ Add Capital" to record Owner Equity or a Bank / Credit Facility.',
+            textAlign: TextAlign.center,
+            style: TextStyle(color: AppTheme.slateMuted),
+          ),
+        ),
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 96),
+      children: [
+        if (facilities.isNotEmpty) ...[
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Bank & Credit Facilities',
+                style: TextStyle(
+                  fontSize: 14.5,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.slateInk,
+                ),
+              ),
+              if (dscr != null)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: dscr >= 1.35
+                        ? AppTheme.successSurface
+                        : AppTheme.warningSurface,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'DSCR ${dscr.toStringAsFixed(2)}x ${dscr >= 1.35 ? 'Healthy' : 'Tight'}',
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: dscr >= 1.35
+                          ? AppTheme.forestGreenDeep
+                          : AppTheme.warning,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          for (final loan in facilities) ...[
+            Builder(
+              builder: (context) {
+                final savedInterest = loan.estimatedInterestSavedByPrepayment;
+                return Card(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  child: Padding(
+                    padding: const EdgeInsets.all(14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${loan.lenderName} — ${loan.facilityName}',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 14.5,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Disbursed ${ExpensesViewModel.formatDate(loan.disbursementDate)} • Debit Day ${loan.debitDayOfMonth}th • EIR ${loan.effectiveAnnualRatePct.toStringAsFixed(1)}%',
+                                    style: const TextStyle(
+                                      fontSize: 11.5,
+                                      color: AppTheme.slateMuted,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: loan.isFullySettled
+                                    ? AppTheme.successSurface
+                                    : AppTheme.infoSurface,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                loan.isFullySettled ? 'Settled' : 'Active',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: loan.isFullySettled
+                                      ? AppTheme.forestGreen
+                                      : AppTheme.info,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: LinearProgressIndicator(
+                            value: loan.payoffProgress,
+                            minHeight: 7,
+                            backgroundColor: AppTheme.surfaceSage,
+                            color: AppTheme.leafGreen,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 4,
+                          children: [
+                            Text(
+                              'Principal: KES ${ExpensesViewModel.formatMoney(loan.principal)}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              'Remaining: KES ${ExpensesViewModel.formatMoney(loan.remainingPrincipal)}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.danger,
+                              ),
+                            ),
+                            Text(
+                              'Monthly: KES ${ExpensesViewModel.formatMoney(loan.monthlyInstallment)}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: AppTheme.forestGreenDeep,
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (savedInterest > 10) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'Early Principal Top-Up Savings: KES ${ExpensesViewModel.formatMoney(savedInterest)} interest saved!',
+                            style: const TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: AppTheme.forestGreen,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          children: [
+                            if (!loan.isFullySettled)
+                              FilledButton.icon(
+                                key: Key('btn_repay_company_loan_${loan.id}'),
+                                onPressed: () =>
+                                    _openCompanyLoanInstallmentModal(loan),
+                                icon: const Icon(Icons.payments_outlined, size: 17),
+                                label: const Text('Record Installment'),
+                              ),
+                            OutlinedButton.icon(
+                              onPressed: () =>
+                                  _openCompanyLoanScheduleSheet(loan),
+                              icon: const Icon(Icons.table_chart_outlined, size: 17),
+                              label: const Text('Schedule'),
+                            ),
+                            IconButton(
+                              tooltip: 'Delete Facility',
+                              icon: const Icon(
+                                Icons.delete_outline,
+                                color: AppTheme.danger,
+                              ),
+                              onPressed: () async {
+                                final ok = await _confirmDelete(
+                                  'Delete Bank Facility',
+                                  'Delete "${loan.lenderName}" and all linked disbursement/installment ledger entries?',
+                                );
+                                if (ok) await _vm.deleteCompanyLoan(loan.id);
+                              },
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+          const SizedBox(height: 8),
+          const Text(
+            'Capital Input Ledger',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: AppTheme.slateInk,
+            ),
+          ),
+          const SizedBox(height: 6),
+        ],
+        for (final e in capItems)
+          Card(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: AppTheme.successSurface,
+                child: Icon(
+                  Icons.arrow_downward,
+                  color: AppTheme.forestGreen,
+                  size: 20,
+                ),
+              ),
+              title: Text(
+                e.desc,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.slateInk,
+                ),
+              ),
+              subtitle: Text(
+                '${ExpensesViewModel.formatDate(e.date)} | '
+                '${ExpensesViewModel.getCategoryLabel(e.category)}',
+              ),
+              trailing: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'KES ${ExpensesViewModel.formatMoney(e.amount)}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: AppTheme.forestGreen,
+                    ),
+                  ),
+                  if (e.refType != 'company_loan_disbursement')
+                    IconButton(
+                      icon: const Icon(
+                        Icons.delete_outline,
+                        color: AppTheme.danger,
+                        size: 20,
+                      ),
+                      onPressed: () async {
+                        final ok = await _confirmDelete(
+                          'Delete Entry',
+                          'Are you sure you want to delete "${e.desc}"?',
+                        );
+                        if (ok) await _vm.deleteExpense(e.id);
+                      },
+                    ),
+                ],
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -1574,7 +2520,7 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Personal Spending (${_vm.selectedMonth})',
+                  'Company Expenses (${_vm.selectedMonth})',
                   style: const TextStyle(
                     fontWeight: FontWeight.w600,
                     color: AppTheme.forestGreenDeep,
@@ -1598,7 +2544,7 @@ class _ExpensesHubScreenState extends State<ExpensesHubScreen>
             padding: EdgeInsets.symmetric(vertical: 40),
             child: Center(
               child: Text(
-                'No personal expenses this month.',
+                'No company expenses recorded this month.',
                 style: TextStyle(color: AppTheme.slateMuted),
               ),
             ),
@@ -1879,6 +2825,15 @@ class _HubKpiHeader extends StatelessWidget {
                   : AppTheme.danger,
               icon: Icons.account_balance_outlined,
             ),
+            if (summary.activeBankDebt > 0) ...[
+              const SizedBox(width: 8),
+              _KpiCard(
+                title: 'Active Bank Debt',
+                amount: summary.activeBankDebt,
+                color: AppTheme.warning,
+                icon: Icons.credit_score_outlined,
+              ),
+            ],
           ],
         ),
       ),

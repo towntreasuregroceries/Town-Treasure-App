@@ -215,6 +215,17 @@ function normalizeDocketInput(docket) {
     throw new Error('Receipt pages must be valid JPEG, PNG, WebP, or GIF image data.');
   }
 
+  const rawPodStamp = typeof docket.client_pod_stamp === 'string' && docket.client_pod_stamp.trim()
+    ? docket.client_pod_stamp.trim()
+    : null;
+  if (rawPodStamp && (rawPodStamp.length > 6_000_000 || !imageDataUrl.test(rawPodStamp))) {
+    throw new Error('Client POD stamp must be valid image data.');
+  }
+  const podReceiver = cleanText(docket.client_pod_receiver ?? '', 120);
+  const podAt = cleanText(docket.client_pod_at ?? '', 40);
+  const rawSha = cleanText(docket.client_pod_sha256 ?? '', 64).toLowerCase();
+  const podSha256 = /^[0-9a-f]{64}$/.test(rawSha) ? rawSha : '';
+
   return {
     clerk_name: clerkName,
     restaurant_name: restaurantName,
@@ -225,6 +236,10 @@ function normalizeDocketInput(docket) {
     total_sell: itemTotal + deliveryCost + otherCost,
     total_buy: buyTotal,
     photos,
+    pod_stamp: rawPodStamp,
+    pod_receiver: podReceiver,
+    pod_at: podAt,
+    pod_sha256: podSha256,
     notes: cleanText(docket.notes ?? '', 4000),
   };
 }
@@ -270,7 +285,70 @@ async function hydratePhotosFromR2(env, photoKeysJson) {
   return photos;
 }
 
-function rowToStagedDto(row, hydratedPhotos = null) {
+async function savePodStampRecord(env, ownerId, docketId, podStamp, receiver, capturedAt, sha256) {
+  if (!podStamp) return null;
+  const podKey = `staged/${ownerId}/${docketId}/pod-stamp.txt`;
+  await env.STORAGE.put(podKey, podStamp, {
+    httpMetadata: { contentType: 'text/plain; charset=utf-8', cacheControl: 'no-store' },
+  });
+  await env.DB.prepare(
+    `INSERT INTO staged_pod_stamps (docket_id, owner_user_id, pod_r2_key, receiver_name, captured_at, sha256)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(docket_id) DO UPDATE SET
+       pod_r2_key = excluded.pod_r2_key,
+       receiver_name = excluded.receiver_name,
+       captured_at = excluded.captured_at,
+       sha256 = excluded.sha256
+     WHERE staged_pod_stamps.owner_user_id = excluded.owner_user_id`,
+  )
+    .bind(docketId, ownerId, podKey, receiver || '', capturedAt || '', sha256 || '')
+    .run();
+  return {
+    client_pod_stamp: podStamp,
+    client_pod_receiver: receiver || null,
+    client_pod_at: capturedAt || null,
+    client_pod_sha256: sha256 || null,
+  };
+}
+
+async function loadPodStampMeta(env, ownerId, docketId, includeStampData = false) {
+  const rec = await env.DB.prepare(
+    'SELECT pod_r2_key, receiver_name, captured_at, sha256 FROM staged_pod_stamps WHERE docket_id = ? AND owner_user_id = ?',
+  )
+    .bind(docketId, ownerId)
+    .first()
+    .catch(() => null);
+  if (!rec) return null;
+  let stampData = null;
+  if (includeStampData && rec.pod_r2_key) {
+    const obj = await env.STORAGE.get(rec.pod_r2_key);
+    if (obj) stampData = await obj.text();
+  }
+  return {
+    client_pod_stamp: stampData,
+    client_pod_receiver: rec.receiver_name || null,
+    client_pod_at: rec.captured_at || null,
+    client_pod_sha256: rec.sha256 || null,
+  };
+}
+
+async function deletePodStampRecord(env, ownerId, docketId) {
+  const rec = await env.DB.prepare(
+    'SELECT pod_r2_key FROM staged_pod_stamps WHERE docket_id = ? AND owner_user_id = ?',
+  )
+    .bind(docketId, ownerId)
+    .first()
+    .catch(() => null);
+  if (rec?.pod_r2_key) {
+    await env.STORAGE.delete(rec.pod_r2_key).catch(() => {});
+  }
+  await env.DB.prepare('DELETE FROM staged_pod_stamps WHERE docket_id = ? AND owner_user_id = ?')
+    .bind(docketId, ownerId)
+    .run()
+    .catch(() => {});
+}
+
+function rowToStagedDto(row, hydratedPhotos = null, podInfo = null) {
   let items = [];
   try {
     const parsed = typeof row.items_json === 'string' ? JSON.parse(row.items_json) : row.items_json;
@@ -302,6 +380,12 @@ function rowToStagedDto(row, hydratedPhotos = null) {
   if (hydratedPhotos !== null) {
     out.receipt_photos = hydratedPhotos;
     out.receipt_photo = hydratedPhotos[0] ?? null;
+  }
+  if (podInfo) {
+    if (podInfo.client_pod_stamp) out.client_pod_stamp = podInfo.client_pod_stamp;
+    if (podInfo.client_pod_receiver) out.client_pod_receiver = podInfo.client_pod_receiver;
+    if (podInfo.client_pod_at) out.client_pod_at = podInfo.client_pod_at;
+    if (podInfo.client_pod_sha256) out.client_pod_sha256 = podInfo.client_pod_sha256;
   }
   return out;
 }
@@ -638,7 +722,8 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
         const submissions = [];
         for (const row of rowsRes.results || []) {
           const photos = includePhotos ? await hydratePhotosFromR2(env, row.photo_keys_json) : null;
-          submissions.push(sanitizeForClerk(rowToStagedDto(row, photos)));
+          const podInfo = await loadPodStampMeta(env, invite.owner_user_id, row.id, includePhotos);
+          submissions.push(sanitizeForClerk(rowToStagedDto(row, photos, podInfo)));
         }
         return jsonResponse(
           200,
@@ -672,6 +757,7 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
         }
         await env.DB.prepare('DELETE FROM staged_invoices WHERE id = ?').bind(id).run();
         await deleteOrphanedPhotosFromR2(env, existing.photo_keys_json, []);
+        await deletePodStampRecord(env, invite.owner_user_id, id);
         return jsonResponse(200, { deleted: true }, request);
       }
 
@@ -773,6 +859,17 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
           );
         }
         await deleteOrphanedPhotosFromR2(env, returned.photo_keys_json, photoKeys);
+        const podSaved = fields.pod_stamp
+          ? await savePodStampRecord(
+              env,
+              invite.owner_user_id,
+              requestedId,
+              fields.pod_stamp,
+              fields.pod_receiver,
+              fields.pod_at,
+              fields.pod_sha256,
+            )
+          : await loadPodStampMeta(env, invite.owner_user_id, requestedId, true);
         await recordClerkSubmissionRateCount(env, invite.id, rateCheck.hourBucket, nowMs);
         const updatedRow = await env.DB.prepare('SELECT * FROM staged_invoices WHERE id = ?')
           .bind(requestedId)
@@ -780,7 +877,7 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
         return jsonResponse(
           200,
           {
-            submission: sanitizeForClerk(rowToStagedDto(updatedRow, fields.photos)),
+            submission: sanitizeForClerk(rowToStagedDto(updatedRow, fields.photos, podSaved)),
             replayed: false,
           },
           request,
@@ -841,6 +938,17 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
         throw err;
       }
 
+      const podSaved = fields.pod_stamp
+        ? await savePodStampRecord(
+            env,
+            invite.owner_user_id,
+            newId,
+            fields.pod_stamp,
+            fields.pod_receiver,
+            fields.pod_at,
+            fields.pod_sha256,
+          )
+        : null;
       await recordClerkSubmissionRateCount(env, invite.id, rateCheck.hourBucket, nowMs);
       const createdRow = await env.DB.prepare('SELECT * FROM staged_invoices WHERE id = ?')
         .bind(newId)
@@ -848,7 +956,7 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
       return jsonResponse(
         200,
         {
-          submission: sanitizeForClerk(rowToStagedDto(createdRow, fields.photos)),
+          submission: sanitizeForClerk(rowToStagedDto(createdRow, fields.photos, podSaved)),
           replayed: false,
         },
         request,
@@ -916,10 +1024,24 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
     )
       .bind(userId)
       .all();
+    const podRows = await env.DB.prepare(
+      'SELECT docket_id, receiver_name, captured_at, sha256 FROM staged_pod_stamps WHERE owner_user_id = ?',
+    )
+      .bind(userId)
+      .all()
+      .catch(() => ({ results: [] }));
+    const podMap = new Map();
+    for (const p of podRows.results || []) {
+      podMap.set(p.docket_id, {
+        client_pod_receiver: p.receiver_name || null,
+        client_pod_at: p.captured_at || null,
+        client_pod_sha256: p.sha256 || null,
+      });
+    }
     return jsonResponse(
       200,
       {
-        rows: (rows.results || []).map(r => rowToStagedDto(r, null)),
+        rows: (rows.results || []).map(r => rowToStagedDto(r, null, podMap.get(r.id) || null)),
       },
       request,
     );
@@ -952,7 +1074,8 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
         .first();
       if (!row) return jsonResponse(200, { row: null }, request);
       const photos = await hydratePhotosFromR2(env, row.photo_keys_json);
-      return jsonResponse(200, { row: rowToStagedDto(row, photos) }, request);
+      const podInfo = await loadPodStampMeta(env, userId, stagedId, true);
+      return jsonResponse(200, { row: rowToStagedDto(row, photos, podInfo) }, request);
     }
 
     if (request.method === 'PUT' && !subAction) {
@@ -1041,6 +1164,17 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
       if (photos.length && existing?.photo_keys_json) {
         await deleteOrphanedPhotosFromR2(env, existing.photo_keys_json, photoKeys);
       }
+      if (typeof rec.client_pod_stamp === 'string' && rec.client_pod_stamp.trim()) {
+        await savePodStampRecord(
+          env,
+          userId,
+          stagedId,
+          rec.client_pod_stamp.trim(),
+          cleanText(rec.client_pod_receiver ?? '', 120),
+          cleanText(rec.client_pod_at ?? '', 40),
+          cleanText(rec.client_pod_sha256 ?? '', 64),
+        );
+      }
       return jsonResponse(200, { ok: true, id: stagedId }, request);
     }
 
@@ -1110,6 +1244,7 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
         .run();
       if ((res.meta?.changes ?? 0) > 0) {
         await deleteOrphanedPhotosFromR2(env, existing.photo_keys_json, []);
+        await deletePodStampRecord(env, userId, stagedId);
       }
       return jsonResponse(200, { deleted: (res.meta?.changes ?? 0) > 0 }, request);
     }

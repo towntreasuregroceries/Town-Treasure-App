@@ -19,6 +19,7 @@ import 'package:town_treasure_groceries/data/services/ocr_consensus_service.dart
 import 'package:town_treasure_groceries/data/services/remote_update_service.dart';
 import 'package:town_treasure_groceries/data/services/supabase_service.dart';
 import 'package:town_treasure_groceries/domain/models/models.dart';
+import 'package:town_treasure_groceries/ui/core/client_stamp_scanner_sheet.dart';
 import 'package:town_treasure_groceries/ui/core/theme/app_theme.dart';
 import 'package:town_treasure_groceries/ui/features/clerk/clerk_portal_screen.dart';
 import 'package:town_treasure_groceries/ui/features/clerk/clerk_review_sheet.dart';
@@ -1808,6 +1809,189 @@ void main() {
 
       expect(find.byKey(const Key('btn_install_update')), findsOneWidget);
       expect(openedApkPath, isNull);
+    });
+  });
+
+  group('v1.2.11 True-Color Client Wet-Stamp Absorption & Clerk POD Transfer',
+      () {
+    Uint8List buildSyntheticPurpleStampSlipJpeg() {
+      final canvas = img.Image(width: 260, height: 220);
+      // Off-white paper with realistic diagonal warm shadow gradient
+      for (var y = 0; y < canvas.height; y++) {
+        for (var x = 0; x < canvas.width; x++) {
+          final shade = ((x + y) * 0.05).round();
+          canvas.setPixelRgb(x, y, 246 - shade, 243 - shade, 238 - shade);
+        }
+      }
+      // Draw authentic purple/violet circular rubber stamp ring + inner text bar
+      const cx = 130;
+      const cy = 110;
+      for (var y = 35; y < 185; y++) {
+        for (var x = 55; x < 205; x++) {
+          final dist = math.sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+          if ((dist >= 56 && dist <= 63) ||
+              (dist >= 42 && dist <= 45) ||
+              (y >= 104 && y <= 116 && x >= 78 && x <= 182)) {
+            canvas.setPixelRgb(x, y, 148, 34, 168); // Violet rubber stamp ink
+          }
+        }
+      }
+      return Uint8List.fromList(img.encodeJpg(canvas, quality: 92));
+    }
+
+    test(
+        'ChrominanceStampProcessor removes shadowed white paper to alpha=0 while preserving authentic purple stamp hue',
+        () {
+      final rawJpeg = buildSyntheticPurpleStampSlipJpeg();
+      final res = ChrominanceStampProcessor.processStampBytes(
+        rawJpeg,
+        receiverName: 'Chef Musa',
+        capturedAt: DateTime.utc(2026, 11, 27, 9, 30),
+      );
+
+      expect(res.receiverName, 'Chef Musa');
+      expect(res.rawPhotoSha256.length, 64);
+      expect(res.dominantInkLabel, 'Violet / Purple Ink');
+      expect(res.stampDataUri, startsWith('data:image/png;base64,'));
+
+      final outPng = img.decodePng(res.stampPngBytes);
+      expect(outPng, isNotNull);
+      // Outer padded corner must be 100% transparent (paper removed)
+      expect(outPng!.getPixel(0, 0).a, 0);
+
+      // Verify extracted opaque ink pixels retain violet/purple dominance (R > G and B > G)
+      var opaqueVioletPixels = 0;
+      for (var y = 0; y < outPng.height; y++) {
+        for (var x = 0; x < outPng.width; x++) {
+          final p = outPng.getPixel(x, y);
+          if (p.a >= 150 && p.r > p.g + 25 && p.b > p.g + 20) {
+            opaqueVioletPixels++;
+          }
+        }
+      }
+      expect(opaqueVioletPixels, greaterThan(200));
+    });
+
+    testWidgets(
+        'Clerk submits docket with client POD stamp, ClerkReviewSheet previews stamp, and Owner approval transfers stamp onto Invoice',
+        (tester) async {
+      final storage = _InMemoryLocalStorageService();
+      final supabase = _ClerkFakeSupabaseGateway();
+      const user = AuthUserInfo(
+        id: 'owner-1',
+        email: 'veronica@towntreasure.test',
+      );
+      supabase.user = user;
+      await storage.setUserId(user.id);
+      await storage.setE2eKey(CryptoService.bytesToJwk(List<int>.filled(32, 5)));
+
+      final vault = VaultRepository(
+        cryptoService: CryptoService(),
+        localStorage: storage,
+        supabase: supabase,
+        syncDebounceDuration: const Duration(milliseconds: 10),
+      );
+      addTearDown(vault.dispose);
+      await vault.setRestaurants(
+        const [Restaurant(id: 'r1', name: 'Sankara Nairobi')],
+        sync: false,
+      );
+
+      final staging = StagingRepository(
+        supabase: supabase,
+        localStorage: storage,
+        vaultRepository: vault,
+      );
+      final vm = ClerkViewModel(
+        stagingRepository: staging,
+        vaultRepository: vault,
+        supabase: supabase,
+        localStorage: storage,
+        ocrService: OcrConsensusService(),
+        duplicateDetector: DuplicateDetectorService(),
+      );
+      addTearDown(vm.dispose);
+
+      // Pair clerk invite & submit docket carrying extracted client POD stamp
+      await vm.pairWithInviteToken(supabase.activeInviteToken);
+      final scan = ChrominanceStampProcessor.processStampBytes(
+        buildSyntheticPurpleStampSlipJpeg(),
+        receiverName: 'Chef Musa',
+      );
+
+      final subRes = await vm.submitClerkDocket(
+        clerkName: 'Daniel',
+        restaurantName: 'Sankara Nairobi',
+        invoiceDate: '2026-11-27',
+        items: const [
+          InvoiceLineItem(
+            desc: 'Hass Avocados',
+            qty: 15,
+            unit: 'kgs',
+            buyPrice: 90,
+            sellPrice: 150,
+            total: 2250,
+          ),
+        ],
+        deliveryCost: 0,
+        otherCost: 0,
+        notes: 'Verified at receiving bay',
+        receiptPhotos: const [],
+        clientPodStamp: scan.stampDataUri,
+        clientPodReceiver: scan.receiverName,
+        clientPodAt: scan.capturedAtIso,
+        clientPodSha256: scan.rawPhotoSha256,
+      );
+      expect(subRes.isSuccess, isTrue);
+
+      await vm.loadSubmissions();
+      expect(vm.submissions.single.hasClientPod, isTrue);
+      expect(vm.submissions.single.clientPodReceiver, 'Chef Musa');
+
+      Invoice? approvedInv;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Builder(
+            builder: (ctx) => Scaffold(
+              body: ElevatedButton(
+                onPressed: () => ClerkReviewSheet.show(
+                  ctx,
+                  viewModel: vm,
+                  docket: vm.submissions.single,
+                  onApproved: (inv) => approvedInv = inv,
+                ),
+                child: const Text('Review POD Docket'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Review POD Docket'));
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('CLIENT POD STAMP ATTACHED'), findsOneWidget);
+      expect(find.textContaining('Chef Musa'), findsWidgets);
+
+      await tester.ensureVisible(find.text('Approve & Encrypt'));
+      await tester.tap(find.text('Approve & Encrypt'));
+      await tester.pump();
+      await tester.runAsync(() async {
+        for (var i = 0; i < 60 && vm.isProcessingReview; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 50));
+        }
+      });
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('View Invoice'));
+      await tester.pumpAndSettle();
+
+      expect(approvedInv, isNotNull);
+      expect(approvedInv!.hasClientPodStamp, isTrue);
+      expect(approvedInv!.clientPodStamp, scan.stampDataUri);
+      expect(approvedInv!.clientPodReceiver, 'Chef Musa');
+      expect(approvedInv!.clientPodSha256, scan.rawPhotoSha256);
     });
   });
 }

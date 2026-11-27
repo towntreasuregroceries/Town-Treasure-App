@@ -26,6 +26,10 @@ class StagingDocket {
     this.targetUserName,
     this.approvedAt,
     this.generatedInvoiceNumber,
+    this.clientPodStamp,
+    this.clientPodReceiver,
+    this.clientPodAt,
+    this.clientPodSha256,
     this.createdAt,
     this.updatedAt,
   });
@@ -52,12 +56,19 @@ class StagingDocket {
   final String? targetUserName;
   final String? approvedAt;
   final String? generatedInvoiceNumber;
+  final String? clientPodStamp;
+  final String? clientPodReceiver;
+  final String? clientPodAt;
+  final String? clientPodSha256;
   final String? createdAt;
   final String? updatedAt;
 
   bool get isPending => status == 'pending';
   bool get isApproved => status == 'approved';
   bool get isRejected => status == 'rejected';
+  bool get hasClientPod =>
+      (clientPodStamp ?? '').trim().isNotEmpty ||
+      (clientPodSha256 ?? '').trim().isNotEmpty;
 
   factory StagingDocket.fromJson(Map<String, dynamic> json) {
     final rawItems = json['items_json'];
@@ -106,6 +117,10 @@ class StagingDocket {
       approvedAt: AppHelpers.nullableString(json['approved_at']),
       generatedInvoiceNumber:
           AppHelpers.nullableString(json['generated_invoice_number']),
+      clientPodStamp: AppHelpers.nullableString(json['client_pod_stamp']),
+      clientPodReceiver: AppHelpers.nullableString(json['client_pod_receiver']),
+      clientPodAt: AppHelpers.nullableString(json['client_pod_at']),
+      clientPodSha256: AppHelpers.nullableString(json['client_pod_sha256']),
       createdAt: AppHelpers.nullableString(json['created_at']),
       updatedAt: AppHelpers.nullableString(json['updated_at']),
     );
@@ -128,6 +143,11 @@ class StagingDocket {
       'total_buy': totalBuy,
       if (includePhotos) 'receipt_photo': receiptPhoto,
       if (includePhotos) 'receipt_photos': receiptPhotos,
+      if (includePhotos && clientPodStamp != null)
+        'client_pod_stamp': clientPodStamp,
+      if (clientPodReceiver != null) 'client_pod_receiver': clientPodReceiver,
+      if (clientPodAt != null) 'client_pod_at': clientPodAt,
+      if (clientPodSha256 != null) 'client_pod_sha256': clientPodSha256,
       'notes': notes,
       'status': status,
       'rejection_reason': rejectionReason,
@@ -165,6 +185,10 @@ class StagingDocket {
     String? targetUserName,
     String? approvedAt,
     String? generatedInvoiceNumber,
+    String? clientPodStamp,
+    String? clientPodReceiver,
+    String? clientPodAt,
+    String? clientPodSha256,
     String? createdAt,
     String? updatedAt,
   }) {
@@ -192,6 +216,10 @@ class StagingDocket {
       approvedAt: approvedAt ?? this.approvedAt,
       generatedInvoiceNumber:
           generatedInvoiceNumber ?? this.generatedInvoiceNumber,
+      clientPodStamp: clientPodStamp ?? this.clientPodStamp,
+      clientPodReceiver: clientPodReceiver ?? this.clientPodReceiver,
+      clientPodAt: clientPodAt ?? this.clientPodAt,
+      clientPodSha256: clientPodSha256 ?? this.clientPodSha256,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );

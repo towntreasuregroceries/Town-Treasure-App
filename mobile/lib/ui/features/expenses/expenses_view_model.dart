@@ -11,12 +11,16 @@ class FinanceHubSummary {
     required this.totalExpenses,
     required this.paidRevenue,
     required this.netBalance,
+    this.activeBankDebt = 0,
+    this.totalLoanPrincipalRepaid = 0,
   });
 
   final double totalCapital;
   final double totalExpenses;
   final double paidRevenue;
   final double netBalance;
+  final double activeBankDebt;
+  final double totalLoanPrincipalRepaid;
 }
 
 /// Payroll KPI summary matching `updatePayrollSummary()` in `payroll.js`.
@@ -80,16 +84,16 @@ class ExpensesViewModel extends ChangeNotifier {
   ];
 
   static const Map<String, String> personalCategoryLabels = {
-    'personal': 'Personal',
-    'airtime': 'Airtime',
-    'food_personal': 'Food & Meals',
-    'personal_transport': 'Transport',
-    'family': 'Family',
-    'medical': 'Medical',
-    'clothing': 'Clothing',
-    'entertainment': 'Entertainment',
-    'savings': 'Savings',
-    'other_personal': 'Other',
+    'personal': 'Company General',
+    'airtime': 'Office Airtime & Data',
+    'food_personal': 'Staff & Business Meals',
+    'personal_transport': 'Local Errands & Transport',
+    'family': 'Staff Welfare',
+    'medical': 'Staff Welfare / Medical',
+    'clothing': 'Uniforms & Protective Gear',
+    'entertainment': 'Client Hospitality',
+    'savings': 'Company Reserve',
+    'other_personal': 'Other Company Expense',
   };
 
   static const Set<String> personalCategories = {
@@ -151,6 +155,8 @@ class ExpensesViewModel extends ChangeNotifier {
       'salaries': 'Salaries',
       'inventory': 'Inventory Purchase',
       'capital': 'Capital Injection',
+      'loan_interest': 'Loan Interest & Bank Fees',
+      'loan_principal': 'Loan Principal Repayment',
       'software': 'Software/Subscriptions',
       'insurance': 'Insurance',
       'other': 'Other',
@@ -167,14 +173,21 @@ class ExpensesViewModel extends ChangeNotifier {
     final totalExp = _vault.expenses
         .where((e) => e.type == 'expense')
         .fold<double>(0, (s, e) => s + e.amount);
+    final totalPrincipalPaid = _vault.expenses
+        .where((e) => e.type == 'loan_principal')
+        .fold<double>(0, (s, e) => s + e.amount);
     final totalRev = _vault.invoices
         .where((i) => i.status == 'paid')
         .fold<double>(0, (s, i) => s + i.totalSell);
+    final activeDebt = _vault.settings.companyLoans
+        .fold<double>(0, (s, l) => s + l.remainingPrincipal);
     return FinanceHubSummary(
       totalCapital: totalCap,
       totalExpenses: totalExp,
       paidRevenue: totalRev,
-      netBalance: totalCap + totalRev - totalExp,
+      netBalance: totalCap + totalRev - totalExp - totalPrincipalPaid,
+      activeBankDebt: activeDebt,
+      totalLoanPrincipalRepaid: totalPrincipalPaid,
     );
   }
 
@@ -534,6 +547,298 @@ class ExpensesViewModel extends ChangeNotifier {
       category: category,
       amount: amount,
     );
+  }
+
+  // --- Debt-Financed Capital Facilities (Bank / SACCO / Credit Loans) ---
+
+  List<CompanyLoan> get companyLoans => _vault.settings.companyLoans;
+
+  double get totalMonthlyDebtService => companyLoans
+      .where((l) => !l.isFullySettled)
+      .fold<double>(0, (s, l) => s + l.monthlyInstallment);
+
+  /// Computes trailing 3-month Operating Cash Flow divided by active monthly
+  /// bank loan installments (`DSCR >= 1.5x` healthy, `< 1.15x` tight).
+  double? get debtServiceCoverageRatio {
+    final debtService = totalMonthlyDebtService;
+    if (debtService <= 0) return null;
+    final parts = _selectedMonth.split('-');
+    final yr = int.tryParse(parts.firstOrNull ?? '') ?? DateTime.now().year;
+    final mo = int.tryParse(parts.elementAtOrNull(1) ?? '') ?? DateTime.now().month;
+
+    var totalSurplus = 0.0;
+    var activeMonths = 0;
+    for (var k = 0; k < 3; k++) {
+      final d = DateTime(yr, mo - k, 1);
+      final ym = DateFormat('yyyy-MM').format(d);
+      final monthInvs = _vault.invoices
+          .where((i) => !i.isDraft && i.date.startsWith(ym))
+          .toList();
+      final monthExps = _vault.expenses
+          .where(
+            (e) =>
+                e.type == 'expense' &&
+                e.category != 'loan_interest' &&
+                e.date.startsWith(ym),
+          )
+          .toList();
+      if (monthInvs.isEmpty && monthExps.isEmpty) continue;
+      final gross = monthInvs.fold<double>(
+        0,
+        (s, i) => s + (i.totalSell - i.totalBuy),
+      );
+      final opEx = monthExps.fold<double>(0, (s, e) => s + e.amount);
+      totalSurplus += (gross - opEx);
+      activeMonths++;
+    }
+    if (activeMonths == 0) return null;
+    final avgMonthlySurplus = totalSurplus / activeMonths;
+    return avgMonthlySurplus / debtService;
+  }
+
+  /// Disburses a new Bank / Credit Facility into `Capital Input` (+Principal cash)
+  /// while booking any upfront bank/excise fee as a Finance Expense and initializing
+  /// the amortized liability ledger.
+  Future<CompanyLoan> addBankCapitalFacility({
+    required String lenderName,
+    String facilityName = 'Working Capital Facility',
+    required String disbursementDate,
+    required double principal,
+    double upfrontFees = 0,
+    required CompanyLoanMode mode,
+    double annualRatePct = 0,
+    required int tenureMonths,
+    double? monthlyInstallmentOverride,
+    int debitDayOfMonth = 5,
+    String accountLabel = 'Company Bank Account',
+  }) async {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final cleanLender = lenderName.trim().isEmpty ? 'Bank' : lenderName.trim();
+    final cleanFacility = facilityName.trim().isEmpty
+        ? 'Working Capital Facility'
+        : facilityName.trim();
+    final resolvedDate = disbursementDate.trim().isEmpty
+        ? DateFormat('yyyy-MM-dd').format(DateTime.now())
+        : disbursementDate.trim();
+    final safeTenure = tenureMonths < 1 ? 1 : tenureMonths;
+
+    final computedInstallment = (mode == CompanyLoanMode.fixedInstallment &&
+            (monthlyInstallmentOverride ?? 0) > 0)
+        ? monthlyInstallmentOverride!
+        : CompanyLoan.computeMonthlyInstallment(
+            principal: principal,
+            annualRatePct: annualRatePct,
+            tenureMonths: safeTenure,
+            mode: mode,
+          );
+
+    final effectiveNominalRate = mode == CompanyLoanMode.fixedInstallment
+        ? CompanyLoan.solveEffectiveAnnualRatePct(
+            principal: principal,
+            monthlyInstallment: computedInstallment,
+            tenureMonths: safeTenure,
+            upfrontFees: 0,
+          )
+        : annualRatePct;
+
+    final loanId = 'loan_${AppHelpers.genId()}';
+    final capExpId = AppHelpers.genId();
+    final feeExpId = upfrontFees > 0 ? AppHelpers.genId() : null;
+
+    final nextExpenses = List<Expense>.from(_vault.expenses)
+      ..add(
+        Expense(
+          id: capExpId,
+          refId: loanId,
+          refType: 'company_loan_disbursement',
+          type: 'capital',
+          date: resolvedDate,
+          desc: 'Bank Loan Capital — $cleanLender ($cleanFacility)',
+          category: 'capital',
+          amount: principal,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        ),
+      );
+
+    if (upfrontFees > 0 && feeExpId != null) {
+      nextExpenses.add(
+        Expense(
+          id: feeExpId,
+          refId: loanId,
+          refType: 'company_loan_fee',
+          type: 'expense',
+          date: resolvedDate,
+          desc: 'Loan Arrangement & Excise Fee — $cleanLender',
+          category: 'loan_interest',
+          amount: upfrontFees,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        ),
+      );
+    }
+
+    final loan = CompanyLoan(
+      id: loanId,
+      lenderName: cleanLender,
+      facilityName: cleanFacility,
+      disbursementDate: resolvedDate,
+      principal: principal,
+      upfrontFees: upfrontFees < 0 ? 0 : upfrontFees,
+      mode: mode,
+      annualRatePct: effectiveNominalRate,
+      tenureMonths: safeTenure,
+      monthlyInstallment: computedInstallment,
+      debitDayOfMonth: debitDayOfMonth.clamp(1, 28),
+      accountLabel: accountLabel.trim().isEmpty
+          ? 'Company Bank Account'
+          : accountLabel.trim(),
+      capitalExpenseId: capExpId,
+      upfrontFeeExpenseId: feeExpId,
+      payments: const [],
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    );
+
+    await _vault.saveCompanyLoan(loan, sync: false);
+    await _vault.setExpenses(nextExpenses);
+    return loan;
+  }
+
+  /// Records a monthly or lump-sum installment on [loanId], automatically
+  /// bifurcating the cash outflow into:
+  /// 1. Balance-sheet Principal Reduction (`type: 'loan_principal'` — reduces cash & debt without distorting P&L Net Profit)
+  /// 2. Deductible Finance Cost (`type: 'expense', category: 'loan_interest'` — reduces cash & P&L Net Profit)
+  Future<CompanyLoanPayment?> recordCompanyLoanInstallment({
+    required String loanId,
+    required double amount,
+    required String date,
+    String notes = '',
+  }) async {
+    if (amount <= 0) return null;
+    final loan = companyLoans.where((l) => l.id == loanId).firstOrNull;
+    if (loan == null) return null;
+
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final resolvedDate = date.trim().isEmpty
+        ? DateFormat('yyyy-MM-dd').format(DateTime.now())
+        : date.trim();
+    final split = loan.splitPaymentAmount(amount);
+    final paymentId = 'lpay_${AppHelpers.genId()}';
+
+    final payment = CompanyLoanPayment(
+      id: paymentId,
+      date: resolvedDate,
+      totalAmount: amount,
+      principalComponent: split.principal,
+      interestComponent: split.interest,
+      notes: notes.trim(),
+      createdAt: nowIso,
+    );
+
+    final updatedLoan = loan.copyWith(
+      payments: [...loan.payments, payment],
+      updatedAt: nowIso,
+    );
+
+    final nextExpenses = List<Expense>.from(_vault.expenses);
+    if (split.principal > 0) {
+      nextExpenses.add(
+        Expense(
+          id: AppHelpers.genId(),
+          refId: paymentId,
+          refType: 'company_loan_principal',
+          type: 'loan_principal',
+          date: resolvedDate,
+          desc: 'Loan Principal — ${loan.lenderName} (${loan.facilityName})',
+          category: 'loan_principal',
+          amount: split.principal,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        ),
+      );
+    }
+    if (split.interest > 0) {
+      nextExpenses.add(
+        Expense(
+          id: AppHelpers.genId(),
+          refId: paymentId,
+          refType: 'company_loan_interest',
+          type: 'expense',
+          date: resolvedDate,
+          desc: 'Loan Interest — ${loan.lenderName} (${loan.facilityName})',
+          category: 'loan_interest',
+          amount: split.interest,
+          createdAt: nowIso,
+          updatedAt: nowIso,
+        ),
+      );
+    }
+
+    await _vault.saveCompanyLoan(updatedLoan, sync: false);
+    await _vault.setExpenses(nextExpenses);
+    return payment;
+  }
+
+  Future<bool> deleteCompanyLoanPayment(String loanId, String paymentId) async {
+    final loan = companyLoans.where((l) => l.id == loanId).firstOrNull;
+    if (loan == null) return false;
+
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final updatedLoan = loan.copyWith(
+      payments: loan.payments.where((p) => p.id != paymentId).toList(),
+      updatedAt: nowIso,
+    );
+
+    var expenses = List<Expense>.from(_vault.expenses);
+    expenses = await _deleteLinkedExpenseFromList(
+      expenses,
+      refId: paymentId,
+      refType: 'company_loan_principal',
+    );
+    expenses = await _deleteLinkedExpenseFromList(
+      expenses,
+      refId: paymentId,
+      refType: 'company_loan_interest',
+    );
+
+    await _vault.saveCompanyLoan(updatedLoan, sync: false);
+    await _vault.setExpenses(expenses, sync: false);
+    return _vault.syncNow();
+  }
+
+  Future<bool> deleteCompanyLoan(String loanId) async {
+    final loan = _vault.settings.allCompanyLoansRaw
+        .where((l) => l.id == loanId)
+        .firstOrNull;
+    var expenses = List<Expense>.from(_vault.expenses);
+    if (loan != null) {
+      expenses = await _deleteLinkedExpenseFromList(
+        expenses,
+        refId: loan.id,
+        refType: 'company_loan_disbursement',
+      );
+      expenses = await _deleteLinkedExpenseFromList(
+        expenses,
+        refId: loan.id,
+        refType: 'company_loan_fee',
+      );
+      for (final p in loan.payments) {
+        expenses = await _deleteLinkedExpenseFromList(
+          expenses,
+          refId: p.id,
+          refType: 'company_loan_principal',
+        );
+        expenses = await _deleteLinkedExpenseFromList(
+          expenses,
+          refId: p.id,
+          refType: 'company_loan_interest',
+        );
+      }
+    }
+    await _vault.deleteCompanyLoanRecord(loanId, sync: false);
+    await _vault.setExpenses(expenses, sync: false);
+    return _vault.syncNow();
   }
 
   // --- Boss's Account (Borrowings & Linked Expenses) ---

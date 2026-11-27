@@ -355,6 +355,16 @@ class StagingRepository extends ChangeNotifier {
       );
     }
 
+    StagingDocket hydratedItem = item;
+    if ((item.clientPodStamp ?? '').isEmpty &&
+        ((item.clientPodSha256 ?? '').isNotEmpty ||
+            (item.clientPodAt ?? '').isNotEmpty)) {
+      try {
+        final full = await getSubmission(id);
+        if (full != null) hydratedItem = full;
+      } catch (_) {}
+    }
+
     final resolvedItems = (items ?? item.itemsJson).map((it) {
       final qty = it.qty <= 0 ? 1.0 : it.qty;
       return it.copyWith(
@@ -410,6 +420,10 @@ class StagingRepository extends ChangeNotifier {
       profit: profit,
       notes: combinedNotes,
       status: 'pending',
+      clientPodStamp: hydratedItem.clientPodStamp,
+      clientPodReceiver: hydratedItem.clientPodReceiver,
+      clientPodAt: hydratedItem.clientPodAt,
+      clientPodSha256: hydratedItem.clientPodSha256,
       createdAt: nowIso,
       updatedAt: nowIso,
     );

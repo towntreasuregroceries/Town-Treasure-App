@@ -1020,6 +1020,47 @@ class InvoicesViewModel extends ChangeNotifier {
     );
   }
 
+  /// Punches a client's background-removed Proof-of-Delivery (POD) rubber stamp
+  /// and receiver sign-off onto an existing invoice (including already-issued
+  /// KRA eTIMS invoices, without modifying line items, amounts, or eTIMS codes).
+  Future<ActionOutcome> attachClientPodStamp({
+    required String invoiceId,
+    required String stampDataUri,
+    String receiverName = '',
+    required String capturedAtIso,
+    required String rawPhotoSha256,
+    String? podDocId,
+  }) async {
+    final idx = _vault.invoices.indexWhere((i) => i.id == invoiceId);
+    if (idx < 0) {
+      return const ActionOutcome(
+        ok: false,
+        synced: false,
+        message: 'Invoice not found.',
+      );
+    }
+    final list = List<Invoice>.from(_vault.invoices);
+    final inv = list[idx];
+    final updated = inv.copyWith(
+      clientPodStamp: stampDataUri,
+      clientPodReceiver: receiverName.trim(),
+      clientPodAt: capturedAtIso,
+      clientPodSha256: rawPhotoSha256,
+      clientPodDocId: podDocId ?? inv.clientPodDocId,
+      updatedAt: DateTime.now().toUtc().toIso8601String(),
+    );
+    list[idx] = updated;
+    await _vault.setInvoices(list, sync: false);
+    final synced = await _boundedSync();
+    return ActionOutcome(
+      ok: true,
+      synced: synced,
+      message: synced
+          ? 'Client stamp punched onto ${updated.number} and synced.'
+          : 'Client stamp punched onto ${updated.number} (cloud sync pending).',
+    );
+  }
+
   Future<ActionOutcome> softDeleteInvoice(String id) async {
     _autoSaveTimer?.cancel();
     final inv = findInvoiceById(id);

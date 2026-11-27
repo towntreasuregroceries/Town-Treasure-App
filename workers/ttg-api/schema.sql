@@ -80,3 +80,12 @@ CREATE TABLE IF NOT EXISTS clerk_rate_limits (
   updated_at TEXT NOT NULL,
   PRIMARY KEY (invite_id, hour_bucket)
 );
+
+CREATE TABLE IF NOT EXISTS staged_pod_stamps (
+  docket_id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  pod_r2_key TEXT NOT NULL,
+  receiver_name TEXT NOT NULL DEFAULT '',
+  captured_at TEXT NOT NULL DEFAULT '',
+  sha256 TEXT NOT NULL DEFAULT ''
+);

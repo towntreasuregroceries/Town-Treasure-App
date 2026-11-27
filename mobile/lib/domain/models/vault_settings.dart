@@ -1,4 +1,5 @@
 import 'branded_document.dart';
+import 'company_loan.dart';
 import 'kra_tax.dart';
 import 'personal_document.dart';
 import 'restaurant.dart';
@@ -17,6 +18,7 @@ class VaultSettings {
   static const String keyPersonalDocs = 'personalDocs';
   static const String keyPersonalDocsWorkerUrl = 'personalDocsWorkerUrl';
   static const String keyBrandedDocs = 'brandedDocs';
+  static const String keyCompanyLoans = 'companyLoans';
 
   final String? signature;
   final String? updatedAt;
@@ -130,6 +132,26 @@ class VaultSettings {
     return list;
   }
 
+  /// Returns all stored company bank/credit facilities (including soft-deleted tombstones for sync).
+  List<CompanyLoan> get allCompanyLoansRaw {
+    final raw = extra[keyCompanyLoans];
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((e) => CompanyLoan.fromJson(Map<String, dynamic>.from(e)))
+        .where((l) => l.id.isNotEmpty)
+        .toList();
+  }
+
+  /// Returns active (non-deleted) company bank/credit facilities sorted newest first.
+  List<CompanyLoan> get companyLoans {
+    final list = allCompanyLoansRaw.where((l) => !l.isDeleted).toList();
+    list.sort(
+      (a, b) => b.disbursementDate.compareTo(a.disbursementDate),
+    );
+    return list;
+  }
+
   factory VaultSettings.fromJson(Map<String, dynamic> json) {
     final extra = Map<String, dynamic>.from(json)
       ..remove('signature')
@@ -211,6 +233,13 @@ class VaultSettings {
     final nowIso = DateTime.now().toUtc().toIso8601String();
     final nextExtra = Map<String, dynamic>.from(extra);
     nextExtra[keyBrandedDocs] = docs.map((d) => d.toJson()).toList();
+    return copyWith(updatedAt: nowIso, extra: nextExtra);
+  }
+
+  VaultSettings withCompanyLoans(List<CompanyLoan> loans) {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final nextExtra = Map<String, dynamic>.from(extra);
+    nextExtra[keyCompanyLoans] = loans.map((l) => l.toJson()).toList();
     return copyWith(updatedAt: nowIso, extra: nextExtra);
   }
 }

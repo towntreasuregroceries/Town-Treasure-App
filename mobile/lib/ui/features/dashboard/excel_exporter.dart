@@ -183,6 +183,36 @@ class ExcelExporter {
       ]);
     }
 
+    if (vault.settings.companyLoans.isNotEmpty) {
+      final facilitiesSheet = workbook['Bank Facilities'];
+      facilitiesSheet.appendRow([
+        TextCellValue('Disbursement Date'),
+        TextCellValue('Lender'),
+        TextCellValue('Facility'),
+        TextCellValue('Principal (KES)'),
+        TextCellValue('Monthly Installment (KES)'),
+        TextCellValue('Effective Rate (% p.a.)'),
+        TextCellValue('Principal Repaid (KES)'),
+        TextCellValue('Interest Paid (KES)'),
+        TextCellValue('Remaining Principal (KES)'),
+      ]);
+      for (final loan in vault.settings.companyLoans) {
+        facilitiesSheet.appendRow([
+          TextCellValue(loan.disbursementDate),
+          TextCellValue(loan.lenderName),
+          TextCellValue(loan.facilityName),
+          DoubleCellValue(loan.principal),
+          DoubleCellValue(loan.monthlyInstallment),
+          DoubleCellValue(
+            double.parse(loan.effectiveAnnualRatePct.toStringAsFixed(2)),
+          ),
+          DoubleCellValue(loan.totalPrincipalPaid),
+          DoubleCellValue(loan.totalInterestPaid),
+          DoubleCellValue(loan.remainingPrincipal),
+        ]);
+      }
+    }
+
     final encoded = workbook.encode();
     if (encoded == null) {
       throw StateError('Failed to encode Excel workbook.');

@@ -506,6 +506,40 @@ class VaultRepository extends ChangeNotifier {
     await setSettings(_settings.withBrandedDocuments(docs), sync: sync);
   }
 
+  Future<void> saveCompanyLoan(
+    CompanyLoan loan, {
+    bool sync = true,
+  }) async {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final updated = loan.copyWith(
+      createdAt: loan.createdAt ?? nowIso,
+      updatedAt: nowIso,
+    );
+    final loans = List<CompanyLoan>.from(_settings.allCompanyLoansRaw);
+    final idx = loans.indexWhere((l) => l.id == updated.id);
+    if (idx >= 0) {
+      loans[idx] = updated;
+    } else {
+      loans.insert(0, updated);
+    }
+    await setSettings(_settings.withCompanyLoans(loans), sync: sync);
+  }
+
+  Future<void> deleteCompanyLoanRecord(
+    String loanId, {
+    bool sync = true,
+  }) async {
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    final loans = List<CompanyLoan>.from(_settings.allCompanyLoansRaw);
+    final idx = loans.indexWhere((l) => l.id == loanId);
+    if (idx < 0) return;
+    loans[idx] = loans[idx].copyWith(
+      deletedAt: nowIso,
+      updatedAt: nowIso,
+    );
+    await setSettings(_settings.withCompanyLoans(loans), sync: sync);
+  }
+
   Future<void> markRecordDeleted(String collection, String id,
       {bool sync = true}) async {
     if (collection.isEmpty || id.isEmpty) return;
@@ -812,6 +846,32 @@ class VaultRepository extends ChangeNotifier {
     if (brandedById.isNotEmpty) {
       merged[VaultSettings.keyBrandedDocs] =
           brandedById.values.map((d) => d.toJson()).toList();
+    }
+
+    // Merge company bank/credit facilities by `id` using latest `updatedAt` / `deletedAt` tombstone.
+    final loansById = <String, CompanyLoan>{};
+    for (final loan in [
+      ...remote.allCompanyLoansRaw,
+      ...local.allCompanyLoansRaw,
+    ]) {
+      final existing = loansById[loan.id];
+      if (existing == null) {
+        loansById[loan.id] = loan;
+      } else {
+        final lTime = AppHelpers.parseTimestampMs(
+          loan.updatedAt ?? loan.deletedAt ?? loan.createdAt,
+        );
+        final eTime = AppHelpers.parseTimestampMs(
+          existing.updatedAt ?? existing.deletedAt ?? existing.createdAt,
+        );
+        if (lTime >= eTime) {
+          loansById[loan.id] = loan;
+        }
+      }
+    }
+    if (loansById.isNotEmpty) {
+      merged[VaultSettings.keyCompanyLoans] =
+          loansById.values.map((l) => l.toJson()).toList();
     }
 
     return VaultSettings.fromJson(merged);

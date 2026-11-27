@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/services.dart';
@@ -121,6 +122,10 @@ class InvoicePdfBuilder {
       final docHeadingTitle = isTaxInvoice
           ? 'TAX INVOICE'
           : (invoice.isFiscalized ? 'eTIMS INVOICE' : 'INVOICE');
+      final podBytes = decodeRawDataUrlBytes(invoice.clientPodStamp);
+      final clientPodImage = (podBytes != null && podBytes.isNotEmpty)
+          ? pw.MemoryImage(podBytes)
+          : null;
 
       final pageTheme = pw.PageTheme(
         pageFormat: pageFormat,
@@ -174,7 +179,15 @@ class InvoicePdfBuilder {
                     taxSummary: taxSummary,
                     isTaxInvoice: isTaxInvoice,
                   ),
-                  pw.SizedBox(height: 24),
+                  if (clientPodImage != null) ...[
+                    pw.SizedBox(height: 16),
+                    _buildClientPodAcceptanceCard(
+                      invoice: invoice,
+                      clientName: clientName,
+                      clientPodImage: clientPodImage,
+                    ),
+                  ],
+                  pw.SizedBox(height: 20),
                   _buildBottomQrAndStamp(
                     invoice: invoice,
                     stampImage: stampImage,
@@ -1009,6 +1022,136 @@ class InvoicePdfBuilder {
     );
   }
 
+  static pw.Widget _buildClientPodAcceptanceCard({
+    required Invoice invoice,
+    required String clientName,
+    required pw.MemoryImage clientPodImage,
+  }) {
+    final receiver = (invoice.clientPodReceiver ?? '').trim();
+    final rawAt = (invoice.clientPodAt ?? '').trim();
+    final parsedAt = DateTime.tryParse(rawAt)?.toLocal();
+    final atDisplay = parsedAt != null
+        ? '${InvoiceFormatters.formatDisplayDate(invoice.date)} '
+            '${parsedAt.hour.toString().padLeft(2, '0')}:${parsedAt.minute.toString().padLeft(2, '0')}'
+        : InvoiceFormatters.formatDisplayDate(invoice.date);
+    final sha = (invoice.clientPodSha256 ?? '').trim();
+    final shortSha = sha.length >= 16 ? '${sha.substring(0, 16)}...' : sha;
+
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: pw.BoxDecoration(
+        color: _altRowBg,
+        border: pw.Border.all(color: _leafGreen, width: 1.2),
+        borderRadius: pw.BorderRadius.circular(8),
+      ),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
+        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        children: [
+          pw.Expanded(
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              mainAxisSize: pw.MainAxisSize.min,
+              children: [
+                pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(
+                    horizontal: 7,
+                    vertical: 2.5,
+                  ),
+                  decoration: pw.BoxDecoration(
+                    color: _leafGreen,
+                    borderRadius: pw.BorderRadius.circular(4),
+                  ),
+                  child: pw.Text(
+                    'ORDER VERIFIED & ACCEPTED BY RECIPIENT',
+                    style: pw.TextStyle(
+                      fontSize: 7.5,
+                      fontWeight: pw.FontWeight.bold,
+                      color: PdfColors.white,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                ),
+                pw.SizedBox(height: 6),
+                pw.Text(
+                  'Client: $clientName',
+                  style: pw.TextStyle(
+                    fontSize: 8.8,
+                    fontWeight: pw.FontWeight.bold,
+                    color: _textDark,
+                  ),
+                ),
+                if (receiver.isNotEmpty) ...[
+                  pw.SizedBox(height: 2),
+                  pw.Text(
+                    'Received By: $receiver',
+                    style: const pw.TextStyle(fontSize: 8.3, color: _textDark),
+                  ),
+                ],
+                pw.SizedBox(height: 2),
+                pw.Text(
+                  'Accepted: $atDisplay  |  Ref: ${invoice.cuInvoiceNumber?.isNotEmpty == true ? invoice.cuInvoiceNumber : invoice.number}',
+                  style: const pw.TextStyle(fontSize: 7.8, color: _textMuted),
+                ),
+                if (shortSha.isNotEmpty) ...[
+                  pw.SizedBox(height: 2),
+                  pw.Text(
+                    'Digital POD Seal (SHA-256): $shortSha',
+                    style: pw.TextStyle(
+                      font: pw.Font.courier(),
+                      fontSize: 7.0,
+                      color: _textMuted,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          pw.SizedBox(width: 12),
+          pw.Container(
+            width: 196,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.white,
+              border: pw.Border.all(
+                color: const PdfColor.fromInt(0xFFCBD5E1),
+                width: 0.9,
+              ),
+              borderRadius: pw.BorderRadius.circular(6),
+            ),
+            child: pw.Column(
+              mainAxisSize: pw.MainAxisSize.min,
+              children: [
+                pw.Image(
+                  clientPodImage,
+                  height: 62,
+                  width: 176,
+                  fit: pw.BoxFit.contain,
+                ),
+                pw.SizedBox(height: 3),
+                pw.Container(
+                  width: 150,
+                  height: 0.6,
+                  color: const PdfColor.fromInt(0xFF94A3B8),
+                ),
+                pw.SizedBox(height: 2.5),
+                pw.Text(
+                  'CLIENT RECEIVING STAMP & SIGN-OFF',
+                  style: pw.TextStyle(
+                    fontSize: 6.2,
+                    fontWeight: pw.FontWeight.bold,
+                    color: _textMuted,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   static pw.Widget _buildBottomQrAndStamp({
     required Invoice invoice,
     required pw.MemoryImage? stampImage,
@@ -1225,12 +1368,17 @@ class InvoicePdfBuilder {
     final greetingName = cleanContact.isNotEmpty ? cleanContact : clientName;
     final dateStr = InvoiceFormatters.formatDisplayDate(invoice.date);
     final amountStr = InvoiceFormatters.formatMoney(invoice.totalSell);
+    final podLine = invoice.hasClientPodStamp
+        ? '*Delivery Acceptance:* Verified & Stamped${(invoice.clientPodReceiver ?? '').trim().isNotEmpty ? ' (${invoice.clientPodReceiver!.trim()})' : ''}\n'
+        : '';
 
     return 'Hello $greetingName,\n\n'
-        'Thank you for choosing Town Treasure Groceries! Please find attached your invoice for the recent order.\n\n'
+        'Thank you for choosing Town Treasure Groceries! Please find attached your${invoice.hasClientPodStamp ? ' stamped & verified' : ''} invoice for the recent order.\n\n'
         '*Invoice No:* ${invoice.number}\n'
+        '${(invoice.cuInvoiceNumber ?? '').trim().isNotEmpty ? '*KRA eTIMS CU No:* ${invoice.cuInvoiceNumber!.trim()}\n' : ''}'
         '*Date:* $dateStr\n'
-        '*Total Amount:* KES $amountStr\n\n'
+        '*Total Amount:* KES $amountStr\n'
+        '$podLine\n'
         'Feel free to reach out for any queries. We appreciate your business!';
   }
 
@@ -1292,6 +1440,18 @@ class InvoicePdfBuilder {
 
   static Uint8List? decodeSignatureDataUrl(String? signature) {
     return StampSignatureHelper.prepareSignaturePng(signature);
+  }
+
+  static Uint8List? decodeRawDataUrlBytes(String? dataUri) {
+    if (dataUri == null || dataUri.trim().isEmpty) return null;
+    final trimmed = dataUri.trim();
+    final commaIdx = trimmed.indexOf(',');
+    final b64 = commaIdx >= 0 ? trimmed.substring(commaIdx + 1) : trimmed;
+    try {
+      return base64Decode(b64);
+    } catch (_) {
+      return null;
+    }
   }
 
   static Future<Uint8List?> _loadAssetBytes(String assetPath) async {

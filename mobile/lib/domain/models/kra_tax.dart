@@ -511,7 +511,7 @@ class KraTaxCalculator {
 
     var inputVat = 0.0;
     for (final exp in expenses) {
-      if (!exp.isCapital && exp.date.startsWith(monthYm)) {
+      if (!exp.isCapital && !exp.isLoanPrincipal && exp.date.startsWith(monthYm)) {
         inputVat += exp.inputVatAmount ?? 0.0;
       }
     }

@@ -11,6 +11,7 @@ import '../../../data/services/ocr_consensus_service.dart';
 import '../../../data/services/remote_update_service.dart';
 import '../../../domain/models/models.dart';
 import '../../core/app_lock_guard.dart';
+import '../../core/client_stamp_scanner_sheet.dart';
 import '../../core/theme/app_theme.dart';
 import '../dashboard/update_checker_sheet.dart';
 import '../scanner/docket_scanner_sheet.dart';
@@ -49,6 +50,7 @@ class ClerkPortalScreen extends StatefulWidget {
     this.standaloneClerkApp = false,
     this.updateService,
     this.updateManifestUrl = RemoteUpdateService.defaultClerkManifestUrl,
+    this.stampImagePicker,
   });
 
   final ClerkViewModel viewModel;
@@ -57,6 +59,7 @@ class ClerkPortalScreen extends StatefulWidget {
   final bool standaloneClerkApp;
   final RemoteUpdateService? updateService;
   final String updateManifestUrl;
+  final StampImageBytesPicker? stampImagePicker;
 
   @override
   State<ClerkPortalScreen> createState() => _ClerkPortalScreenState();
@@ -106,6 +109,12 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
 
   final List<_ClerkLineRow> _rows = [];
   final List<OcrImagePage> _photoPages = [];
+
+  String? _podStampDataUri;
+  Uint8List? _podStampPreviewBytes;
+  String _podReceiver = '';
+  String? _podAtIso;
+  String? _podSha256;
 
   String _selectedRestaurant = '';
   String? _editingDocketId;
@@ -396,6 +405,10 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
         otherCost: oth,
         notes: _notesController.text,
         receiptPhotos: _photoPages.map((p) => p.dataUrl).toList(),
+        clientPodStamp: _podStampDataUri,
+        clientPodReceiver: _podReceiver.trim().isEmpty ? null : _podReceiver.trim(),
+        clientPodAt: _podAtIso,
+        clientPodSha256: _podSha256,
         bypassDuplicateCheck: bypassDuplicateCheck,
       );
       if (!mounted) return;
@@ -602,6 +615,11 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
       _photoPages
         ..clear()
         ..addAll(full.receiptPhotos.map((u) => OcrImagePage(dataUrl: u)));
+      _podStampDataUri = full.clientPodStamp;
+      _podStampPreviewBytes = null;
+      _podReceiver = full.clientPodReceiver ?? '';
+      _podAtIso = full.clientPodAt;
+      _podSha256 = full.clientPodSha256;
 
       setState(() {});
       _showSnack(
@@ -666,6 +684,11 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
     _editingRejectionReason = null;
     if (!clearEditingOnly) {
       _photoPages.clear();
+      _podStampDataUri = null;
+      _podStampPreviewBytes = null;
+      _podReceiver = '';
+      _podAtIso = null;
+      _podSha256 = null;
       _ocrStatus = '';
       if (clearRestaurant) {
         _selectedRestaurant = '';
@@ -710,6 +733,110 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
   void _showSnack(String msg, {Color color = AppTheme.forestGreen}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(msg), backgroundColor: color),
+    );
+  }
+
+  Future<void> _captureClerkPodStamp() async {
+    final restLabel = _effectiveRestaurant.trim().isNotEmpty
+        ? _effectiveRestaurant.trim()
+        : 'Client Order';
+    final scan = await ClientStampScannerSheet.show(
+      context,
+      clientName: restLabel,
+      initialReceiverName: _podReceiver,
+      imagePicker: widget.stampImagePicker,
+    );
+    if (scan == null || !mounted) return;
+    setState(() {
+      _podStampDataUri = scan.stampDataUri;
+      _podStampPreviewBytes = scan.stampPngBytes;
+      _podReceiver = scan.receiverName;
+      _podAtIso = scan.capturedAtIso;
+      _podSha256 = scan.rawPhotoSha256;
+    });
+  }
+
+  Widget _buildClerkPodStampCard() {
+    final hasPod = (_podStampDataUri ?? '').trim().isNotEmpty;
+    return Container(
+      key: const Key('card_clerk_pod_stamp'),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: hasPod ? AppTheme.leafGreen : AppTheme.borderSubtle,
+          width: hasPod ? 1.3 : 1.0,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Icon(
+                hasPod ? Icons.verified : Icons.approval_outlined,
+                color: AppTheme.forestGreen,
+                size: 19,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  hasPod
+                      ? 'Client Delivery Stamp Attached${_podReceiver.isNotEmpty ? ' • $_podReceiver' : ''}'
+                      : 'Paperless Client Acceptance Stamp (Optional)',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: AppTheme.slateInk,
+                  ),
+                ),
+              ),
+              if (hasPod)
+                IconButton(
+                  tooltip: 'Remove stamp',
+                  onPressed: () => setState(() {
+                    _podStampDataUri = null;
+                    _podStampPreviewBytes = null;
+                    _podReceiver = '';
+                    _podAtIso = null;
+                    _podSha256 = null;
+                  }),
+                  icon: const Icon(
+                    Icons.close,
+                    size: 18,
+                    color: AppTheme.danger,
+                  ),
+                ),
+            ],
+          ),
+          if (hasPod) ...[
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 68,
+              child: _podStampPreviewBytes != null
+                  ? Image.memory(_podStampPreviewBytes!, fit: BoxFit.contain)
+                  : DocketReceiptImage(
+                      dataUrl: _podStampDataUri!,
+                      fit: BoxFit.contain,
+                    ),
+            ),
+          ] else ...[
+            const SizedBox(height: 4),
+            const Text(
+              'After the client verifies the delivery, have them stamp + sign a white slip and snap it here.',
+              style: TextStyle(fontSize: 11.5, color: AppTheme.slateMuted),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              key: const Key('btn_clerk_absorb_stamp'),
+              onPressed: _captureClerkPodStamp,
+              icon: const Icon(Icons.camera_alt_outlined, size: 17),
+              label: const Text('Absorb Client Stamp'),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -1183,6 +1310,9 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
                       ],
                     ),
                   ),
+
+                  const SizedBox(height: 14),
+                  _buildClerkPodStampCard(),
 
                   const SizedBox(height: 16),
 
