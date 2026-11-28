@@ -1,7 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart';
 import 'package:google_mlkit_document_scanner/google_mlkit_document_scanner.dart';
 import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
@@ -9,6 +9,31 @@ import 'package:image/image.dart' as img;
 import '../../ui/core/app_lock_guard.dart';
 import 'cloudflare_backend_service.dart';
 import 'supabase_service.dart';
+
+/// Top-level isolate entrypoint so decoding & downscaling large Android camera
+/// photos never blocks the Flutter UI thread.
+Uint8List? _prepareCompactJpegIsolate(Uint8List rawBytes) {
+  final decoded = img.decodeImage(rawBytes);
+  if (decoded == null) return null;
+  var oriented = img.bakeOrientation(decoded);
+  const maxDim = 960;
+  if (oriented.width > maxDim || oriented.height > maxDim) {
+    if (oriented.width >= oriented.height) {
+      oriented = img.copyResize(
+        oriented,
+        width: maxDim,
+        interpolation: img.Interpolation.linear,
+      );
+    } else {
+      oriented = img.copyResize(
+        oriented,
+        height: maxDim,
+        interpolation: img.Interpolation.linear,
+      );
+    }
+  }
+  return Uint8List.fromList(img.encodeJpg(oriented, quality: 82));
+}
 
 /// Spatial & semantic stamp localization metadata returned by `POST /stamp/locate`
 /// (`gemini-3.5-flash-lite` Free Tier via `ttg-api`).
@@ -92,8 +117,9 @@ abstract class StampLocatorGateway {
 /// Calls Cloudflare Worker `POST /stamp/locate` using either an authenticated
 /// Owner Supabase Bearer token or a valid Clerk invite token.
 ///
-/// Always degrades gracefully to `null` on offline networks, timeouts, or
-/// free-tier rate limits so on-device extraction never blocks a delivery.
+/// Resizes large photos on a background isolate and degrades gracefully to
+/// `null` on offline networks, timeouts, or unconfigured server keys so
+/// on-device extraction never blocks a delivery.
 class CloudflareStampLocatorService implements StampLocatorGateway {
   CloudflareStampLocatorService({
     this.authGateway,
@@ -109,8 +135,11 @@ class CloudflareStampLocatorService implements StampLocatorGateway {
   final Duration timeout;
   final http.Client _http;
 
+  String? lastFallbackReason;
+
   @override
   Future<StampLocationHint?> locateStamp(Uint8List photoBytes) async {
+    lastFallbackReason = null;
     try {
       String? bearerToken;
       if (authGateway != null) {
@@ -119,10 +148,13 @@ class CloudflareStampLocatorService implements StampLocatorGateway {
       }
       final inviteTok = (clerkInviteToken ?? '').trim();
       if (bearerToken == null && inviteTok.isEmpty) {
+        lastFallbackReason = 'No active cloud session — using offline extractor';
         return null;
       }
 
-      final uploadJpeg = _prepareCompactJpeg(photoBytes);
+      final uploadJpeg = Platform.environment.containsKey('FLUTTER_TEST')
+          ? _prepareCompactJpegIsolate(photoBytes)
+          : await compute(_prepareCompactJpegIsolate, photoBytes);
       if (uploadJpeg == null || uploadJpeg.isEmpty) return null;
 
       final root = baseUrl.replaceAll(RegExp(r'/+$'), '');
@@ -144,38 +176,26 @@ class CloudflareStampLocatorService implements StampLocatorGateway {
           )
           .timeout(timeout);
 
+      if (res.statusCode == 503) {
+        lastFallbackReason =
+            'AI server key not configured yet on Cloudflare (GEMINI_API_KEY) — using offline mode';
+        return null;
+      }
+      if (res.statusCode == 429) {
+        lastFallbackReason = 'AI free-tier busy — using offline mode';
+        return null;
+      }
       if (res.statusCode < 200 || res.statusCode >= 300) {
+        lastFallbackReason = 'AI locator unavailable (HTTP ${res.statusCode})';
         return null;
       }
       final decoded = jsonDecode(res.body);
       if (decoded is! Map) return null;
       return StampLocationHint.tryParse(Map<String, dynamic>.from(decoded));
     } catch (_) {
+      lastFallbackReason = 'Offline or slow network — using offline mode';
       return null;
     }
-  }
-
-  static Uint8List? _prepareCompactJpeg(Uint8List rawBytes) {
-    final decoded = img.decodeImage(rawBytes);
-    if (decoded == null) return null;
-    var oriented = img.bakeOrientation(decoded);
-    const maxDim = 960;
-    if (oriented.width > maxDim || oriented.height > maxDim) {
-      if (oriented.width >= oriented.height) {
-        oriented = img.copyResize(
-          oriented,
-          width: maxDim,
-          interpolation: img.Interpolation.cubic,
-        );
-      } else {
-        oriented = img.copyResize(
-          oriented,
-          height: maxDim,
-          interpolation: img.Interpolation.cubic,
-        );
-      }
-    }
-    return Uint8List.fromList(img.encodeJpg(oriented, quality: 82));
   }
 }
 

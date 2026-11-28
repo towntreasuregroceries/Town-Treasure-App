@@ -1,8 +1,9 @@
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
-import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart' as crypto;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
@@ -13,6 +14,39 @@ import '../../data/services/supabase_service.dart';
 import 'app_lock_guard.dart';
 import 'theme/app_theme.dart';
 import 'user_friendly_error.dart';
+
+/// Serializable payload for executing `ChrominanceStampProcessor` on a
+/// background isolate via [compute] so large Android camera photos NEVER freeze
+/// the Flutter UI thread or trigger an ANR.
+class _StampProcessRequest {
+  const _StampProcessRequest({
+    required this.inputBytes,
+    required this.receiverName,
+    required this.inkClarity,
+    this.locationHint,
+  });
+
+  final Uint8List inputBytes;
+  final String receiverName;
+  final double inkClarity;
+  final StampLocationHint? locationHint;
+}
+
+Future<ClientStampScanResult> _runStampProcess(_StampProcessRequest req) {
+  if (Platform.environment.containsKey('FLUTTER_TEST')) {
+    return Future<ClientStampScanResult>(() => _processStampIsolate(req));
+  }
+  return compute(_processStampIsolate, req);
+}
+
+ClientStampScanResult _processStampIsolate(_StampProcessRequest req) {
+  return ChrominanceStampProcessor.processStampBytes(
+    req.inputBytes,
+    receiverName: req.receiverName,
+    locationHint: req.locationHint,
+    inkClarity: req.inkClarity,
+  );
+}
 
 /// Result of capturing and extracting a client's Proof-of-Delivery (POD) rubber
 /// stamp and receiver sign-off from a white verification slip.
@@ -61,7 +95,10 @@ class ClientStampScanResult {
       );
 }
 
-/// Multi-spectral chrominance + local-illumination rubber-stamp extractor (v3).
+/// Multi-spectral chrominance + local-illumination rubber-stamp extractor (v3.1).
+///
+/// Optimized with integer `Int32List` integral images and bounded working
+/// dimensions (`<= 1000px`) for fast, low-memory background-isolate execution.
 ///
 /// Supports two modes:
 /// 1. **AI Spatial Hybrid (`locationHint != null`)**: crops real camera pixels
@@ -70,10 +107,8 @@ class ClientStampScanResult {
 ///    on transparent RGBA (zero black corners), and fits a tight shape-aware
 ///    oval/circle mask.
 /// 2. **Offline Local Mode (`locationHint == null`)**: runs integral-image
-///    local paper white-balancing + border flood-fill desk removal over the
-///    captured slip (or ML Kit Document Scanner output).
-///
-/// Both modes accept [inkClarity] (`-18.0` to `+28.0`) for live user tuning.
+///    local paper white-balancing + border flood-fill desk removal + density
+///    outlier trimming so isolated paper-edge specks never blow up the crop.
 class ChrominanceStampProcessor {
   ChrominanceStampProcessor._();
 
@@ -167,23 +202,23 @@ class ChrominanceStampProcessor {
 
   static Uint8List _encodeEvidenceJpeg(img.Image oriented) {
     var ev = oriented;
-    const maxDim = 1350;
+    const maxDim = 1200;
     if (ev.width > maxDim || ev.height > maxDim) {
       if (ev.width >= ev.height) {
         ev = img.copyResize(
           ev,
           width: maxDim,
-          interpolation: img.Interpolation.cubic,
+          interpolation: img.Interpolation.linear,
         );
       } else {
         ev = img.copyResize(
           ev,
           height: maxDim,
-          interpolation: img.Interpolation.cubic,
+          interpolation: img.Interpolation.linear,
         );
       }
     }
-    return Uint8List.fromList(img.encodeJpg(ev, quality: 82));
+    return Uint8List.fromList(img.encodeJpg(ev, quality: 80));
   }
 
   static ClientStampScanResult _processWithSpatialHint({
@@ -221,15 +256,23 @@ class ChrominanceStampProcessor {
     final ch = math.min(oriented.height - cy0, (ymax - ymin) + padY * 2);
 
     var crop = img.copyCrop(oriented, x: cx0, y: cy0, width: cw, height: ch);
-    if (crop.width > 960) {
-      crop = img.copyResize(
-        crop,
-        width: 960,
-        interpolation: img.Interpolation.cubic,
-      );
+    const maxCropDim = 900;
+    if (crop.width > maxCropDim || crop.height > maxCropDim) {
+      if (crop.width >= crop.height) {
+        crop = img.copyResize(
+          crop,
+          width: maxCropDim,
+          interpolation: img.Interpolation.linear,
+        );
+      } else {
+        crop = img.copyResize(
+          crop,
+          height: maxCropDim,
+          interpolation: img.Interpolation.linear,
+        );
+      }
     }
 
-    // Handle coarse 90/180/-90 upright rotation if photo was sideways/upside-down
     var coarseRot = 0.0;
     var fineFallbackRot = hint.uprightClockwiseRotationDeg;
     if (hint.uprightClockwiseRotationDeg.abs() > 45.0) {
@@ -243,28 +286,28 @@ class ChrominanceStampProcessor {
     final height = crop.height;
     final stride = width + 1;
     final intLen = (width + 1) * (height + 1);
-    final intR = Float64List(intLen);
-    final intG = Float64List(intLen);
-    final intB = Float64List(intLen);
+    final intR = Int32List(intLen);
+    final intG = Int32List(intLen);
+    final intB = Int32List(intLen);
 
     for (var y = 0; y < height; y++) {
-      var sumR = 0.0;
-      var sumG = 0.0;
-      var sumB = 0.0;
+      var sumR = 0;
+      var sumG = 0;
+      var sumB = 0;
       final prevRow = y * stride;
       final curRow = (y + 1) * stride;
       for (var x = 0; x < width; x++) {
         final p = crop.getPixel(x, y);
-        sumR += p.r;
-        sumG += p.g;
-        sumB += p.b;
+        sumR += p.r.toInt();
+        sumG += p.g.toInt();
+        sumB += p.b.toInt();
         intR[curRow + x + 1] = intR[prevRow + x + 1] + sumR;
         intG[curRow + x + 1] = intG[prevRow + x + 1] + sumG;
         intB[curRow + x + 1] = intB[prevRow + x + 1] + sumB;
       }
     }
 
-    final radius = math.max(26, math.min(width, height) ~/ 6);
+    final radius = math.max(24, math.min(width, height) ~/ 6);
     final lumDrops = Float32List(width * height);
     final chromas = Float32List(width * height);
     final normR = Uint8List(width * height);
@@ -338,7 +381,6 @@ class ChrominanceStampProcessor {
       }
     }
 
-    // Learn core stamp pigment hue so pale neutral-gray form lines are suppressed
     final avgCoreR = coreCount > 20 ? coreR / coreCount : 70.0;
     final avgCoreG = coreCount > 20 ? coreG / coreCount : 70.0;
     final avgCoreB = coreCount > 20 ? coreB / coreCount : 70.0;
@@ -420,12 +462,11 @@ class ChrominanceStampProcessor {
       }
     }
 
-    // Apply coarse upright rotation (if sideways/upside-down) + PCA fine deskew
-    var workingRgba = coarseRot.abs() >= 45.0
+    final workingRgba = coarseRot.abs() >= 45.0
         ? img.copyRotate(
             rgbaUnrotated,
             angle: coarseRot,
-            interpolation: img.Interpolation.cubic,
+            interpolation: img.Interpolation.linear,
           )
         : rgbaUnrotated;
 
@@ -443,7 +484,7 @@ class ChrominanceStampProcessor {
         ? img.copyRotate(
             workingRgba,
             angle: fineRot,
-            interpolation: img.Interpolation.cubic,
+            interpolation: img.Interpolation.linear,
           )
         : workingRgba;
 
@@ -463,7 +504,6 @@ class ChrominanceStampProcessor {
     }
 
     if (maxX < minX || maxY < minY) {
-      // Fallback to local full-frame if spatial box yielded too few ink pixels
       return _processFullFrameOffline(
         oriented: oriented,
         rawEvidenceJpeg: rawEvidenceJpeg,
@@ -474,7 +514,6 @@ class ChrominanceStampProcessor {
       );
     }
 
-    // Fit tight oval/circle rim mask on the straightened stamp
     if (hint.shape == 'oval' || hint.shape == 'circle') {
       final cx = (minX + maxX) / 2.0;
       final cy = (minY + maxY) / 2.0;
@@ -532,7 +571,7 @@ class ChrominanceStampProcessor {
       );
     }
 
-    final pngBytes = Uint8List.fromList(img.encodePng(finalImg, level: 6));
+    final pngBytes = Uint8List.fromList(img.encodePng(finalImg, level: 4));
     final effectiveReceiver = receiverName.trim().isNotEmpty
         ? receiverName.trim()
         : hint.receiverOrUser.trim();
@@ -566,19 +605,19 @@ class ChrominanceStampProcessor {
     required double inkClarity,
   }) {
     var working = oriented;
-    const maxDim = 1350;
+    const maxDim = 1000;
     if (working.width > maxDim || working.height > maxDim) {
       if (working.width >= working.height) {
         working = img.copyResize(
           working,
           width: maxDim,
-          interpolation: img.Interpolation.cubic,
+          interpolation: img.Interpolation.linear,
         );
       } else {
         working = img.copyResize(
           working,
           height: maxDim,
-          interpolation: img.Interpolation.cubic,
+          interpolation: img.Interpolation.linear,
         );
       }
     }
@@ -588,28 +627,28 @@ class ChrominanceStampProcessor {
     final stride = width + 1;
     final intLen = (width + 1) * (height + 1);
 
-    final intR = Float64List(intLen);
-    final intG = Float64List(intLen);
-    final intB = Float64List(intLen);
+    final intR = Int32List(intLen);
+    final intG = Int32List(intLen);
+    final intB = Int32List(intLen);
 
     for (var y = 0; y < height; y++) {
-      var sumR = 0.0;
-      var sumG = 0.0;
-      var sumB = 0.0;
+      var sumR = 0;
+      var sumG = 0;
+      var sumB = 0;
       final prevRow = y * stride;
       final curRow = (y + 1) * stride;
       for (var x = 0; x < width; x++) {
         final p = working.getPixel(x, y);
-        sumR += p.r;
-        sumG += p.g;
-        sumB += p.b;
+        sumR += p.r.toInt();
+        sumG += p.g.toInt();
+        sumB += p.b.toInt();
         intR[curRow + x + 1] = intR[prevRow + x + 1] + sumR;
         intG[curRow + x + 1] = intG[prevRow + x + 1] + sumG;
         intB[curRow + x + 1] = intB[prevRow + x + 1] + sumB;
       }
     }
 
-    final radius = math.max(28, math.min(width, height) ~/ 7);
+    final radius = math.max(24, math.min(width, height) ~/ 7);
     final strength = Float32List(width * height);
     final mask = Uint8List(width * height);
     final normR = Uint8List(width * height);
@@ -730,10 +769,8 @@ class ChrominanceStampProcessor {
       }
     }
 
-    var minX = width;
-    var minY = height;
-    var maxX = -1;
-    var maxY = -1;
+    final rowCounts = Int32List(height);
+    final colCounts = Int32List(width);
     var sumInkR = 0;
     var sumInkG = 0;
     var sumInkB = 0;
@@ -773,10 +810,8 @@ class ChrominanceStampProcessor {
         outFull.setPixelRgba(x, y, r, g, b, alpha);
 
         if (alpha >= 90) {
-          if (x < minX) minX = x;
-          if (y < minY) minY = y;
-          if (x > maxX) maxX = x;
-          if (y > maxY) maxY = y;
+          rowCounts[y]++;
+          colCounts[x]++;
           sumInkR += r;
           sumInkG += g;
           sumInkB += b;
@@ -785,10 +820,38 @@ class ChrominanceStampProcessor {
       }
     }
 
-    if (maxX < minX || maxY < minY || inkCount < 20) {
+    if (inkCount < 20) {
       throw const FormatException(
         'No clear stamp or signature ink detected. Place the stamped white slip in good lighting and try again.',
       );
+    }
+
+    // Trim sparse outer outlier specks (0.5% cumulative ink margin) so a
+    // stray edge speck never blows up the crop and makes the stamp look tiny.
+    final trimMargin = math.max(1, (inkCount * 0.005).round());
+    var minY = 0;
+    var acc = 0;
+    while (minY < height - 1 && acc + rowCounts[minY] < trimMargin) {
+      acc += rowCounts[minY];
+      minY++;
+    }
+    var maxY = height - 1;
+    acc = 0;
+    while (maxY > minY && acc + rowCounts[maxY] < trimMargin) {
+      acc += rowCounts[maxY];
+      maxY--;
+    }
+    var minX = 0;
+    acc = 0;
+    while (minX < width - 1 && acc + colCounts[minX] < trimMargin) {
+      acc += colCounts[minX];
+      minX++;
+    }
+    var maxX = width - 1;
+    acc = 0;
+    while (maxX > minX && acc + colCounts[maxX] < trimMargin) {
+      acc += colCounts[maxX];
+      maxX--;
     }
 
     const pad = 12;
@@ -812,7 +875,7 @@ class ChrominanceStampProcessor {
       );
     }
 
-    final pngBytes = Uint8List.fromList(img.encodePng(cropped, level: 6));
+    final pngBytes = Uint8List.fromList(img.encodePng(cropped, level: 4));
     final avgR = sumInkR / inkCount;
     final avgG = sumInkG / inkCount;
     final avgB = sumInkB / inkCount;
@@ -840,13 +903,34 @@ class ChrominanceStampProcessor {
   }
 }
 
+class _CheckerboardPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    const cell = 10.0;
+    final light = Paint()..color = const Color(0xFFFFFFFF);
+    final dark = Paint()..color = const Color(0xFFF1F5F2);
+    canvas.drawRect(Offset.zero & size, light);
+    for (var y = 0.0; y < size.height; y += cell) {
+      final row = (y ~/ cell);
+      for (var x = 0.0; x < size.width; x += cell) {
+        if (((x ~/ cell) + row).isOdd) {
+          canvas.drawRect(Rect.fromLTWH(x, y, cell, cell), dark);
+        }
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
 typedef StampImageBytesPicker = Future<Uint8List?> Function(ImageSource source);
 
 /// Dedicated bottom-sheet scanner used in both Owner App and Clerk App to
 /// photograph or ML-Kit-scan a client's stamped + signed verification slip,
 /// localize the rubber stamp via Gemini AI Studio Free Tier (`POST /stamp/locate`)
-/// with automatic offline fallback, auto-straighten + remove paper background,
-/// and punch the authentic stamp onto the order.
+/// with automatic offline fallback, auto-straighten + remove paper background
+/// on a background isolate (zero UI freezes), and punch it onto the order.
 class ClientStampScannerSheet extends StatefulWidget {
   const ClientStampScannerSheet({
     super.key,
@@ -908,8 +992,11 @@ class _ClientStampScannerSheetState extends State<ClientStampScannerSheet> {
   ClientStampScanResult? _scanResult;
   Uint8List? _lastRawBytes;
   StampLocationHint? _lastLocationHint;
+  String? _fallbackNote;
   double _inkClarity = 0.0;
   bool _busy = false;
+  bool _reprocessingSlider = false;
+  int _processGen = 0;
   String _busyMessage = 'Extracting true-color stamp...';
   String? _error;
 
@@ -951,41 +1038,49 @@ class _ClientStampScannerSheetState extends State<ClientStampScannerSheet> {
     final picked = await AppLockGuard.runWithoutRelock(
       () => _defaultPicker.pickImage(
         source: source,
-        maxWidth: 1800,
-        maxHeight: 1800,
-        imageQuality: 92,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 90,
       ),
     );
     return picked?.readAsBytes();
   }
 
   Future<void> _processCapturedBytes(Uint8List bytes) async {
+    final gen = ++_processGen;
     setState(() {
       _busy = true;
       _error = null;
+      _fallbackNote = null;
       _busyMessage = 'Locating official stamp & straightening...';
     });
 
     StampLocationHint? hint;
+    String? fallbackReason;
     final locator = _resolveLocator();
     if (locator != null) {
       hint = await locator.locateStamp(bytes);
+      if (hint == null && locator is CloudflareStampLocatorService) {
+        fallbackReason = locator.lastFallbackReason;
+      }
     }
 
-    if (!mounted) return;
+    if (!mounted || gen != _processGen) return;
     setState(() {
       _busyMessage = hint != null
           ? 'Separating true-color stamp ink from background...'
-          : 'Extracting stamp offline (local chrominance)...';
+          : 'Extracting stamp cleanly in background...';
     });
 
-    final result = ChrominanceStampProcessor.processStampBytes(
-      bytes,
-      receiverName: _receiverCtrl.text,
-      locationHint: hint,
-      inkClarity: 0.0,
+    final result = await _runStampProcess(
+      _StampProcessRequest(
+        inputBytes: bytes,
+        receiverName: _receiverCtrl.text,
+        locationHint: hint,
+        inkClarity: 0.0,
+      ),
     );
-    if (!mounted) return;
+    if (!mounted || gen != _processGen) return;
 
     if (_receiverCtrl.text.trim().isEmpty &&
         result.receiverName.trim().isNotEmpty) {
@@ -995,6 +1090,7 @@ class _ClientStampScannerSheetState extends State<ClientStampScannerSheet> {
     setState(() {
       _lastRawBytes = bytes;
       _lastLocationHint = hint;
+      _fallbackNote = hint == null ? fallbackReason : null;
       _inkClarity = 0.0;
       _scanResult = result;
       _busy = false;
@@ -1053,24 +1149,33 @@ class _ClientStampScannerSheetState extends State<ClientStampScannerSheet> {
     }
   }
 
-  void _reprocessWithClarity(double clarity) {
+  Future<void> _reprocessWithClarity(double clarity) async {
     final raw = _lastRawBytes;
     if (raw == null) return;
+    final gen = ++_processGen;
+    setState(() {
+      _inkClarity = clarity;
+      _reprocessingSlider = true;
+    });
     try {
-      final result = ChrominanceStampProcessor.processStampBytes(
-        raw,
-        receiverName: _receiverCtrl.text,
-        locationHint: _lastLocationHint,
-        inkClarity: clarity,
+      final result = await _runStampProcess(
+        _StampProcessRequest(
+          inputBytes: raw,
+          receiverName: _receiverCtrl.text,
+          locationHint: _lastLocationHint,
+          inkClarity: clarity,
+        ),
       );
+      if (!mounted || gen != _processGen) return;
       setState(() {
-        _inkClarity = clarity;
         _scanResult = result;
+        _reprocessingSlider = false;
         _error = null;
       });
     } catch (_) {
+      if (!mounted || gen != _processGen) return;
       setState(() {
-        _inkClarity = clarity;
+        _reprocessingSlider = false;
         _error = 'Clarity too high — slide left to restore faint stamp ink.';
       });
     }
@@ -1300,6 +1405,17 @@ class _ClientStampScannerSheetState extends State<ClientStampScannerSheet> {
                         ),
                       ],
                     ),
+                    if (_fallbackNote != null &&
+                        _fallbackNote!.trim().isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        _fallbackNote!,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          color: AppTheme.slateMuted,
+                        ),
+                      ),
+                    ],
                     if (_scanResult!.stampOrganization.isNotEmpty ||
                         _scanResult!.stampDate.isNotEmpty) ...[
                       const SizedBox(height: 6),
@@ -1320,12 +1436,30 @@ class _ClientStampScannerSheetState extends State<ClientStampScannerSheet> {
                       ),
                     ],
                     const SizedBox(height: 10),
-                    Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 145),
-                        child: Image.memory(
-                          _scanResult!.stampPngBytes,
-                          fit: BoxFit.contain,
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: CustomPaint(
+                        painter: _CheckerboardPainter(),
+                        child: Container(
+                          constraints: const BoxConstraints(
+                            minHeight: 110,
+                            maxHeight: 165,
+                          ),
+                          padding: const EdgeInsets.all(8),
+                          alignment: Alignment.center,
+                          child: _reprocessingSlider
+                              ? const SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2.5,
+                                    color: AppTheme.forestGreen,
+                                  ),
+                                )
+                              : Image.memory(
+                                  _scanResult!.stampPngBytes,
+                                  fit: BoxFit.contain,
+                                ),
                         ),
                       ),
                     ),
@@ -1348,7 +1482,8 @@ class _ClientStampScannerSheetState extends State<ClientStampScannerSheet> {
                             max: 24.0,
                             divisions: 20,
                             activeColor: AppTheme.forestGreen,
-                            onChanged: (v) => _reprocessWithClarity(v),
+                            onChanged: (v) => setState(() => _inkClarity = v),
+                            onChangeEnd: (v) => _reprocessWithClarity(v),
                           ),
                         ),
                         Text(
@@ -1375,11 +1510,13 @@ class _ClientStampScannerSheetState extends State<ClientStampScannerSheet> {
                   backgroundColor: AppTheme.forestGreenDeep,
                   padding: const EdgeInsets.symmetric(vertical: 13),
                 ),
-                onPressed: () {
-                  Navigator.of(context).pop(
-                    _scanResult!.withReceiverName(_receiverCtrl.text),
-                  );
-                },
+                onPressed: _reprocessingSlider
+                    ? null
+                    : () {
+                        Navigator.of(context).pop(
+                          _scanResult!.withReceiverName(_receiverCtrl.text),
+                        );
+                      },
                 icon: const Icon(Icons.approval_outlined, size: 19),
                 label: const Text('Punch Stamp onto Order'),
               ),

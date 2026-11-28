@@ -76,6 +76,35 @@ Future<void> main() async {
   );
 }
 
+/// Holds background screen-lock state above `MaterialApp`'s `Navigator` so
+/// locking hides all screens, sheets, and dialogs behind an opaque lock curtain
+/// WITHOUT popping routes or destroying half-filled forms (100% continuation).
+class AppLockController extends ChangeNotifier {
+  bool _isLocked = false;
+  int _lockEpoch = 0;
+
+  bool get isLocked => _isLocked;
+  int get lockEpoch => _lockEpoch;
+
+  void lock() {
+    _isLocked = true;
+    _lockEpoch++;
+    notifyListeners();
+  }
+
+  void unlock() {
+    if (!_isLocked) return;
+    _isLocked = false;
+    notifyListeners();
+  }
+
+  void bumpLockEpoch() {
+    if (!_isLocked) return;
+    _lockEpoch++;
+    notifyListeners();
+  }
+}
+
 class TownTreasureApp extends StatelessWidget {
   const TownTreasureApp({
     super.key,
@@ -146,14 +175,49 @@ class TownTreasureApp extends StatelessWidget {
         ChangeNotifierProvider<DeveloperPreviewController>(
           create: (_) => DeveloperPreviewController(),
         ),
+        ChangeNotifierProvider<AppLockController>(
+          create: (_) => AppLockController(),
+        ),
       ],
-      child: Consumer2<AuthRepository, DeveloperPreviewController>(
-        builder: (_, auth, devPreview, _) => MaterialApp(
+      child: Consumer3<AuthRepository, DeveloperPreviewController,
+          AppLockController>(
+        builder: (_, auth, devPreview, lockCtrl, _) => MaterialApp(
           title: 'Town Treasure Groceries',
           debugShowCheckedModeBanner: false,
           theme: devPreview.isRedesignedUiActiveFor(auth.currentUser?.email)
               ? AppTheme.redesignedLight()
               : AppTheme.light(),
+          builder: (ctx, child) {
+            final appChild = child ?? const SizedBox.shrink();
+            return Stack(
+              children: [
+                // Offstage hides the entire live Navigator (including open
+                // InvoiceEditorScreen, ClientStampScannerSheet, and dialogs)
+                // from painting, touch, and screenshots while keeping 100% of
+                // widget state and typed form data intact for instant resume.
+                Offstage(
+                  offstage: lockCtrl.isLocked,
+                  child: appChild,
+                ),
+                if (lockCtrl.isLocked)
+                  Positioned.fill(
+                    child: HeroControllerScope.none(
+                      child: Navigator(
+                        key: ValueKey('lock_curtain_nav_${lockCtrl.lockEpoch}'),
+                        onGenerateRoute: (_) => MaterialPageRoute<void>(
+                          builder: (_) => AuthScreen(
+                            key: ValueKey('auth_lock_${lockCtrl.lockEpoch}'),
+                            viewModel: authViewModel,
+                            autoInitialize: autoInitializeAuth,
+                            onAuthenticated: (_) => lockCtrl.unlock(),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
           home: AuthGate(
             authViewModel: authViewModel,
             autoInitializeAuth: autoInitializeAuth,
@@ -252,21 +316,51 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     }
   }
 
+  AppLockController? _maybeLockController() {
+    try {
+      return context.read<AppLockController>();
+    } catch (_) {
+      return null;
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached) {
       _lockOnBackgroundIfEnabled();
-    } else if (state == AppLifecycleState.resumed &&
-        _lockedInBackground &&
-        _unlockedUser == null) {
-      _lockedInBackground = false;
-      _dismissOpenOverlaysAndSubRoutes();
-      if (mounted) {
-        setState(() {
-          _authEpoch++;
-        });
+    } else if (state == AppLifecycleState.resumed) {
+      AppLockGuard.notifyAppResumed();
+      if (_lockedInBackground) {
+        _lockedInBackground = false;
+        final lockCtrl = _maybeLockController();
+        if (lockCtrl != null && lockCtrl.isLocked) {
+          lockCtrl.bumpLockEpoch();
+        } else if (_unlockedUser == null && mounted) {
+          setState(() {
+            _authEpoch++;
+          });
+        }
       }
+    }
+  }
+
+  void _engageBackgroundLock() {
+    _lockedInBackground = true;
+    context.read<LocalStorageService>().evictInMemoryKeys();
+    final lockCtrl = _maybeLockController();
+    if (lockCtrl != null) {
+      // Engage opaque root lock curtain WITHOUT popping active routes or
+      // unmounting AppShell so users resume right where they left off.
+      lockCtrl.lock();
+      return;
+    }
+    _dismissOpenOverlaysAndSubRoutes();
+    if (mounted) {
+      setState(() {
+        _unlockedUser = null;
+        _authEpoch++;
+      });
     }
   }
 
@@ -274,15 +368,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     if (_unlockedUser == null || AppLockGuard.isSuppressed) return;
 
     if (_biometricLockEnabled) {
-      _lockedInBackground = true;
-      context.read<LocalStorageService>().evictInMemoryKeys();
-      _dismissOpenOverlaysAndSubRoutes();
-      if (mounted) {
-        setState(() {
-          _unlockedUser = null;
-          _authEpoch++;
-        });
-      }
+      _engageBackgroundLock();
       return;
     }
 
@@ -291,13 +377,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     final enabled = await repo.isBiometricEnabled();
     _biometricLockEnabled = enabled;
     if (enabled && mounted && _unlockedUser != null && !AppLockGuard.isSuppressed) {
-      _lockedInBackground = true;
-      context.read<LocalStorageService>().evictInMemoryKeys();
-      _dismissOpenOverlaysAndSubRoutes();
-      setState(() {
-        _unlockedUser = null;
-        _authEpoch++;
-      });
+      _engageBackgroundLock();
     }
   }
 
@@ -305,6 +385,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     if (!mounted) return;
     _refreshBiometricStatus();
     if (_unlockedUser != null && _authRepo?.currentUser == null) {
+      _maybeLockController()?.unlock();
       _dismissOpenOverlaysAndSubRoutes();
       setState(() {
         _unlockedUser = null;
@@ -316,6 +397,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   void _handleAuthenticated(AuthUserInfo user) {
     if (!mounted) return;
     _refreshBiometricStatus();
+    _maybeLockController()?.unlock();
     setState(() {
       _unlockedUser = user;
     });
@@ -323,6 +405,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
 
   void _handleSignedOut() {
     if (!mounted) return;
+    _maybeLockController()?.unlock();
     _dismissOpenOverlaysAndSubRoutes();
     setState(() {
       _biometricLockEnabled = false;

@@ -1,8 +1,8 @@
 {
-  "version": "1.2.12",
-  "buildNumber": 2026,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.12/TownTreasureGroceries.apk",
-  "sha256": "5fdb6d7dc9315bcbce4fb70ec148ffbddb1b0a1d315df681be8276f99433ec54",
-  "releaseNotes": "v1.2.12: Next-Gen AI Hybrid Wet-Stamp Extraction (free-tier Gemini 3.5 Flash-Lite spatial localization via ttg-api + PCA auto-straightening + chromatic ink separation + tight oval/circle rim masking), auto-fill Received By from stamp metadata, Google ML Kit Document Scanner ('Scan Slip') offline fallback, and a live Ink Clarity slider.",
+  "version": "1.2.13",
+  "buildNumber": 2027,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.13/TownTreasureGroceries.apk",
+  "sha256": "a5f5af71962bec02efb0b2b14c8e4272e737f7c1c81b03c964e9773fbd3eb614",
+  "releaseNotes": "v1.2.13 Hotfix: Eliminated stamp scanner ANR/crash by moving all image decoding, resizing, and extraction onto a background Dart isolate with integer integral images + debounced Ink Clarity slider + transparency checkerboard preview + outlier trim. Added a Root Lock Curtain (Offstage) so answering phone calls or switching apps NEVER loses your half-filled invoice or open sheet upon unlock, plus a post-camera AppLockGuard handoff window so taking stamp photos never locks you out.",
   "mandatory": false
 }

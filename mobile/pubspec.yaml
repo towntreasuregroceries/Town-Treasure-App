@@ -2,7 +2,7 @@ name: town_treasure_groceries
 description: "Town Treasure Groceries mobile application for invoice, ledger, payroll, price list, and clerk staging management."
 publish_to: 'none'
 
-version: 1.2.12+26
+version: 1.2.13+27
 
 environment:
   sdk: ^3.13.2

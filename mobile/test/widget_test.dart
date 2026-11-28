@@ -591,7 +591,7 @@ void main() {
   });
 
   testWidgets(
-    'AuthGate dismisses open bottom sheets and alert dialogs on background lock and sign-out',
+    'AuthGate shields open sheets/forms behind lock curtain on background lock, resumes seamlessly on unlock, and clears all overlays on sign-out',
     (WidgetTester tester) async {
       final harness = _IntegrationHarness(
         initialUser: const AuthUserInfo(
@@ -613,11 +613,29 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byType(DashboardScreen), findsOneWidget);
 
-      // Open the New / Scan modal bottom sheet over Dashboard, then background-lock.
-      await tester.tap(find.byKey(const Key('nav_new_scan')));
+      // Open InvoiceEditorScreen and begin filling an invoice, then background-lock
+      // (simulating answering a phone call mid-invoice).
+      await tester.tap(find.byKey(const Key('fab_create_invoice')));
       await tester.pumpAndSettle();
-      expect(find.text('Scan Delivery Docket (OCR)'), findsOneWidget);
+      expect(find.byType(InvoiceEditorScreen), findsOneWidget);
 
+      // Camera/ML Kit return handoff via AppLockGuard must NOT trigger lockout
+      // even if a trailing paused event arrives right after runWithoutRelock ends.
+      await AppLockGuard.runWithoutRelock(() async {
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+        await tester.pump();
+      });
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(find.byType(InvoiceEditorScreen), findsOneWidget);
+      expect(find.byKey(const Key('btn_quick_unlock')), findsNothing);
+
+      // Genuine background (e.g. answering a phone call mid-invoice) locks behind
+      // the root Lock Curtain without destroying InvoiceEditorScreen state.
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
@@ -626,52 +644,19 @@ void main() {
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
       await tester.pumpAndSettle();
 
+      // While locked: Lock Curtain hides InvoiceEditorScreen completely.
       expect(find.byKey(const Key('btn_quick_unlock')), findsOneWidget);
-      expect(find.text('Scan Delivery Docket (OCR)'), findsNothing);
+      expect(find.byType(InvoiceEditorScreen), findsNothing);
 
-      // Re-unlock, open an AlertDialog, then background-lock again.
+      // Unlocking lifts the curtain and resumes directly inside InvoiceEditorScreen!
       await tester.tap(find.byKey(const Key('btn_quick_unlock')));
       await tester.pumpAndSettle();
-      expect(find.byType(DashboardScreen), findsOneWidget);
+      expect(find.byType(InvoiceEditorScreen), findsOneWidget);
 
-      final dashCtx = tester.element(find.byType(DashboardScreen));
+      // Signing out while a sub-route / dialog is open still clears everything.
+      final editorCtx = tester.element(find.byType(InvoiceEditorScreen));
       showDialog<void>(
-        context: dashCtx,
-        builder: (ctx) => AlertDialog(
-          title: const Text('Mark Invoices Paid'),
-          content: const Text(
-            'Mark 3 selected invoices totaling KES 344,639.00 as paid today?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel'),
-            ),
-          ],
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('Mark Invoices Paid'), findsOneWidget);
-
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
-      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const Key('btn_quick_unlock')), findsOneWidget);
-      expect(find.text('Mark Invoices Paid'), findsNothing);
-
-      // Re-unlock, open an AlertDialog again, then sign out while dialog is open.
-      await tester.tap(find.byKey(const Key('btn_quick_unlock')));
-      await tester.pumpAndSettle();
-      expect(find.byType(DashboardScreen), findsOneWidget);
-
-      final dashCtx2 = tester.element(find.byType(DashboardScreen));
-      showDialog<void>(
-        context: dashCtx2,
+        context: editorCtx,
         builder: (ctx) => const AlertDialog(
           title: Text('Confirm Sign Out Test'),
           content: Text('Should vanish immediately on sign-out.'),
@@ -680,12 +665,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Confirm Sign Out Test'), findsOneWidget);
 
-      final signedOut = await harness.auth.signOut();
+      final signedOut = await tester.runAsync(() => harness.auth.signOut());
       expect(signedOut, isTrue);
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('btn_sign_in')), findsOneWidget);
       expect(find.text('Confirm Sign Out Test'), findsNothing);
+      expect(find.byType(InvoiceEditorScreen), findsNothing);
     },
   );
 }

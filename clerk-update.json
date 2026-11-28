@@ -1,8 +1,8 @@
 {
-  "version": "1.2.12",
-  "buildNumber": 2026,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.12/TownTreasureClerk.apk",
-  "sha256": "52b55d1d1b223f00a8e09e9e128473b1b7c1e961a1cf75a8f38c542731c1ce54",
-  "releaseNotes": "v1.2.12: Upgraded Clerk Client Delivery Stamp scanner with free-tier AI spatial localization, PCA auto-straightening, chromatic form-line suppression, Google ML Kit Document Scanner ('Scan Slip') offline mode, auto-fill Received By, and live Ink Clarity slider.",
+  "version": "1.2.13",
+  "buildNumber": 2027,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.13/TownTreasureClerk.apk",
+  "sha256": "97c1814684389b1ea048ad933055078b4765a3a7ba7d26a457f0d56c8e2871ad",
+  "releaseNotes": "v1.2.13 Hotfix: Moved Client Delivery Stamp extraction and JPEG resizing onto a background isolate to eliminate ANR freezes/crashes, debounced the Ink Clarity slider, added checkerboard transparency preview + outlier trim, and added a post-camera handoff guard.",
   "mandatory": false
 }
