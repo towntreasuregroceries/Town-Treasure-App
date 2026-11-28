@@ -443,7 +443,7 @@ test('ttg-api health & fail-closed admin/seed when MIGRATION_SECRET unset', asyn
   const health = await handleApiRequest(new Request('https://api.example/health'), env, {});
   assert.equal(health.status, 200);
   const hb = await health.json();
-  assert.deepEqual(hb, { ok: true, service: 'ttg-api', hasDb: true, hasStorage: true });
+  assert.deepEqual(hb, { ok: true, service: 'ttg-api', hasDb: true, hasStorage: true, hasGemini: false });
 
   const seedRes = await handleApiRequest(
     new Request('https://api.example/admin/seed', {
@@ -1007,4 +1007,142 @@ test('ttg-api POD stamp: clerk submits client_pod_stamp -> owner list shows meta
   assert.deepEqual(await delRes.json(), { deleted: true });
   assert.equal(storage.store.has(`staged/owner-1/${docketId}/pod-stamp.txt`), false);
   assert.equal(db.stagedPodStamps.size, 0);
+});
+
+test('ttg-api POST /stamp/locate: supports Owner Bearer and Clerk invite_token, validates payload, and sanitizes Gemini JSON', async () => {
+  const { handleApiRequest } = await loadTtgApiWorker();
+  const db = createFakeD1();
+  const storage = createFakeR2Bucket();
+  const env = {
+    DB: db,
+    STORAGE: storage,
+    SUPABASE_URL: 'https://example.supabase.co',
+    SUPABASE_ANON_KEY: 'anon',
+    GEMINI_API_KEY: 'fake-gemini-secret-key',
+  };
+
+  let geminiCalls = 0;
+  let lastGeminiUrl = '';
+  const combinedFetch = async (url, init) => {
+    const s = String(url);
+    if (s.includes('/auth/v1/user')) {
+      const auth = init?.headers?.Authorization || init?.headers?.authorization || '';
+      if (auth === 'Bearer jwt-vero') {
+        return new Response(
+          JSON.stringify({ id: 'owner-1', email: 'vero@example.com', user_metadata: { full_name: 'Veronicah' } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+      return new Response(JSON.stringify({ error: 'Invalid' }), { status: 401 });
+    }
+    if (s.includes('generativelanguage.googleapis.com')) {
+      geminiCalls++;
+      lastGeminiUrl = s;
+      return new Response(
+        JSON.stringify({
+          candidates: [
+            {
+              content: {
+                parts: [
+                  {
+                    text: JSON.stringify({
+                      box_2d: [260, 210, 524, 778],
+                      shape: 'oval',
+                      upright_clockwise_rotation_deg: 9.5,
+                      stamp_organization: 'CO-OPERATIVE BANK UTAWALA',
+                      stamp_date: '02 JUL 2026',
+                      receiver_or_user: 'USER FSN',
+                      stamp_ink_color: 'violet',
+                      has_printed_form_underneath: true,
+                    }),
+                  },
+                ],
+              },
+            },
+          ],
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    }
+    throw new Error(`Unexpected fetch URL: ${s}`);
+  };
+
+  // Health reports hasGemini boolean without exposing secret
+  const healthRes = await handleApiRequest(new Request('https://api.example/health'), env, {}, combinedFetch);
+  const healthJson = await healthRes.json();
+  assert.equal(healthJson.hasGemini, true);
+
+  // Missing auth -> 401
+  const sampleB64 = 'A'.repeat(64);
+  const unauthRes = await handleApiRequest(
+    new Request('https://api.example/stamp/locate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_base64: sampleB64 }),
+    }),
+    env,
+    {},
+    combinedFetch,
+  );
+  assert.equal(unauthRes.status, 401);
+
+  // Owner Bearer succeeds
+  const ownerRes = await handleApiRequest(
+    new Request('https://api.example/stamp/locate', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer jwt-vero', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_base64: `data:image/jpeg;base64,${sampleB64}` }),
+    }),
+    env,
+    {},
+    combinedFetch,
+  );
+  assert.equal(ownerRes.status, 200);
+  const ownerJson = await ownerRes.json();
+  assert.equal(ownerJson.ok, true);
+  assert.equal(ownerJson.model, 'gemini-3.5-flash-lite');
+  assert.deepEqual(ownerJson.box_2d, [260, 210, 524, 778]);
+  assert.equal(ownerJson.shape, 'oval');
+  assert.equal(ownerJson.receiver_or_user, 'USER FSN');
+  assert.equal(ownerJson.has_printed_form_underneath, true);
+  assert.match(lastGeminiUrl, /gemini-3\.5-flash-lite:generateContent/);
+
+  // Create valid Clerk invite and call /stamp/locate with invite_token (no Bearer header)
+  const invRes = await handleApiRequest(
+    new Request('https://api.example/clerk', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer jwt-vero', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create_invite' }),
+    }),
+    env,
+    {},
+    combinedFetch,
+  );
+  const { token: clerkToken } = await invRes.json();
+
+  const clerkRes = await handleApiRequest(
+    new Request('https://api.example/stamp/locate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ invite_token: clerkToken, image_base64: sampleB64 }),
+    }),
+    env,
+    {},
+    combinedFetch,
+  );
+  assert.equal(clerkRes.status, 200);
+  assert.equal(geminiCalls, 2);
+
+  // Missing GEMINI_API_KEY returns 503 cleanly
+  const noKeyRes = await handleApiRequest(
+    new Request('https://api.example/stamp/locate', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer jwt-vero', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image_base64: sampleB64 }),
+    }),
+    { ...env, GEMINI_API_KEY: '' },
+    {},
+    combinedFetch,
+  );
+  assert.equal(noKeyRes.status, 503);
 });

@@ -1,8 +1,8 @@
 {
-  "version": "1.2.11",
-  "buildNumber": 2025,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.11/TownTreasureClerk.apk",
-  "sha256": "d440badc7f51a379ab265ebfafecd34c2ded678eb6f6aa4367b7a1d43bbd609a",
-  "releaseNotes": "v1.2.11: Added True-Color Client Delivery Stamp (POD) capture inside the Clerk Portal — photograph a client's stamped & signed verification slip to remove paper shadows and attach their authentic stamp directly to the submitted docket.",
+  "version": "1.2.12",
+  "buildNumber": 2026,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.12/TownTreasureClerk.apk",
+  "sha256": "52b55d1d1b223f00a8e09e9e128473b1b7c1e961a1cf75a8f38c542731c1ce54",
+  "releaseNotes": "v1.2.12: Upgraded Clerk Client Delivery Stamp scanner with free-tier AI spatial localization, PCA auto-straightening, chromatic form-line suppression, Google ML Kit Document Scanner ('Scan Slip') offline mode, auto-fill Received By, and live Ink Clarity slider.",
   "mandatory": false
 }

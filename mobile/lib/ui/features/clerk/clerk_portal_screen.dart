@@ -745,6 +745,7 @@ class _ClerkPortalScreenState extends State<ClerkPortalScreen> {
       clientName: restLabel,
       initialReceiverName: _podReceiver,
       imagePicker: widget.stampImagePicker,
+      clerkInviteToken: widget.viewModel.clerkInviteToken,
     );
     if (scan == null || !mounted) return;
     setState(() {

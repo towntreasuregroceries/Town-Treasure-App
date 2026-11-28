@@ -1,8 +1,8 @@
 {
-  "version": "1.2.11",
-  "buildNumber": 2025,
-  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.11/TownTreasureGroceries.apk",
-  "sha256": "e8eb06971ba3ae17aeeb155eb175efadb03d08e90d1cdc4cbc9648c24e62f386",
-  "releaseNotes": "v1.2.11 (Official Release Parity): True-Color Client Wet-Stamp POD Absorption + 1-tap WhatsApp stamped eTIMS PDFs, Company Expense rename, and Debt-Financed Bank Loan Amortization Engine (PMT/Flat/Newton-Raphson EIR + Principal/Interest P&L split).",
+  "version": "1.2.12",
+  "buildNumber": 2026,
+  "apkUrl": "https://github.com/towntreasuregroceries/Town-Treasure-App/releases/download/v1.2.12/TownTreasureGroceries.apk",
+  "sha256": "5fdb6d7dc9315bcbce4fb70ec148ffbddb1b0a1d315df681be8276f99433ec54",
+  "releaseNotes": "v1.2.12 (Official Release Parity): AI Hybrid Wet-Stamp Extraction (Gemini 3.5 Flash-Lite spatial box + PCA deskew + true-color matting), ML Kit Document Scanner offline fallback, auto-fill Received By, and live Ink Clarity slider.",
   "mandatory": false
 }

@@ -17,6 +17,7 @@ import 'package:town_treasure_groceries/data/services/duplicate_detector_service
 import 'package:town_treasure_groceries/data/services/local_storage_service.dart';
 import 'package:town_treasure_groceries/data/services/ocr_consensus_service.dart';
 import 'package:town_treasure_groceries/data/services/remote_update_service.dart';
+import 'package:town_treasure_groceries/data/services/stamp_locator_service.dart';
 import 'package:town_treasure_groceries/data/services/supabase_service.dart';
 import 'package:town_treasure_groceries/domain/models/models.dart';
 import 'package:town_treasure_groceries/ui/core/client_stamp_scanner_sheet.dart';
@@ -1993,5 +1994,208 @@ void main() {
       expect(approvedInv!.clientPodReceiver, 'Chef Musa');
       expect(approvedInv!.clientPodSha256, scan.rawPhotoSha256);
     });
+
+    test(
+        'CloudflareStampLocatorService sends Owner Bearer or Clerk invite_token and degrades gracefully on 429/error',
+        () async {
+      final photoBytes = buildSyntheticPurpleStampSlipJpeg();
+      String? capturedAuth;
+      Map<String, dynamic>? capturedBody;
+
+      final mockHttp = MockClient((req) async {
+        capturedAuth = req.headers['Authorization'];
+        capturedBody = jsonDecode(req.body) as Map<String, dynamic>;
+        return http.Response(
+          jsonEncode({
+            'ok': true,
+            'model': 'gemini-3.5-flash-lite',
+            'box_2d': [200, 150, 800, 850],
+            'shape': 'oval',
+            'upright_clockwise_rotation_deg': 8.0,
+            'stamp_organization': 'THE GOLDEN CREST HOTEL',
+            'stamp_date': '28 NOV 2026',
+            'receiver_or_user': 'Chef Daniel',
+            'stamp_ink_color': 'violet',
+            'has_printed_form_underneath': true,
+          }),
+          200,
+        );
+      });
+
+      final clerkLocator = CloudflareStampLocatorService(
+        clerkInviteToken: 'tok_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF',
+        httpClient: mockHttp,
+      );
+      final hint = await clerkLocator.locateStamp(photoBytes);
+      expect(hint, isNotNull);
+      expect(capturedAuth, isNull);
+      expect(capturedBody!['invite_token'],
+          'tok_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF');
+      expect((capturedBody!['image_base64'] as String).length, greaterThan(50));
+      expect(hint!.shape, 'oval');
+      expect(hint.receiverOrUser, 'Chef Daniel');
+      expect(hint.hasPrintedFormUnderneath, isTrue);
+
+      // 429 quota / offline error returns null cleanly instead of throwing
+      final busyLocator = CloudflareStampLocatorService(
+        clerkInviteToken: 'tok_abcdefghijklmnopqrstuvwxyz0123456789ABCDEF',
+        httpClient: MockClient((_) async => http.Response('{"error":"busy"}', 429)),
+      );
+      expect(await busyLocator.locateStamp(photoBytes), isNull);
+    });
+
+    test(
+        'ChrominanceStampProcessor v3 spatial hybrid isolates oval stamp from noisy printed form and preserves violet ink',
+        () {
+      // Build a synthetic busy pre-printed form with gray grid lines, dark outer desk strip,
+      // and a central deep-violet oval rubber stamp.
+      final canvas = img.Image(width: 600, height: 420);
+      img.fill(canvas, color: img.ColorRgb8(244, 244, 240));
+      // Wooden desk strip on top/bottom outside stamp box
+      for (var y = 0; y < 55; y++) {
+        for (var x = 0; x < 600; x++) {
+          canvas.setPixelRgb(x, y, 82, 58, 42);
+        }
+      }
+      // Pale gray printed form grid lines across the entire slip
+      for (var y = 80; y < 380; y += 35) {
+        for (var x = 30; x < 570; x++) {
+          canvas.setPixelRgb(x, y, 198, 198, 198);
+        }
+      }
+      // Oval violet stamp centered at (300, 220), rx=120, ry=72
+      for (var y = 135; y < 305; y++) {
+        for (var x = 165; x < 435; x++) {
+          final dx = (x - 300) / 120.0;
+          final dy = (y - 220) / 72.0;
+          final dist = math.sqrt(dx * dx + dy * dy);
+          if ((dist >= 0.88 && dist <= 1.0) ||
+              (y >= 212 && y <= 228 && x >= 220 && x <= 380)) {
+            canvas.setPixelRgb(x, y, 95, 30, 128);
+          }
+        }
+      }
+      final slipBytes = Uint8List.fromList(img.encodeJpg(canvas, quality: 92));
+
+      const hint = StampLocationHint(
+        box2d: [320, 275, 730, 725],
+        shape: 'oval',
+        uprightClockwiseRotationDeg: 0,
+        stampOrganization: 'CO-OP BANK UTAWALA',
+        stampDate: '02 JUL 2026',
+        receiverOrUser: 'USER FSN',
+        hasPrintedFormUnderneath: true,
+      );
+
+      final result = ChrominanceStampProcessor.processStampBytes(
+        slipBytes,
+        locationHint: hint,
+      );
+
+      expect(result.usedAiLocalization, isTrue);
+      expect(result.receiverName, 'USER FSN');
+      expect(result.stampOrganization, 'CO-OP BANK UTAWALA');
+      expect(result.dominantInkLabel, 'Violet / Purple Ink');
+
+      final outPng = img.decodePng(result.stampPngBytes)!;
+      // Corners must be 100% transparent (desk & oval rim corners cleanly removed)
+      expect(outPng.getPixel(0, 0).a, 0);
+      expect(outPng.getPixel(outPng.width - 1, outPng.height - 1).a, 0);
+      // Output aspect should tightly hug the oval stamp, not the 600x420 full form
+      expect(outPng.width, lessThan(340));
+    });
+
+    testWidgets(
+        'ClientStampScannerSheet supports ML Kit Scan Slip, AI auto-fill, and Ink Clarity slider with zero extra AI calls',
+        (tester) async {
+      final slipBytes = buildSyntheticPurpleStampSlipJpeg();
+      var aiCalls = 0;
+
+      final fakeLocator = _FakeStampLocator(() async {
+        aiCalls++;
+        return const StampLocationHint(
+          box2d: [120, 100, 880, 900],
+          shape: 'oval',
+          uprightClockwiseRotationDeg: 0,
+          stampOrganization: 'SANKARA RECEIVING BAY',
+          stampDate: '28 NOV 2026',
+          receiverOrUser: 'USER FSN',
+          hasPrintedFormUnderneath: false,
+        );
+      });
+      final fakeDocScanner = _FakeDocScanner(slipBytes);
+
+      ClientStampScanResult? popped;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.light(),
+          home: Builder(
+            builder: (ctx) => Scaffold(
+              body: ElevatedButton(
+                onPressed: () async {
+                  popped = await ClientStampScannerSheet.show(
+                    ctx,
+                    clientName: 'Sankara Suites',
+                    orderReference: 'INV-0099',
+                    stampLocator: fakeLocator,
+                    documentScanner: fakeDocScanner,
+                  );
+                },
+                child: const Text('Open Stamp Scanner'),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Open Stamp Scanner'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('btn_capture_stamp_mlkit')));
+      await tester.pumpAndSettle();
+
+      expect(aiCalls, 1);
+      expect(find.byKey(const Key('badge_stamp_extraction_mode')), findsOneWidget);
+      expect(find.textContaining('AI Localized'), findsOneWidget);
+      expect(find.textContaining('SANKARA RECEIVING BAY'), findsOneWidget);
+      // Receiver field auto-filled from Gemini hint
+      final receiverField = tester.widget<TextField>(
+        find.byKey(const Key('input_pod_receiver_name')),
+      );
+      expect(receiverField.controller?.text, 'USER FSN');
+
+      // Drag Ink Clarity slider — reprocesses locally without calling Gemini again
+      final slider = find.byKey(const Key('slider_stamp_ink_clarity'));
+      expect(slider, findsOneWidget);
+      await tester.drag(slider, const Offset(40, 0));
+      await tester.pumpAndSettle();
+      expect(aiCalls, 1);
+
+      await tester.ensureVisible(
+        find.byKey(const Key('btn_confirm_punch_client_stamp')),
+      );
+      await tester.tap(find.byKey(const Key('btn_confirm_punch_client_stamp')));
+      await tester.pumpAndSettle();
+
+      expect(popped, isNotNull);
+      expect(popped!.usedAiLocalization, isTrue);
+      expect(popped!.receiverName, 'USER FSN');
+    });
   });
+}
+
+class _FakeStampLocator implements StampLocatorGateway {
+  _FakeStampLocator(this._fn);
+  final Future<StampLocationHint?> Function() _fn;
+
+  @override
+  Future<StampLocationHint?> locateStamp(Uint8List photoBytes) => _fn();
+}
+
+class _FakeDocScanner implements DocumentScannerGateway {
+  _FakeDocScanner(this._bytes);
+  final Uint8List _bytes;
+
+  @override
+  Future<Uint8List?> scanSinglePage() async => _bytes;
 }

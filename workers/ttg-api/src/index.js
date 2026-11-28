@@ -2,7 +2,10 @@ const MAX_INVITE_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000;
 const IDLE_TIMEOUT_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_VAULT_HISTORY = 100;
 const MAX_JSON_BODY_BYTES = 25 * 1024 * 1024; // 25 MiB cap across /clerk, /vault/cas, /staged
+const MAX_STAMP_LOCATE_BYTES = 3 * 1024 * 1024; // 3 MiB cap for resized ~960px stamp locator photo
 const CLERK_HOURLY_SUBMISSION_CAP = 30;
+const STAMP_LOCATE_HOURLY_CAP = 60;
+const DEFAULT_GEMINI_STAMP_MODEL = 'gemini-3.5-flash-lite';
 const DEFAULT_ALLOWED_ORIGIN = 'https://towntreasuregroceries.github.io';
 
 function resolveAllowedOrigin(request) {
@@ -610,6 +613,228 @@ async function handleVaultCas(request, env, userId, expectedRevision, data) {
   return jsonResponse(200, { saved: true, revision: nextRev }, request);
 }
 
+async function checkStampLocateRateLimit(env, actorKey, nowMs = Date.now()) {
+  const hourBucket = new Date(nowMs).toISOString().slice(0, 13);
+  const bucketRow = await env.DB.prepare(
+    'SELECT submissions FROM clerk_rate_limits WHERE invite_id = ? AND hour_bucket = ?',
+  )
+    .bind(actorKey, hourBucket)
+    .first()
+    .catch(() => null);
+  const count = Number(bucketRow?.submissions ?? 0);
+  return { allowed: count < STAMP_LOCATE_HOURLY_CAP, hourBucket };
+}
+
+function parseStampLocateImage(rawInput) {
+  if (typeof rawInput !== 'string') return null;
+  const trimmed = rawInput.trim();
+  if (!trimmed || trimmed.length > 2_800_000) return null;
+  const dataUrlMatch = /^data:(image\/(?:jpe?g|png|webp));base64,([A-Za-z0-9+/=\s]+)$/i.exec(trimmed);
+  if (dataUrlMatch) {
+    const mimeType = dataUrlMatch[1].toLowerCase() === 'image/jpg'
+      ? 'image/jpeg'
+      : dataUrlMatch[1].toLowerCase();
+    const data = dataUrlMatch[2].replace(/\s+/g, '');
+    return data.length >= 32 ? { mimeType, data } : null;
+  }
+  const cleanB64 = trimmed.replace(/\s+/g, '');
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(cleanB64) || cleanB64.length < 32) {
+    return null;
+  }
+  return { mimeType: 'image/jpeg', data: cleanB64 };
+}
+
+function sanitizeStampLocateResult(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const box = Array.isArray(raw.box_2d) ? raw.box_2d.map(Number) : null;
+  if (!box || box.length !== 4 || box.some(v => !Number.isFinite(v))) return null;
+  const ymin = Math.max(0, Math.min(999, Math.round(box[0])));
+  const xmin = Math.max(0, Math.min(999, Math.round(box[1])));
+  const ymax = Math.max(0, Math.min(1000, Math.round(box[2])));
+  const xmax = Math.max(0, Math.min(1000, Math.round(box[3])));
+  if (ymax <= ymin + 15 || xmax <= xmin + 15) return null;
+
+  const rawShape = cleanText(raw.shape ?? '', 24).toLowerCase();
+  const shape = ['oval', 'circle', 'rectangle'].includes(rawShape) ? rawShape : 'rectangle';
+
+  const rawRot = Number(raw.upright_clockwise_rotation_deg ?? 0);
+  const rotationDeg = Number.isFinite(rawRot)
+    ? Math.max(-180, Math.min(180, Math.round(rawRot * 10) / 10))
+    : 0;
+
+  return {
+    box_2d: [ymin, xmin, ymax, xmax],
+    shape,
+    upright_clockwise_rotation_deg: rotationDeg,
+    stamp_organization: cleanText(raw.stamp_organization ?? '', 180),
+    stamp_date: cleanText(raw.stamp_date ?? '', 40),
+    receiver_or_user: cleanText(raw.receiver_or_user ?? '', 120),
+    stamp_ink_color: cleanText(raw.stamp_ink_color ?? '', 40),
+    has_printed_form_underneath: Boolean(raw.has_printed_form_underneath),
+  };
+}
+
+async function handleStampLocate(request, env, fetchImpl = fetch) {
+  const apiKey = typeof env.GEMINI_API_KEY === 'string' ? env.GEMINI_API_KEY.trim() : '';
+  if (!apiKey) {
+    return jsonResponse(
+      503,
+      { error: 'AI stamp localization is not configured on this server.', code: 'GEMINI_NOT_CONFIGURED' },
+      request,
+    );
+  }
+
+  const parsed = await readBoundedJson(
+    request,
+    MAX_STAMP_LOCATE_BYTES,
+    'Stamp photo exceeds 3 MiB limit. Resize before uploading.',
+  );
+  if (parsed.error) return parsed.error;
+  const body = parsed.data;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return jsonResponse(400, { error: 'Request body must be a JSON object.' }, request);
+  }
+
+  // Authenticate either Owner Bearer JWT or valid Clerk invite token
+  let actorKey = '';
+  const authHeader = (request.headers.get('Authorization') || '').trim();
+  if (/^Bearer\s+.+$/i.test(authHeader)) {
+    const auth = await authenticateSupabaseUser(request, env, fetchImpl);
+    if (auth.error) return auth.error;
+    actorKey = `stamp_owner:${auth.userId}`;
+  } else if (typeof body.invite_token === 'string' && body.invite_token.trim()) {
+    const resolution = await resolveClerkInvite(env, body.invite_token.trim());
+    if (!resolution.ok) {
+      return jsonResponse(401, { error: resolution.error }, request);
+    }
+    actorKey = `stamp_clerk:${resolution.invite.id}`;
+  } else {
+    return jsonResponse(
+      401,
+      { error: 'Missing Owner Bearer token or Clerk invite token.' },
+      request,
+    );
+  }
+
+  const imageSpec = parseStampLocateImage(body.image_base64 ?? body.image_data_url ?? '');
+  if (!imageSpec) {
+    return jsonResponse(
+      400,
+      { error: 'A valid base64 JPEG, PNG, or WebP stamp image is required.' },
+      request,
+    );
+  }
+
+  const nowMs = Date.now();
+  const rate = await checkStampLocateRateLimit(env, actorKey, nowMs);
+  if (!rate.allowed) {
+    return jsonResponse(
+      429,
+      { error: 'Hourly AI stamp scan limit reached. Using offline local extraction.' },
+      request,
+    );
+  }
+
+  const model = cleanText(env.GEMINI_STAMP_MODEL ?? '', 64) || DEFAULT_GEMINI_STAMP_MODEL;
+  const prompt = `Analyze this photograph of a stamped paper document.
+Locate ONLY the official rubber stamp impression (and any signature directly inside/overlapping the stamp). Ignore printed form lines, table borders, form labels, wooden desk edges, and unrelated handwriting outside the stamp.
+
+Return STRICT JSON ONLY with this exact schema:
+{
+  "box_2d": [ymin, xmin, ymax, xmax],
+  "shape": "oval" | "circle" | "rectangle",
+  "upright_clockwise_rotation_deg": number,
+  "stamp_organization": string,
+  "stamp_date": string,
+  "receiver_or_user": string,
+  "stamp_ink_color": string,
+  "has_printed_form_underneath": boolean
+}
+Rules:
+- box_2d uses integer coordinates normalized 0 to 1000 relative to the full image width and height, tightly hugging the outer border of the rubber stamp.
+- upright_clockwise_rotation_deg is the clockwise rotation in degrees (-180 to 180) required to make the stamp text horizontal and right-side-up for reading. (For example, if the stamp text reads bottom-to-top, rotating +90 degrees clockwise makes it upright).`;
+
+  const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  let upstreamRes;
+  try {
+    upstreamRes = await fetchImpl(geminiUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { inline_data: { mime_type: imageSpec.mimeType, data: imageSpec.data } },
+              { text: prompt },
+            ],
+          },
+        ],
+        generationConfig: {
+          temperature: 0,
+          responseMimeType: 'application/json',
+        },
+      }),
+    });
+  } catch (_) {
+    return jsonResponse(502, { error: 'Could not reach Gemini Vision service.' }, request);
+  }
+
+  await recordClerkSubmissionRateCount(env, actorKey, rate.hourBucket, nowMs).catch(() => {});
+
+  if (upstreamRes.status === 429) {
+    return jsonResponse(
+      429,
+      { error: 'AI stamp localization quota temporarily busy. Using offline mode.' },
+      request,
+    );
+  }
+  if (!upstreamRes.ok) {
+    return jsonResponse(
+      502,
+      { error: `AI stamp localization returned HTTP ${upstreamRes.status}.` },
+      request,
+    );
+  }
+
+  let upstreamJson;
+  try {
+    upstreamJson = await upstreamRes.json();
+  } catch (_) {
+    return jsonResponse(502, { error: 'Invalid response from AI stamp locator.' }, request);
+  }
+
+  const rawText = (upstreamJson?.candidates?.[0]?.content?.parts || [])
+    .map(p => (typeof p?.text === 'string' ? p.text : ''))
+    .join('')
+    .trim();
+  const cleanJsonText = rawText.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+
+  let parsedResult = null;
+  try {
+    parsedResult = sanitizeStampLocateResult(JSON.parse(cleanJsonText));
+  } catch (_) {
+    parsedResult = null;
+  }
+
+  if (!parsedResult) {
+    return jsonResponse(
+      422,
+      { error: 'No clear rubber stamp could be localized in this photo.' },
+      request,
+    );
+  }
+
+  return jsonResponse(
+    200,
+    {
+      ok: true,
+      model,
+      ...parsedResult,
+    },
+    request,
+  );
+}
+
 export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
   const url = new URL(request.url);
   const path = url.pathname.replace(/\/+$/, '') || '/';
@@ -626,6 +851,7 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
         service: 'ttg-api',
         hasDb: Boolean(env.DB),
         hasStorage: Boolean(env.STORAGE),
+        hasGemini: Boolean(env.GEMINI_API_KEY),
       },
       request,
     );
@@ -637,6 +863,10 @@ export async function handleApiRequest(request, env, _ctx, fetchImpl = fetch) {
 
   if (path === '/admin/seed') {
     return jsonResponse(404, { error: 'Not found.' }, request);
+  }
+
+  if (request.method === 'POST' && path === '/stamp/locate') {
+    return handleStampLocate(request, env, fetchImpl);
   }
 
   // --- Clerk API (unauthenticated invite-token routes + authenticated create_invite) ---
